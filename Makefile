@@ -1,7 +1,7 @@
 CC = cc
 CFLAGS = -Wall -Wextra -std=c11 -Iinclude -g
-SRC = $(wildcard src/*.c)
-HDR = $(wildcard src/*.h)
+SRC = $(wildcard src/*.c src/widgets/*.c)
+HDR = $(wildcard src/*.h src/widgets/*.h)
 BIN = ctui-demo
 
 $(BIN): $(SRC) $(HDR)

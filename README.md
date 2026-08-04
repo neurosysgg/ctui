@@ -6,9 +6,12 @@ shell to eventually replace plasmashell.
 ## Status
 
 Early / first substantial C project. Core building blocks exist and work
-end-to-end — a menu widget with keyboard nav and a status widget reading
-shared state. See `PROGRESS.md` for the running design log, known issues,
-and what's next.
+end-to-end — a bordered header, a keyboard-navigable menu whose items
+toggle on/off, a status line that updates itself via the event system,
+and a debug-info panel that splits into view under the menu when its
+item is toggled on (and closes again when toggled off) — all laid out
+across three areas that reflow correctly on terminal resize. See
+`PROGRESS.md` for the running design log, known issues, and what's next.
 
 ## Build
 
@@ -20,14 +23,46 @@ make
 Requires a C11 compiler and a real terminal (raw mode + alternate screen
 buffer). `make clean` removes the built binary.
 
+## Project layout
+
+- `src/ctui.c` / `src/ctui.h` — the core engine: screen buffer,
+  compositor, widget lifecycle, groups, resize handling, event registry,
+  string-layout utilities. Has no knowledge of any specific widget.
+- `src/widgets/` — the built-in widget catalog (`border`, `label`,
+  `menu`, `status`, `debug_info`), each a small `.c`/`.h` pair built
+  entirely on the public `ctui.h` API.
+- `src/demo.c` — example app: wires widgets into a 3-area (header/main/
+  footer) layout and demonstrates dynamic resizing and event wiring.
+
 ## Architecture at a glance
 
-- **Rendering**: full redraw per frame, diffed against a shadow buffer so
-  only changed cells hit the terminal.
-- **Widgets**: `x, y, w, h` + a small vtable (`init`, `render`,
-  `on_event`) per widget.
-- **Events**: single global event loop, one scope today; every widget
-  sees every event and decides for itself whether to handle it.
+- **Rendering**: full redraw per frame into a `CTUI_COMPOSITOR` (one
+  shared backing buffer, sliced per-widget), diffed against a shadow
+  buffer so only changed cells hit the terminal.
+- **Widgets**: `x, y, w, h` + `widget_data` + a required `render()` +
+  an optional `layout()` that recomputes `x/y/w/h` from the
+  compositor's current size — how widgets reflow on resize. No
+  `on_event` on the widget itself; see Events below.
+- **Groups**: `CTUI_GROUP` lets multiple widgets share one compositor
+  slice and draw into it in order, for cheap layering (e.g. a border
+  widget drawn first, content on top).
+- **Splits**: `CTUI_SPLIT` is a sub-compositor — it divides its own
+  `x/y/w/h` evenly among a set of child widgets (`CTUI_SPLIT_V` stacks
+  them, `CTUI_SPLIT_H` puts them side by side) and binds each child
+  against the same real compositor at its own computed position. The
+  active child count can change at runtime (e.g. an event handler
+  revealing a second pane), re-partitioning immediately rather than
+  waiting for the next resize.
+- **Events**: a central registry (`ctui_event_register()` /
+  `ctui_handle_event()`), addEventListener()-style — widgets register
+  interest in a specific `(source, type)` pair instead of every widget
+  seeing every event and deciding for itself. Widgets emit their own
+  events (e.g. `menu`'s value-changed) by calling `ctui_handle_event()`
+  from within a handler.
+- **Resize**: `SIGWINCH` is caught and turned into a `CTUI_RESIZE_EVENT`;
+  `ctui_app_resize()` reallocates the compositor/screen, re-runs every
+  widget's `layout()`, and dispatches the event to any registered
+  listeners.
 - **Terminal I/O**: raw ANSI/terminfo escapes via termios, no external
   dependencies.
 

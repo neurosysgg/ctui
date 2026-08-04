@@ -1,135 +1,126 @@
 #include "ctui.h"
 #include "logger.h"
+#include "widgets/border.h"
+#include "widgets/debug_info.h"
+#include "widgets/label.h"
+#include "widgets/menu.h"
+#include "widgets/status.h"
 
 #include <stdio.h>
+#include <string.h>
 
-typedef struct {
-  const char **items;
-  int count;
-  int selected;
-  char status[64];
-} MenuData;
-
-/*typedef struct {
-  CTUI_SCREEN *screen
-} DebugData;*/
-
-static void menu_render(CTUI_WIDGET *self, CTUI_SCREEN *screen) {
-  MenuData *data = self->widget_data;
-  ctui_logf(E_INF, "[DEMO:MENU] - rendering @ tick %d (selected=%d)\n",
-            ctui_tick_advance(), data->selected);
-
-  ctui_screen_puts(screen, self->y, self->x,
-                   "Pick a tool (Enter to select, Esc to quit)",
-                   CTUI_COLOR_CYAN, CTUI_COLOR_DEFAULT);
-
-  for (int i = 0; i < data->count; i++) {
-    int row = self->y + 2 + i;
-    unsigned char fg =
-        (i == data->selected) ? CTUI_COLOR_BLACK : CTUI_COLOR_DEFAULT;
-    unsigned char bg =
-        (i == data->selected) ? CTUI_COLOR_GREEN : CTUI_COLOR_DEFAULT;
-    char line[64];
-    snprintf(line, sizeof(line), "%c %-20s", (i == data->selected) ? '>' : ' ',
-             data->items[i]);
-    ctui_screen_puts(screen, row, self->x, line, fg, bg);
-  }
+/* shared by every layout() below: header ~20%, main ~60%, footer takes
+ * whatever's left so the three areas always sum to exactly rows, no matter
+ * how rows changes on resize */
+static void demo_area_heights(int rows, int *header_h, int *main_h,
+                              int *footer_h) {
+  *header_h = rows * 20 / 100;
+  *main_h = rows * 60 / 100;
+  *footer_h = rows - *header_h - *main_h;
 }
 
-static int menu_on_event(CTUI_WIDGET *self, CTUI_EVENT *ev) {
-  MenuData *data = self->widget_data;
+static void header_border_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  int header_h, main_h, footer_h;
+  demo_area_heights(comp->rows, &header_h, &main_h, &footer_h);
+  self->x = 0;
+  self->y = 0;
+  self->w = comp->cols;
+  self->h = header_h;
+}
 
-  ctui_logf(E_INF, "[DEMO:MENU] - event received @ tick %d (type=%s)\n",
-            ctui_tick_advance(), ctui_eventtype_name(ev->type));
+static void header_title_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  int header_h, main_h, footer_h;
+  demo_area_heights(comp->rows, &header_h, &main_h, &footer_h);
+  self->x = 1;
+  self->y = 1;
+  self->w = comp->cols - 2;
+  self->h = header_h - 2;
+}
 
-  switch (ev->type) {
-  case CTUI_KEYPRESS_EVENT: {
-    CTUI_KEYPRESS_EVENT_DATA *ev_data =
-        (CTUI_KEYPRESS_EVENT_DATA *)ev->event_data;
-    ctui_logf(E_INF, "[DEMO:MENU] - keypress %s\n",
-              ctui_keytype_name(ev_data->type));
+static void main_border_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  int header_h, main_h, footer_h;
+  demo_area_heights(comp->rows, &header_h, &main_h, &footer_h);
+  self->x = 0;
+  self->y = header_h;
+  self->w = comp->cols;
+  self->h = main_h;
+}
 
-    if (ev_data->type == CTUI_KEY_UP) {
-      if (data->selected > 0) {
-        data->selected--;
-        ctui_logf(E_INF, "[DEMO:MENU] - selection moved up to %d ('%s')\n",
-                  data->selected, data->items[data->selected]);
-        return 1;
-      }
-      ctui_log(E_INF, "[DEMO:MENU] - already at top, ignoring UP\n");
-    } else if (ev_data->type == CTUI_KEY_DOWN) {
-      if (data->selected < data->count - 1) {
-        data->selected++;
-        ctui_logf(E_INF, "[DEMO:MENU] - selection moved down to %d ('%s')\n",
-                  data->selected, data->items[data->selected]);
-        return 1;
-      }
-      ctui_log(E_INF, "[DEMO:MENU] - already at bottom, ignoring DOWN\n");
-    } else if (ev_data->type == CTUI_KEY_ENTER) {
-      snprintf(data->status, sizeof(data->status), "you picked: %s",
-               data->items[data->selected]);
-      ctui_logf(E_INF, "[DEMO:MENU] - picked '%s'\n",
-                data->items[data->selected]);
-      return 1;
-    }
-    ctui_log(E_INF, "[DEMO:MENU] - event not handled\n");
+/* the main area now hosts a CTUI_SPLIT (widget_data), not the menu
+ * directly: same centering math the old standalone menu_layout() used, but
+ * the box is one pane tall (7 rows) until debug info is picked, then two
+ * (14, capped to whatever the main area's inner region actually has --
+ * see main_inner_h below) once ctui_split's count grows to 2 -- see
+ * main_split_handle_debug_toggle(). ctui_split_layout() at the end handles
+ * dividing whatever area this computes among the active children and
+ * rebinding them; it's re-run automatically by ctui_widget_init() (both at
+ * startup and on resize) since this whole function is registered as the
+ * split widget's layout(). */
+static void main_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  CTUI_SPLIT *split = self->widget_data;
+  int header_h, main_h, footer_h;
+  demo_area_heights(comp->rows, &header_h, &main_h, &footer_h);
+  int main_inner_w = comp->cols - 2, main_inner_h = main_h - 2;
+  int wanted_h = 7 * split->count;
+
+  self->w = 48;
+  self->h = wanted_h < main_inner_h ? wanted_h : main_inner_h;
+  self->x = 1 + (main_inner_w - self->w) / 2;
+  self->y = (header_h + 1) + (main_inner_h - self->h) / 2;
+
+  ctui_split_layout(self, comp);
+}
+
+/* listens for ("menu", CTUI_VALUE_CHANGED_EVENT) -- same event status
+ * listens for, just a second, independent handler on the same key,
+ * demonstrating that the registry supports more than one listener per
+ * (source, type). Only reacts to the "debug info" item; tracks its
+ * enabled/disabled state, not just the fact that it changed, so the panel
+ * opens when it's toggled on and closes again when toggled off. */
+static int main_split_handle_debug_toggle(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  CTUI_SPLIT *split = self->widget_data;
+  CTUI_VALUE_CHANGED_EVENT_DATA *changed = ev->event_data;
+
+  if (strcmp(changed->value, "debug info") != 0) {
     return 0;
   }
-  default:
-    ctui_logf(E_INF, "[DEMO:MENU] - ignoring non-keypress event type %s\n",
-              ctui_eventtype_name(ev->type));
+
+  int want_count = changed->enabled ? 2 : 1;
+  if (split->count == want_count) {
     return 0;
   }
+
+  split->count = want_count;
+  /* re-run right now rather than waiting for the next resize, so the
+   * pane that just appeared/disappeared is (re)bound before the next
+   * render */
+  main_split_layout(self, split->comp);
+  ctui_logf(E_INF,
+            "[DEMO:APP] - \"debug info\" %s @ tick %d, %s main area\n",
+            changed->enabled ? "enabled" : "disabled", ctui_tick_advance(),
+            changed->enabled ? "splitting" : "closing");
+  return 1;
 }
 
-static void status_render(CTUI_WIDGET *self, CTUI_SCREEN *screen) {
-  MenuData *data = self->widget_data;
-  ctui_logf(E_INF, "[DEMO:STATUS] - rendering @ tick %d (status=\"%s\")\n",
-            ctui_tick_advance(), data->status);
-
-  ctui_screen_puts(screen, self->y, self->x, "Status:", CTUI_COLOR_YELLOW,
-                   CTUI_COLOR_DEFAULT);
-  ctui_screen_puts(screen, self->y + 1, self->x,
-                   data->status[0] ? data->status : "(nothing yet)",
-                   CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
+static void footer_border_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  int header_h, main_h, footer_h;
+  demo_area_heights(comp->rows, &header_h, &main_h, &footer_h);
+  self->x = 0;
+  self->y = header_h + main_h;
+  self->w = comp->cols;
+  self->h = footer_h;
 }
 
-static int status_on_event(CTUI_WIDGET *self, CTUI_EVENT *ev) {
-  (void)self;
-  ctui_logf(
-      E_INF,
-      "[DEMO:STATUS] - event received @ tick %d (type=%s), ignoring (no-op "
-      "widget)\n",
-      ctui_tick_advance(), ctui_eventtype_name(ev->type));
-  return 0;
-}
-
-static void debug_info_render(CTUI_WIDGET *self, CTUI_SCREEN *screen) {
-  char buf[screen->cols * screen->rows];
-  ctui_logf(E_INF, "[DEMO:DEBUG] - rendering @ tick %d (screen=%dx%d)\n",
-            ctui_tick_advance(), screen->cols, screen->rows);
-
-  // row 1/6
-  ctui_screen_puts(screen, self->y, self->x, "__debug_info__",
-                   CTUI_COLOR_YELLOW, CTUI_COLOR_DEFAULT);
-  // row 2/6
-  snprintf(buf, sizeof(buf), "width: %d chars/columns", screen->cols);
-  ctui_screen_puts(screen, self->y + 1, self->x, buf, CTUI_COLOR_YELLOW,
-                   CTUI_COLOR_DEFAULT);
-  // row 3/6; etc
-  snprintf(buf, sizeof(buf), "height: %d chars/rows", screen->rows);
-  ctui_screen_puts(screen, self->y + 2, self->x, buf, CTUI_COLOR_YELLOW,
-                   CTUI_COLOR_DEFAULT);
-}
-
-static int debug_info_on_event(CTUI_WIDGET *self, CTUI_EVENT *ev) {
-  (void)self;
-  ctui_logf(
-      E_INF,
-      "[DEMO:DEBUG] - event received @ tick %d (type=%s), ignoring (no-op "
-      "widget)\n",
-      ctui_tick_advance(), ctui_eventtype_name(ev->type));
-  return 0;
+/* only vertically centered -- x stays a fixed inset from the left border */
+static void status_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  int header_h, main_h, footer_h;
+  demo_area_heights(comp->rows, &header_h, &main_h, &footer_h);
+  int footer_y = header_h + main_h;
+  int footer_inner_h = footer_h - 2;
+  self->w = 48;
+  self->h = 2;
+  self->x = 2;
+  self->y = (footer_y + 1) + (footer_inner_h - self->h) / 2;
 }
 
 int main(void) {
@@ -147,31 +138,92 @@ int main(void) {
             ctui_tick_advance());
   CTUI_SCREEN *screen = ctui_screen_create(rows, cols);
 
-  static const char *items[] = {"debug info", "vm stats", "whatever", "1337",
-                                "quit"};
-  MenuData data = {.items = items, .count = 5, .selected = 0, .status = ""};
-  // DebugData debug_data = {.screen = screen};
+  static CTUI_MENU_ITEM items[] = {
+      {.label = "debug info", .enabled = 0},
+      {.label = "vm stats", .enabled = 0},
+      {.label = "whatever", .enabled = 0},
+      {.label = "1337", .enabled = 0},
+      {.label = "quit", .enabled = 0},
+  };
+  CTUI_MENU data = {.items = items, .count = 5, .selected = 0};
+  CTUI_STATUS status_data = {.text = ""};
+  CTUI_LABEL title = {
+      .text = "ctui - demo", .fg = CTUI_COLOR_CYAN, .bg = CTUI_COLOR_DEFAULT};
 
-  CTUI_WIDGET menu =
-      ctui_widget_make(2, 1, 48, 6, &data, menu_on_event, menu_render);
+  /* shared by all three borders -- ctui_border_render only reads it, so one
+   * instance is enough even though three separate widgets point at it */
+  CTUI_BORDER border_style = ctui_border_make(CTUI_COLOR_WHITE);
+  border_style.corner =
+      (CTUI_CELL){.ch = '+', .fg = CTUI_COLOR_YELLOW, .bg = CTUI_COLOR_DEFAULT};
 
-  CTUI_WIDGET debug_info = ctui_widget_make(
-      2, 8, 48, 6, NULL, debug_info_on_event, debug_info_render);
+  /* each area's border and content are independent widgets, not a
+   * CTUI_GROUP -- content is deliberately inset from its border (never
+   * shares a cell with it), so there's no layering to compose and each just
+   * gets its own compositor slice via its own (x,y), the normal way.
+   *
+   * every widget below gets its real x/y/w/h from its layout() callback
+   * (see above main()), re-run by ctui_widget_init() -- both the initial
+   * one from ctui_app_init() just below, and every one ctui_app_resize()
+   * triggers on a terminal resize. The 0,0,0,0 here is just a placeholder,
+   * immediately overwritten before anything reads it. */
+  CTUI_WIDGET header_border = ctui_widget_make(
+      0, 0, 0, 0, &border_style, ctui_border_render, header_border_layout);
+  CTUI_WIDGET header_title = ctui_widget_make(
+      0, 0, 0, 0, &title, ctui_label_render, header_title_layout);
+  CTUI_WIDGET main_border = ctui_widget_make(
+      0, 0, 0, 0, &border_style, ctui_border_render, main_border_layout);
 
-  CTUI_WIDGET status = ctui_widget_make(2, rows - 8, 48, 2, &data,
-                                        status_on_event, status_render);
+  /* main area's content: a menu on top, a debug-info panel revealed below
+   * it once "debug info" is picked (see main_split_handle_debug_toggle()).
+   * Neither child widget's own x/y/w/h matter here -- ctui_split_layout()
+   * (called from main_split_layout()) overwrites them every time. */
+  CTUI_WIDGET menu = ctui_widget_make(0, 0, 0, 0, &data, ctui_menu_render, NULL);
+  CTUI_WIDGET debug_info =
+      ctui_widget_make(0, 0, 0, 0, NULL, ctui_debug_info_render, NULL);
+  CTUI_WIDGET *main_split_children[] = {&menu, &debug_info};
+  CTUI_SPLIT main_split = {
+      .mode = CTUI_SPLIT_V, .children = main_split_children, .count = 1};
+  CTUI_WIDGET main_split_widget = ctui_widget_make(
+      0, 0, 0, 0, &main_split, ctui_split_render, main_split_layout);
 
-  CTUI_WIDGET *widgets[] = {&menu, &debug_info, &status};
+  CTUI_WIDGET footer_border = ctui_widget_make(
+      0, 0, 0, 0, &border_style, ctui_border_render, footer_border_layout);
+  CTUI_WIDGET status = ctui_widget_make(0, 0, 0, 0, &status_data,
+                                        ctui_status_render, status_layout);
+
+  /* main_split_widget takes the menu's old slot in the top-level widget
+   * list -- menu and debug_info are its children now, positioned/bound/
+   * rendered entirely through it (see main_split_layout()/
+   * ctui_split_render()), so they must NOT also appear here or they'd get
+   * bound twice against stale (0,0,0,0) geometry */
+  CTUI_WIDGET *widgets[] = {
+      &header_border,     &header_title, &main_border,
+      &main_split_widget, &footer_border, &status,
+  };
   CTUI_APP app;
-  ctui_app_init(&app, widgets, 3);
+  ctui_app_init(&app, widgets, 6, rows, cols);
+
+  /* addEventListener()-style wiring: menu reacts to raw keypresses (the
+   * "input" source ctui_input_loop() emits under). status and
+   * main_split_widget both listen for menu's value-changed events -- two
+   * independent handlers on the same (source, type) key -- neither knowing
+   * anything about how the other reacts. */
+  ctui_event_register("input", CTUI_KEYPRESS_EVENT, &menu,
+                      ctui_menu_handle_keypress);
+  ctui_event_register("menu", CTUI_VALUE_CHANGED_EVENT, &status,
+                      ctui_status_handle_value_changed);
+  ctui_event_register("menu", CTUI_VALUE_CHANGED_EVENT, &main_split_widget,
+                      main_split_handle_debug_toggle);
+
   ctui_logf(E_INF,
-            "[DEMO:APP] - widgets wired (menu, debug_info, status) @ tick "
-            "%d, entering event loop\n",
+            "[DEMO:APP] - widgets wired (header, main, footer) @ tick %d, "
+            "entering event loop\n",
             ctui_tick_advance());
   ctui_app_run(&app, screen);
   ctui_logf(E_INF, "[DEMO:APP] - event loop exited @ tick %d\n",
             ctui_tick_advance());
 
+  ctui_app_free(&app);
   ctui_screen_free(screen);
   ctui_shutdown();
   return 0;

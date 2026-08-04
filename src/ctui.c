@@ -1,6 +1,16 @@
+/* must precede every #include: struct sigaction/sigaction()/sigemptyset()
+ * are POSIX, not C11, and -std=c11 sets __STRICT_ANSI__, which suppresses
+ * glibc's usual default of exposing them without an explicit feature-test
+ * macro. Has to be set before the first system header (even a transitive
+ * one, e.g. via "ctui.h" -> "logger.h" -> <stdio.h>) or it's too late --
+ * glibc's <features.h> only evaluates it once. */
+#define _POSIX_C_SOURCE 200809L
+
 #include "ctui.h"
 #include "logger.h"
 
+#include <errno.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +23,15 @@
 static struct termios orig_termios;
 static struct CTUI_LOGGER logger;
 static int _ctui_ticks;
+
+/* set (async-signal-safe: just a flag) by handle_sigwinch(); polled by
+ * ctui_input_loop() */
+static volatile sig_atomic_t g_resize_pending = 0;
+
+static void handle_sigwinch(int sig) {
+  (void)sig;
+  g_resize_pending = 1;
+}
 
 int ctui_tick_advance(void) { return ++_ctui_ticks; }
 
@@ -95,6 +114,10 @@ const char *ctui_eventtype_name(CTUI_EVENTTYPE type) {
     return "FOCUS";
   case CTUI_WIDGET_REDRAW:
     return "WIDGET_REDRAW";
+  case CTUI_RESIZE_EVENT:
+    return "RESIZE";
+  case CTUI_VALUE_CHANGED_EVENT:
+    return "VALUE_CHANGED";
   case CTUI_DUMMY_EVENT:
     return "DUMMY";
   }
@@ -129,6 +152,17 @@ int ctui_init(int verbosity) {
     return -1;
   }
   ctui_tick_advance();
+
+  /* no SA_RESTART: we want blocking read() in ctui_input_loop() to return
+   * EINTR on SIGWINCH so the event loop can react to the resize promptly
+   * instead of waiting for the next keypress */
+  struct sigaction sa = {0};
+  sa.sa_handler = handle_sigwinch;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(SIGWINCH, &sa, NULL);
+  ctui_logf(E_INF, "[CTUI:TERM] - SIGWINCH handler installed @ tick %d\n",
+            ctui_tick_advance());
 
   /* alternate screen buffer + hide cursor */
   printf("\x1b[?1049h\x1b[?25l");
@@ -166,20 +200,23 @@ void ctui_get_termsize(/*ref*/ int *rows, /*ref*/ int *cols) {
   }
 }
 
+static void screen_alloc(CTUI_SCREEN *s, int rows, int cols) {
+  s->rows = rows;
+  s->cols = cols;
+  s->cells = calloc((size_t)rows * (size_t)cols, sizeof(CTUI_CELL));
+  s->buffer = calloc((size_t)rows * (size_t)cols, sizeof(CTUI_CELL));
+
+  for (int i = 0; i < rows * cols; i++) {
+    s->cells[i].ch = ' ';
+    s->buffer[i].ch = '\0'; /* force buffer flush on next draw */
+  }
+}
+
 CTUI_SCREEN *ctui_screen_create(int rows, int cols) {
   ctui_logf(E_INF, "[CTUI:SCREEN] - creating %dx%d screen @ tick %d\n", cols,
             rows, ctui_tick_advance());
   CTUI_SCREEN *screen = malloc(sizeof(CTUI_SCREEN));
-  screen->rows = rows;
-  screen->cols = cols;
-  screen->cells = calloc((size_t)rows * (size_t)cols, sizeof(CTUI_CELL));
-  screen->buffer = calloc((size_t)rows * (size_t)cols, sizeof(CTUI_CELL));
-
-  for (int i = 0; i < rows * cols; i++) {
-    screen->cells[i].ch = ' ';
-    screen->buffer[i].ch = '\0'; /* force buffer flush on initial draw */
-  }
-
+  screen_alloc(screen, rows, cols);
   return screen;
 }
 
@@ -189,6 +226,20 @@ void ctui_screen_free(CTUI_SCREEN *s) {
   free(s->cells);
   free(s->buffer);
   free(s);
+}
+
+void ctui_screen_resize(CTUI_SCREEN *s, int rows, int cols) {
+  ctui_logf(E_INF,
+            "[CTUI:SCREEN] - resizing %dx%d -> %dx%d @ tick %d\n", s->cols,
+            s->rows, cols, rows, ctui_tick_advance());
+  free(s->cells);
+  free(s->buffer);
+  screen_alloc(s, rows, cols);
+
+  /* clear the real terminal too -- a shrink could otherwise leave stale
+   * content from the old (larger) frame outside the new bounds */
+  printf("\x1b[2J");
+  fflush(stdout);
 }
 
 void ctui_screen_clear(CTUI_SCREEN *s) {
@@ -288,6 +339,64 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
          sizeof(CTUI_CELL) * (size_t)s->rows * (size_t)s->cols);
 }
 
+static void compositor_alloc(CTUI_COMPOSITOR *comp, int rows, int cols) {
+  comp->rows = rows;
+  comp->cols = cols;
+  comp->cells = calloc((size_t)rows * (size_t)cols, sizeof(CTUI_CELL));
+
+  for (int i = 0; i < rows * cols; i++) {
+    comp->cells[i].ch = ' ';
+  }
+}
+
+CTUI_COMPOSITOR *ctui_compositor_create(int rows, int cols) {
+  ctui_logf(E_INF, "[CTUI:COMPOSITOR] - creating %dx%d compositor @ tick %d\n",
+            cols, rows, ctui_tick_advance());
+  CTUI_COMPOSITOR *comp = malloc(sizeof(CTUI_COMPOSITOR));
+  compositor_alloc(comp, rows, cols);
+  return comp;
+}
+
+void ctui_compositor_free(CTUI_COMPOSITOR *comp) {
+  ctui_logf(E_INF, "[CTUI:COMPOSITOR] - freeing %dx%d compositor @ tick %d\n",
+            comp->cols, comp->rows, ctui_tick_advance());
+  free(comp->cells);
+  free(comp);
+}
+
+void ctui_compositor_clear(CTUI_COMPOSITOR *comp) {
+  ctui_logf(E_DBG, "[CTUI:COMPOSITOR] - clearing %dx%d compositor @ tick %d\n",
+            comp->cols, comp->rows, ctui_tick_advance());
+  for (int i = 0; i < comp->rows * comp->cols; i++) {
+    comp->cells[i].ch = ' ';
+    comp->cells[i].fg = CTUI_COLOR_DEFAULT;
+    comp->cells[i].bg = CTUI_COLOR_DEFAULT;
+  }
+}
+
+void ctui_compositor_resize(CTUI_COMPOSITOR *comp, int rows, int cols) {
+  ctui_logf(E_INF,
+            "[CTUI:COMPOSITOR] - resizing %dx%d -> %dx%d @ tick %d\n",
+            comp->cols, comp->rows, cols, rows, ctui_tick_advance());
+  free(comp->cells);
+  compositor_alloc(comp, rows, cols);
+}
+
+void ctui_compositor_blit(CTUI_COMPOSITOR *comp, CTUI_SCREEN *screen) {
+  if (comp->rows != screen->rows || comp->cols != screen->cols) {
+    ctui_logf(E_WRN,
+              "[CTUI:COMPOSITOR] - blit size mismatch @ tick %d (compositor "
+              "%dx%d, screen %dx%d)\n",
+              ctui_tick_advance(), comp->cols, comp->rows, screen->cols,
+              screen->rows);
+    return;
+  }
+  ctui_logf(E_DBG, "[CTUI:COMPOSITOR] - blit @ tick %d\n",
+            ctui_tick_advance());
+  memcpy(screen->cells, comp->cells,
+         sizeof(CTUI_CELL) * (size_t)comp->rows * (size_t)comp->cols);
+}
+
 static int read_byte_timeout(char *c, int timeout_ms) {
   fd_set fds;
   FD_ZERO(&fds);
@@ -314,19 +423,44 @@ static int read_byte_timeout(char *c, int timeout_ms) {
 }
 
 int ctui_input_loop(CTUI_EVENT *ev) {
+  /* owns its own event_data storage rather than relying on the caller to
+   * pre-populate ev->event_data, since which struct shape is needed depends
+   * on which event type this call ends up producing */
+  static CTUI_KEYPRESS_EVENT_DATA kp_data;
+  static CTUI_RESIZE_EVENT_DATA resize_data;
   char c;
-  ev->type = CTUI_KEYPRESS_EVENT;
-  CTUI_KEYPRESS_EVENT_DATA *ev_data =
-      (CTUI_KEYPRESS_EVENT_DATA *)ev->event_data;
 
-  ctui_logf(E_DBG, "[CTUI:INPUT] - waiting for input @ tick %d\n",
-            ctui_tick_advance());
+  for (;;) {
+    if (g_resize_pending) {
+      g_resize_pending = 0;
+      ctui_get_termsize(&resize_data.rows, &resize_data.cols);
+      ev->type = CTUI_RESIZE_EVENT;
+      ev->ev_source = "terminal";
+      ev->event_data = &resize_data;
+      ctui_logf(E_INF, "[CTUI:INPUT] - resize detected @ tick %d (%dx%d)\n",
+                ctui_tick_advance(), resize_data.cols, resize_data.rows);
+      return 1;
+    }
 
-  if (read(STDIN_FILENO, &c, 1) != 1) {
+    ctui_logf(E_DBG, "[CTUI:INPUT] - waiting for input @ tick %d\n",
+              ctui_tick_advance());
+
+    if (read(STDIN_FILENO, &c, 1) == 1) {
+      break;
+    }
+    if (errno == EINTR) {
+      /* almost certainly SIGWINCH; loop back to the pending-resize check */
+      continue;
+    }
     ctui_logf(E_WRN, "[CTUI:INPUT] - read failed/EOF @ tick %d\n",
               ctui_tick_advance());
     return 0;
   }
+
+  ev->type = CTUI_KEYPRESS_EVENT;
+  ev->ev_source = "input";
+  ev->event_data = &kp_data;
+  CTUI_KEYPRESS_EVENT_DATA *ev_data = &kp_data;
 
   if (c == '\x1b') {
     char seq0, seq1;
@@ -400,9 +534,10 @@ int ctui_input_loop(CTUI_EVENT *ev) {
 }
 
 CTUI_WIDGET ctui_widget_make(int x, int y, int w, int h, void *widget_data,
-                             int (*on_event)(CTUI_WIDGET *self, CTUI_EVENT *ev),
                              void (*render)(CTUI_WIDGET *self,
-                                            CTUI_SCREEN *screen)) {
+                                            CTUI_COMPOSITOR *comp),
+                             void (*layout)(CTUI_WIDGET *self,
+                                           CTUI_COMPOSITOR *comp)) {
   ctui_logf(E_INF,
             "[CTUI:WIDGET] - creating widget @ tick %d (x=%d, y=%d, w=%d, "
             "h=%d)\n",
@@ -412,45 +547,401 @@ CTUI_WIDGET ctui_widget_make(int x, int y, int w, int h, void *widget_data,
                        .w = w,
                        .h = h,
                        .widget_data = widget_data,
-                       .on_event = on_event,
+                       .ticks = 0,
+                       .buf = NULL,
+                       .layout = layout,
                        .render = render};
 }
 
+void ctui_widget_tick_advance(CTUI_WIDGET *widget) { ++widget->ticks; }
+
+void ctui_widget_init(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp) {
+  if (widget->layout) {
+    widget->layout(widget, comp);
+    ctui_logf(E_DBG,
+              "[CTUI:WIDGET] - widget %p layout() re-run @ tick %d (x=%d, "
+              "y=%d, w=%d, h=%d)\n",
+              (void *)widget, ctui_tick_advance(), widget->x, widget->y,
+              widget->w, widget->h);
+  }
+
+  if (widget->x < 0 || widget->x >= comp->cols || widget->y < 0 ||
+      widget->y >= comp->rows) {
+    ctui_logf(E_WRN,
+              "[CTUI:WIDGET] - widget %p origin out of compositor bounds @ "
+              "tick %d (x=%d, y=%d, compositor=%dx%d); leaving buf NULL\n",
+              (void *)widget, ctui_tick_advance(), widget->x, widget->y,
+              comp->cols, comp->rows);
+    widget->buf = NULL;
+    return;
+  }
+  widget->buf = comp->cells + (size_t)widget->y * (size_t)comp->cols +
+               (size_t)widget->x;
+  ctui_logf(E_INF,
+            "[CTUI:WIDGET] - widget %p bound to compositor slice @ tick %d "
+            "(x=%d, y=%d, w=%d, h=%d)\n",
+            (void *)widget, ctui_tick_advance(), widget->x, widget->y,
+            widget->w, widget->h);
+}
+
+void ctui_widget_putc(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                      int col, char ch, unsigned char fg, unsigned char bg) {
+  if (widget->buf == NULL) {
+    ctui_logf(E_WRN,
+              "[CTUI:WIDGET] - putc rejected @ tick %d, widget %p not bound "
+              "to a compositor slice (call ctui_widget_init() first)\n",
+              ctui_tick_advance(), (void *)widget);
+    return;
+  }
+  if (row < 0 || row >= widget->h || col < 0 || col >= widget->w) {
+    ctui_logf(E_WRN,
+              "[CTUI:WIDGET] - putc out of widget bounds @ tick %d (row=%d, "
+              "col=%d, size=%dx%d)\n",
+              ctui_tick_advance(), row, col, widget->w, widget->h);
+    return;
+  }
+  int abs_row = widget->y + row;
+  int abs_col = widget->x + col;
+  if (abs_row < 0 || abs_row >= comp->rows || abs_col < 0 ||
+      abs_col >= comp->cols) {
+    ctui_logf(E_WRN,
+              "[CTUI:WIDGET] - putc out of compositor bounds @ tick %d "
+              "(row=%d, col=%d, compositor=%dx%d)\n",
+              ctui_tick_advance(), abs_row, abs_col, comp->cols, comp->rows);
+    return;
+  }
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - putc @ tick %d (row=%d, col=%d, ch='%c')\n",
+            ctui_tick_advance(), row, col, ch);
+  CTUI_CELL *cell = widget->buf + (size_t)row * (size_t)comp->cols + (size_t)col;
+  cell->ch = ch;
+  cell->bg = bg;
+  cell->fg = fg;
+}
+
+void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                      int col, const char *str, unsigned char fg,
+                      unsigned char bg) {
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - puts @ tick %d (row=%d, col=%d, len=%zu): "
+            "\"%s\"\n",
+            ctui_tick_advance(), row, col, strlen(str), str);
+  for (int i = 0; str[i] != '\0'; i++) {
+    ctui_widget_putc(widget, comp, row, col + i, str[i], fg, bg);
+  }
+}
+
+int ctui_util_center_h(char *center_str, char *line, CTUI_CELL fill) {
+  size_t str_len = strlen(center_str);
+  size_t line_len = strlen(line);
+
+  if (str_len > line_len) {
+    ctui_logf(E_WRN,
+              "[CTUI:UTIL] - center_h rejected @ tick %d, center_str (%zu "
+              "chars) longer than line (%zu chars)\n",
+              ctui_tick_advance(), str_len, line_len);
+    return -1;
+  }
+
+  size_t total_pad = line_len - str_len;
+  size_t left_pad = total_pad / 2;
+  size_t right_pad = total_pad - left_pad;
+
+  memset(line, fill.ch, left_pad);
+  memcpy(line + left_pad, center_str, str_len);
+  memset(line + left_pad + str_len, fill.ch, right_pad);
+
+  ctui_logf(E_DBG,
+            "[CTUI:UTIL] - center_h @ tick %d (\"%s\" in %zu-wide line, "
+            "left_pad=%zu, right_pad=%zu)\n",
+            ctui_tick_advance(), center_str, line_len, left_pad, right_pad);
+  return 0;
+}
+
+int ctui_util_truncate_str(char *str, size_t desired, char *trunc) {
+  size_t str_len = strlen(str);
+  size_t trunc_len = strlen(trunc);
+
+  if (str_len <= desired) {
+    return 0;
+  }
+
+  if (trunc_len > desired) {
+    ctui_logf(E_WRN,
+              "[CTUI:UTIL] - truncate_str rejected @ tick %d, trunc (%zu "
+              "chars) longer than desired (%zu chars)\n",
+              ctui_tick_advance(), trunc_len, desired);
+    return -1;
+  }
+
+  size_t keep = desired - trunc_len;
+  memcpy(str + keep, trunc, trunc_len);
+  str[desired] = '\0';
+
+  ctui_logf(E_DBG,
+            "[CTUI:UTIL] - truncate_str @ tick %d (%zu chars -> %zu chars)\n",
+            ctui_tick_advance(), str_len, desired);
+  return 0;
+}
+
+CTUI_GROUP ctui_group_make(char *group_id, CTUI_WIDGET *members, size_t size) {
+  ctui_logf(E_INF,
+            "[CTUI:GROUP] - creating group \"%s\" @ tick %d (%zu members)\n",
+            group_id, ctui_tick_advance(), size);
+  return (CTUI_GROUP){.size = size, .group_id = group_id, .members = members};
+}
+
+void ctui_group_init(CTUI_GROUP *group, CTUI_COMPOSITOR *comp) {
+  if (group->size == 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:GROUP] - group \"%s\" has no members @ tick %d, nothing "
+              "to bind\n",
+              group->group_id, ctui_tick_advance());
+    return;
+  }
+
+  ctui_widget_init(&group->members[0], comp);
+  CTUI_CELL *shared_buf = group->members[0].buf;
+
+  for (size_t i = 1; i < group->size; i++) {
+    group->members[i].buf = shared_buf;
+  }
+
+  ctui_logf(E_INF,
+            "[CTUI:GROUP] - group \"%s\" bound to shared compositor slice @ "
+            "tick %d (%zu members)\n",
+            group->group_id, ctui_tick_advance(), group->size);
+}
+
+void ctui_group_render(CTUI_GROUP *group, CTUI_COMPOSITOR *comp) {
+  ctui_logf(E_INF,
+            "[CTUI:GROUP] - render pass @ tick %d (group \"%s\", %zu "
+            "members)\n",
+            ctui_tick_advance(), group->group_id, group->size);
+  for (size_t i = 0; i < group->size; i++) {
+    CTUI_WIDGET *w = &group->members[i];
+
+    ctui_widget_tick_advance(w);
+    ctui_logf(E_DBG,
+              "[CTUI:WIDGET] - widget %p (x=%d, y=%d) pre-render @ "
+              "widget-tick %d\n",
+              (void *)w, w->x, w->y, w->ticks);
+
+    w->render(w, comp);
+
+    ctui_widget_tick_advance(w);
+    ctui_logf(E_DBG,
+              "[CTUI:WIDGET] - widget %p (x=%d, y=%d) post-render @ "
+              "widget-tick %d\n",
+              (void *)w, w->x, w->y, w->ticks);
+  }
+}
+
+void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  CTUI_SPLIT *split = self->widget_data;
+  split->comp = comp;
+
+  if (split->count <= 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:SPLIT] - widget %p has no active children @ tick %d, "
+              "nothing to lay out\n",
+              (void *)self, ctui_tick_advance());
+    return;
+  }
+
+  if (split->mode == CTUI_SPLIT_V) {
+    int base = self->h / split->count;
+    int remainder = self->h - base * split->count;
+    int y = self->y;
+    for (int i = 0; i < split->count; i++) {
+      CTUI_WIDGET *child = split->children[i];
+      child->x = self->x;
+      child->w = self->w;
+      child->y = y;
+      child->h = base + (i == split->count - 1 ? remainder : 0);
+      y += child->h;
+      ctui_widget_init(child, comp);
+    }
+  } else {
+    int base = self->w / split->count;
+    int remainder = self->w - base * split->count;
+    int x = self->x;
+    for (int i = 0; i < split->count; i++) {
+      CTUI_WIDGET *child = split->children[i];
+      child->y = self->y;
+      child->h = self->h;
+      child->x = x;
+      child->w = base + (i == split->count - 1 ? remainder : 0);
+      x += child->w;
+      ctui_widget_init(child, comp);
+    }
+  }
+
+  ctui_logf(E_INF,
+            "[CTUI:SPLIT] - widget %p laid out @ tick %d (%s, %d active "
+            "children, self=%dx%d @ %d,%d)\n",
+            (void *)self, ctui_tick_advance(),
+            split->mode == CTUI_SPLIT_V ? "V" : "H", split->count, self->w,
+            self->h, self->x, self->y);
+}
+
+void ctui_split_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  CTUI_SPLIT *split = self->widget_data;
+  ctui_logf(E_INF,
+            "[CTUI:SPLIT] - render pass @ tick %d (widget %p, %d active "
+            "children)\n",
+            ctui_tick_advance(), (void *)self, split->count);
+  for (int i = 0; i < split->count; i++) {
+    CTUI_WIDGET *child = split->children[i];
+
+    ctui_widget_tick_advance(child);
+    ctui_logf(E_DBG,
+              "[CTUI:WIDGET] - widget %p (x=%d, y=%d) pre-render @ "
+              "widget-tick %d\n",
+              (void *)child, child->x, child->y, child->ticks);
+
+    child->render(child, comp);
+
+    ctui_widget_tick_advance(child);
+    ctui_logf(E_DBG,
+              "[CTUI:WIDGET] - widget %p (x=%d, y=%d) post-render @ "
+              "widget-tick %d\n",
+              (void *)child, child->x, child->y, child->ticks);
+  }
+}
+
+struct CTUI_EVENT_HANDLER {
+  const char *source;
+  CTUI_EVENTTYPE type;
+  CTUI_WIDGET *widget;
+  int (*handler)(CTUI_WIDGET *self, CTUI_EVENT *ev);
+};
+
 static CTUI_APP *g_app = NULL;
 
-void ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count) {
+void ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
+                   int cols) {
   app->widgets = widgets;
   app->count = count;
+  app->comp = ctui_compositor_create(rows, cols);
+  app->handlers = NULL;
+  app->handler_count = 0;
+  app->handler_cap = 0;
   g_app = app;
-  ctui_logf(E_INF, "[CTUI:APP] - app initialised @ tick %d (%d widgets)\n",
-            ctui_tick_advance(), count);
+  ctui_logf(E_INF,
+            "[CTUI:APP] - app initialised @ tick %d (%d widgets, %dx%d "
+            "compositor)\n",
+            ctui_tick_advance(), count, cols, rows);
+
+  for (int i = 0; i < count; i++) {
+    ctui_widget_init(widgets[i], app->comp);
+  }
+}
+
+void ctui_app_free(CTUI_APP *app) {
+  ctui_logf(E_INF, "[CTUI:APP] - freeing app @ tick %d\n",
+            ctui_tick_advance());
+  free(app->handlers);
+  ctui_compositor_free(app->comp);
 }
 
 void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen) {
   ctui_logf(E_INF, "[CTUI:APP] - render pass @ tick %d (%d widgets)\n",
             ctui_tick_advance(), app->count);
+  ctui_compositor_clear(app->comp);
   for (int i = 0; i < app->count; i++) {
     CTUI_WIDGET *w = app->widgets[i];
-    w->render(w, screen);
+
+    ctui_widget_tick_advance(w);
+    ctui_logf(E_DBG,
+              "[CTUI:WIDGET] - widget %p (x=%d, y=%d) pre-render @ "
+              "widget-tick %d\n",
+              (void *)w, w->x, w->y, w->ticks);
+
+    w->render(w, app->comp);
+
+    ctui_widget_tick_advance(w);
+    ctui_logf(E_DBG,
+              "[CTUI:WIDGET] - widget %p (x=%d, y=%d) post-render @ "
+              "widget-tick %d\n",
+              (void *)w, w->x, w->y, w->ticks);
   }
+  ctui_compositor_blit(app->comp, screen);
 }
 
-int ctui_process_event(CTUI_EVENT *ev) {
-  int changed = 0;
-  ctui_logf(E_INF, "[CTUI:APP] - dispatching %s event @ tick %d\n",
-            ctui_eventtype_name(ev->type), ctui_tick_advance());
+void ctui_event_register(const char *source, CTUI_EVENTTYPE type,
+                         CTUI_WIDGET *widget,
+                         int (*handler)(CTUI_WIDGET *self, CTUI_EVENT *ev)) {
   if (!g_app) {
-    ctui_log(E_WRN, "[CTUI:APP] - no app registered, dropping event\n");
+    ctui_log(E_WRN,
+             "[CTUI:EVENT] - no app registered, dropping registration\n");
+    return;
+  }
+
+  if (g_app->handler_count == g_app->handler_cap) {
+    int new_cap = g_app->handler_cap == 0 ? 4 : g_app->handler_cap * 2;
+    g_app->handlers = realloc(g_app->handlers,
+                              (size_t)new_cap * sizeof(CTUI_EVENT_HANDLER));
+    g_app->handler_cap = new_cap;
+  }
+
+  g_app->handlers[g_app->handler_count++] = (CTUI_EVENT_HANDLER){
+      .source = source, .type = type, .widget = widget, .handler = handler};
+
+  ctui_logf(E_INF,
+            "[CTUI:EVENT] - registered handler @ tick %d (source=\"%s\", "
+            "type=%s, widget=%p)\n",
+            ctui_tick_advance(), source, ctui_eventtype_name(type),
+            (void *)widget);
+}
+
+int ctui_handle_event(CTUI_EVENT *ev) {
+  int changed = 0;
+  ctui_logf(E_INF,
+            "[CTUI:EVENT] - dispatching %s event @ tick %d (source=\"%s\")\n",
+            ctui_eventtype_name(ev->type), ctui_tick_advance(),
+            ev->ev_source ? ev->ev_source : "(null)");
+  if (!g_app) {
+    ctui_log(E_WRN, "[CTUI:EVENT] - no app registered, dropping event\n");
     return 0;
   }
-  for (int i = 0; i < g_app->count; i++) {
-    CTUI_WIDGET *w = g_app->widgets[i];
-    if (w->on_event && w->on_event(w, ev))
+  for (int i = 0; i < g_app->handler_count; i++) {
+    CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
+    if (h->type != ev->type)
+      continue;
+    if (h->source == NULL || ev->ev_source == NULL ||
+        strcmp(h->source, ev->ev_source) != 0)
+      continue;
+    if (h->handler(h->widget, ev))
       changed = 1;
   }
-  ctui_logf(E_INF, "[CTUI:APP] - event dispatched @ tick %d (changed=%d)\n",
+  ctui_logf(E_INF, "[CTUI:EVENT] - event dispatched @ tick %d (changed=%d)\n",
             ctui_tick_advance(), changed);
   return changed;
+}
+
+void ctui_app_resize(CTUI_APP *app, CTUI_SCREEN *screen, int rows, int cols) {
+  ctui_logf(E_INF, "[CTUI:APP] - resize @ tick %d (%dx%d -> %dx%d)\n",
+            ctui_tick_advance(), app->comp->cols, app->comp->rows, cols,
+            rows);
+
+  ctui_compositor_resize(app->comp, rows, cols);
+  ctui_screen_resize(screen, rows, cols);
+
+  /* rebind every widget (and re-run each one's optional layout() first, so
+   * dynamic geometry reflows against the new size) before anything else
+   * touches app->comp -- widgets with stale buf pointers from the freed
+   * compositor would otherwise write into freed memory */
+  for (int i = 0; i < app->count; i++) {
+    ctui_widget_init(app->widgets[i], app->comp);
+  }
+
+  CTUI_RESIZE_EVENT_DATA resize_data = {.rows = rows, .cols = cols};
+  CTUI_EVENT ev = {.type = CTUI_RESIZE_EVENT,
+                   .scope = CTUI_EVENT_SCOPE_GLOBAL,
+                   .ev_source = "terminal",
+                   .event_data = &resize_data};
+  ctui_handle_event(&ev);
 }
 
 void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen) {
@@ -459,21 +950,29 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen) {
   ctui_app_render(app, screen);
   ctui_screen_flush(screen);
 
-  CTUI_KEYPRESS_EVENT_DATA kp_data;
   CTUI_EVENT ev;
-  ev.type = CTUI_KEYPRESS_EVENT;
   ev.scope = CTUI_EVENT_SCOPE_GLOBAL;
-  ev.event_data = &kp_data;
 
   while (ctui_input_loop(&ev)) {
-    if (kp_data.type == CTUI_KEY_ESC) {
-      ctui_logf(E_INF,
-                "[CTUI:APP] - ESC received @ tick %d, breaking run loop\n",
-                ctui_tick_advance());
-      break;
+    if (ev.type == CTUI_RESIZE_EVENT) {
+      CTUI_RESIZE_EVENT_DATA *resize_data = ev.event_data;
+      ctui_app_resize(app, screen, resize_data->rows, resize_data->cols);
+      ctui_app_render(app, screen);
+      ctui_screen_flush(screen);
+      continue;
     }
 
-    if (ctui_process_event(&ev)) {
+    if (ev.type == CTUI_KEYPRESS_EVENT) {
+      CTUI_KEYPRESS_EVENT_DATA *kp_data = ev.event_data;
+      if (kp_data->type == CTUI_KEY_ESC) {
+        ctui_logf(E_INF,
+                  "[CTUI:APP] - ESC received @ tick %d, breaking run loop\n",
+                  ctui_tick_advance());
+        break;
+      }
+    }
+
+    if (ctui_handle_event(&ev)) {
       ctui_app_render(app, screen);
       ctui_screen_flush(screen);
     }
