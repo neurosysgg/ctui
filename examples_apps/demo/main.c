@@ -219,7 +219,7 @@ int main(void) {
             "[DEMO:APP] - widgets wired (header, main, footer) @ tick %d, "
             "entering event loop\n",
             ctui_tick_advance());
-  ctui_app_run(&app, screen);
+  ctui_app_run(&app, screen, 0);
   ctui_logf(E_INF, "[DEMO:APP] - event loop exited @ tick %d\n",
             ctui_tick_advance());
 

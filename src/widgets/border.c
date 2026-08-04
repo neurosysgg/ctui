@@ -2,6 +2,9 @@
 
 CTUI_BORDER ctui_border_make(unsigned char block_color) {
   CTUI_CELL block = {.ch = ' ', .fg = CTUI_COLOR_DEFAULT, .bg = block_color};
+  ctui_logf(E_INF,
+            "[CTUI:BORDER] - creating border @ tick %d (block_color=%d)\n",
+            ctui_tick_advance(), block_color);
   return (CTUI_BORDER){.edge = block, .corner = block};
 }
 

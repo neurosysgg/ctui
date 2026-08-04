@@ -61,6 +61,10 @@ typedef enum {
   CTUI_FOCUS_EVENT,
   CTUI_WIDGET_REDRAW,
   CTUI_RESIZE_EVENT,
+  CTUI_TICK_EVENT, /* periodic timer tick; emitted by ctui_app_run() (via
+                    * ctui_input_loop()) when no input arrives within its
+                    * tick_ms interval. No payload -- event_data is NULL.
+                    * ev_source is "timer". See ctui_app_run(). */
   CTUI_VALUE_CHANGED_EVENT, /* a widget's value changed; see
                             * CTUI_VALUE_CHANGED_EVENT_DATA. Any widget can
                             * emit one by calling ctui_handle_event() from
@@ -333,8 +337,15 @@ void ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
                    int cols);
 void ctui_app_free(CTUI_APP *app); /* frees app->comp and app->handlers */
 void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen);
-int ctui_input_loop(CTUI_EVENT *ev); /* blocking; returns 0 on EOF/error */
-void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen); /* blocks until ESC */
+/* blocking; tick_ms <= 0 blocks indefinitely (as before), > 0 emits a
+ * CTUI_TICK_EVENT (source "timer") if no input arrives within tick_ms.
+ * Returns 0 on EOF/error. */
+int ctui_input_loop(CTUI_EVENT *ev, int tick_ms);
+/* blocks until ESC; tick_ms is passed straight through to
+ * ctui_input_loop() -- <= 0 means "block on input only" (unchanged
+ * behavior), > 0 also wakes every tick_ms with no input to dispatch a
+ * CTUI_TICK_EVENT through the registry, same as any other event */
+void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms);
 
 /* event handler registry -- addEventListener()-style: widgets no longer
  * implement a catch-all on_event() that checks whether it cares about each

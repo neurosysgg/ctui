@@ -76,6 +76,31 @@ terminal resize.
   otherwise leave stale content outside the new bounds), re-runs
   `ctui_widget_init()` (and so every widget's `layout()`) for every
   widget, then dispatches the resize event through the registry.
+- **Ticking**: `ctui_input_loop()` takes an optional `tick_ms`; when
+  `> 0` it waits on stdin via `select()` with that timeout (instead of a
+  plain blocking `read()`) and, on timeout with nothing pending, emits a
+  `CTUI_TICK_EVENT` (source `"timer"`, no payload) rather than reading.
+  `EINTR` from a real `SIGWINCH` during the wait still falls through to
+  the resize check first, so a resize during a tick wait is never
+  mistaken for a tick. `ctui_app_run()` threads `tick_ms` straight
+  through; `<= 0` is the original blocking-on-input-only behavior, so
+  every existing caller is unaffected by just passing `0`. No special
+  casing needed in the run loop itself — `CTUI_TICK_EVENT` isn't
+  `RESIZE` or `ESC`, so it already falls through to the generic
+  `ctui_handle_event()` → re-render-if-changed path. Added to drive the
+  `examples_apps/clock` app.
+- **`examples_apps/`**: real, runnable ctui apps now live here, one
+  subfolder per app (`main.c` + an optional local `widgets/`), moved out
+  of `src/` so `src/` stays core-engine-and-stdlib-only. `demo` moved in
+  unchanged (`src/demo.c` → `examples_apps/demo/main.c`); `clock` and
+  `file_browser` are new. Each app's local `widgets/` is a staging area:
+  an app-local widget is built exactly like a real one (same naming,
+  same `[CTUI:...]` log tags) but only promotes to `src/widgets/` once a
+  *second* app needs it — nothing promoted speculatively. The `-Isrc`
+  build (replacing the previously-unused `-Iinclude`) makes
+  `#include "widgets/foo.h"` resolve to an app's own local copy first,
+  falling back to the real stdlib only if there isn't one, so a
+  promotion is just `git mv` + deleting the local copy.
 - **Terminal I/O**: raw ANSI/terminfo escapes, termios raw mode,
   alternate screen buffer, `SIGWINCH` handling. Kitty protocol / better
   input handling is a possible future upgrade, not a near-term
@@ -121,6 +146,16 @@ terminal resize.
       `ctui_app_render()` never resetting the compositor between
       frames; fixed with `ctui_compositor_clear()`, called once per
       render pass before any widget draws.
+- [x] `examples_apps/` added, `demo.c` moved in as `examples_apps/demo/
+      main.c`. Two new apps: `clock` (a ticking clock widget, currently
+      staged in `examples_apps/clock/widgets/`, not yet promoted to
+      `src/widgets/`) and `file_browser` (a scrollable, navigable
+      directory listing via a new `CTUI_LIST` widget, same staging
+      status, currently in `examples_apps/file_browser/widgets/`) — the
+      long-standing "simple clock widget" Next-up item below, done.
+- [x] `CTUI_TICK_EVENT` / `ctui_app_run(..., tick_ms)`: apps can now
+      redraw on a timer, not just on keypress/resize (needed by `clock`).
+      See Architecture above.
 
 ## Known issues / deliberately deferred
 
@@ -160,8 +195,10 @@ terminal resize.
 
 ## Next up
 
-- A simple clock widget (the `border`/companion piece from the original
-  "first widgets" plan — border shipped, clock didn't).
+- Promote `CTUI_CLOCK` and `CTUI_LIST` from their `examples_apps/*/
+  widgets/` staging spots to `src/widgets/`, once a second app actually
+  needs either of them — see the `examples_apps/` entry above for the
+  promotion criterion.
 - Weighted/unequal `CTUI_SPLIT` panes, once the even-split limitation
   above actually bites on a real layout.
 - Per-instance event identity, if/when a second instance of the same

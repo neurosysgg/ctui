@@ -16,12 +16,14 @@ across three areas that reflow correctly on terminal resize. See
 ## Build
 
 ```sh
-make
+make          # builds ctui-demo
+make all      # builds every example app under examples_apps/
 ./ctui-demo
 ```
 
 Requires a C11 compiler and a real terminal (raw mode + alternate screen
-buffer). `make clean` removes the built binary.
+buffer). `make examples` builds just the non-demo apps; `make clean`
+removes all built binaries.
 
 ## Project layout
 
@@ -31,8 +33,14 @@ buffer). `make clean` removes the built binary.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
   `menu`, `status`, `debug_info`), each a small `.c`/`.h` pair built
   entirely on the public `ctui.h` API.
-- `src/demo.c` — example app: wires widgets into a 3-area (header/main/
-  footer) layout and demonstrates dynamic resizing and event wiring.
+- `examples_apps/` — real, runnable ctui apps, one subfolder each
+  (`examples_apps/<name>/main.c` + an optional local `widgets/`):
+  `demo` (the original 3-area header/main/footer layout demonstrating
+  resizing and event wiring), `clock` (a ticking clock, driving the
+  `CTUI_TICK_EVENT` timer mechanism), and `file_browser` (a scrollable,
+  navigable directory listing). An app's local `widgets/` is where new
+  stdlib candidates get proven out before graduating to `src/widgets/`
+  once a second app needs them.
 
 ## Architecture at a glance
 
@@ -63,6 +71,11 @@ buffer). `make clean` removes the built binary.
   `ctui_app_resize()` reallocates the compositor/screen, re-runs every
   widget's `layout()`, and dispatches the event to any registered
   listeners.
+- **Ticking**: `ctui_app_run(app, screen, tick_ms)` optionally wakes on
+  its own — `tick_ms > 0` dispatches a `CTUI_TICK_EVENT` (source
+  `"timer"`) whenever no input arrives within that interval, so a widget
+  like `clock` can redraw without waiting on a keypress. `tick_ms <= 0`
+  is the original blocking-on-input-only behavior.
 - **Terminal I/O**: raw ANSI/terminfo escapes via termios, no external
   dependencies.
 

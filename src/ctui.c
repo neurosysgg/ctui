@@ -116,6 +116,8 @@ const char *ctui_eventtype_name(CTUI_EVENTTYPE type) {
     return "WIDGET_REDRAW";
   case CTUI_RESIZE_EVENT:
     return "RESIZE";
+  case CTUI_TICK_EVENT:
+    return "TICK";
   case CTUI_VALUE_CHANGED_EVENT:
     return "VALUE_CHANGED";
   case CTUI_DUMMY_EVENT:
@@ -422,7 +424,7 @@ static int read_byte_timeout(char *c, int timeout_ms) {
   return ok;
 }
 
-int ctui_input_loop(CTUI_EVENT *ev) {
+int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
   /* owns its own event_data storage rather than relying on the caller to
    * pre-populate ev->event_data, since which struct shape is needed depends
    * on which event type this call ends up producing */
@@ -442,8 +444,38 @@ int ctui_input_loop(CTUI_EVENT *ev) {
       return 1;
     }
 
-    ctui_logf(E_DBG, "[CTUI:INPUT] - waiting for input @ tick %d\n",
-              ctui_tick_advance());
+    if (tick_ms > 0) {
+      fd_set fds;
+      FD_ZERO(&fds);
+      FD_SET(STDIN_FILENO, &fds);
+      struct timeval tv = {.tv_sec = tick_ms / 1000,
+                           .tv_usec = (tick_ms % 1000) * 1000};
+      ctui_logf(E_DBG, "[CTUI:INPUT] - waiting for input @ tick %d (tick_ms=%d)\n",
+                ctui_tick_advance(), tick_ms);
+      int r = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+      if (r == 0) {
+        ev->type = CTUI_TICK_EVENT;
+        ev->ev_source = "timer";
+        ev->event_data = NULL;
+        ctui_logf(E_DBG, "[CTUI:INPUT] - tick @ tick %d\n",
+                  ctui_tick_advance());
+        return 1;
+      }
+      if (r < 0) {
+        if (errno == EINTR) {
+          /* almost certainly SIGWINCH; loop back to the pending-resize
+           * check */
+          continue;
+        }
+        ctui_logf(E_WRN, "[CTUI:INPUT] - select failed @ tick %d\n",
+                  ctui_tick_advance());
+        return 0;
+      }
+      /* fds ready; fall through to the read() below */
+    } else {
+      ctui_logf(E_DBG, "[CTUI:INPUT] - waiting for input @ tick %d\n",
+                ctui_tick_advance());
+    }
 
     if (read(STDIN_FILENO, &c, 1) == 1) {
       break;
@@ -944,16 +976,16 @@ void ctui_app_resize(CTUI_APP *app, CTUI_SCREEN *screen, int rows, int cols) {
   ctui_handle_event(&ev);
 }
 
-void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen) {
-  ctui_logf(E_INF, "[CTUI:APP] - run loop starting @ tick %d\n",
-            ctui_tick_advance());
+void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
+  ctui_logf(E_INF, "[CTUI:APP] - run loop starting @ tick %d (tick_ms=%d)\n",
+            ctui_tick_advance(), tick_ms);
   ctui_app_render(app, screen);
   ctui_screen_flush(screen);
 
   CTUI_EVENT ev;
   ev.scope = CTUI_EVENT_SCOPE_GLOBAL;
 
-  while (ctui_input_loop(&ev)) {
+  while (ctui_input_loop(&ev, tick_ms)) {
     if (ev.type == CTUI_RESIZE_EVENT) {
       CTUI_RESIZE_EVENT_DATA *resize_data = ev.event_data;
       ctui_app_resize(app, screen, resize_data->rows, resize_data->cols);
