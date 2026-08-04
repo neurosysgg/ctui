@@ -2,6 +2,7 @@
 #include "logger.h"
 #include "widgets/border.h"
 #include "widgets/debug_info.h"
+#include "widgets/dump_palette.h"
 #include "widgets/label.h"
 #include "widgets/menu.h"
 #include "widgets/status.h"
@@ -71,17 +72,40 @@ static void main_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   ctui_split_layout(self, comp);
 }
 
+/* the split's second pane is a single shared slot that either the "debug
+ * info" or "dump palette" menu item can occupy -- these two file-scope
+ * pointers are how main_split_handle_panel_toggle() (below) knows which
+ * actual widget to swap into split->children[1], since it only gets the
+ * split widget itself as `self`, never the menu's or panel widgets'
+ * addresses. Assigned once in main(), right after each widget is built. */
+static CTUI_WIDGET *debug_info_widget;
+static CTUI_WIDGET *dump_palette_widget;
+
 /* listens for ("menu", CTUI_VALUE_CHANGED_EVENT) -- same event status
  * listens for, just a second, independent handler on the same key,
  * demonstrating that the registry supports more than one listener per
- * (source, type). Only reacts to the "debug info" item; tracks its
- * enabled/disabled state, not just the fact that it changed, so the panel
- * opens when it's toggled on and closes again when toggled off. */
-static int main_split_handle_debug_toggle(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+ * (source, type). Reacts to either the "debug info" or "dump palette"
+ * item, tracking each one's enabled/disabled state (not just the fact that
+ * it changed) so its panel opens when toggled on and closes again when
+ * toggled off. Both items share the same second-pane slot -- toggling one
+ * on swaps it into that slot; toggling one off only closes the pane if
+ * it's the one currently showing there. */
+static int main_split_handle_panel_toggle(CTUI_WIDGET *self, CTUI_EVENT *ev) {
   CTUI_SPLIT *split = self->widget_data;
   CTUI_VALUE_CHANGED_EVENT_DATA *changed = ev->event_data;
 
-  if (strcmp(changed->value, "debug info") != 0) {
+  CTUI_WIDGET *pane;
+  if (strcmp(changed->value, "debug info") == 0) {
+    pane = debug_info_widget;
+  } else if (strcmp(changed->value, "dump palette") == 0) {
+    pane = dump_palette_widget;
+  } else {
+    return 0;
+  }
+
+  if (changed->enabled) {
+    split->children[1] = pane;
+  } else if (split->children[1] != pane) {
     return 0;
   }
 
@@ -96,9 +120,9 @@ static int main_split_handle_debug_toggle(CTUI_WIDGET *self, CTUI_EVENT *ev) {
    * render */
   main_split_layout(self, split->comp);
   ctui_logf(E_INF,
-            "[DEMO:APP] - \"debug info\" %s @ tick %d, %s main area\n",
-            changed->enabled ? "enabled" : "disabled", ctui_tick_advance(),
-            changed->enabled ? "splitting" : "closing");
+            "[DEMO:APP] - \"%s\" %s @ tick %d, %s main area\n",
+            changed->value, changed->enabled ? "enabled" : "disabled",
+            ctui_tick_advance(), changed->enabled ? "splitting" : "closing");
   return 1;
 }
 
@@ -140,7 +164,7 @@ int main(void) {
 
   static CTUI_MENU_ITEM items[] = {
       {.label = "debug info", .enabled = 0},
-      {.label = "vm stats", .enabled = 0},
+      {.label = "dump palette", .enabled = 0},
       {.label = "whatever", .enabled = 0},
       {.label = "1337", .enabled = 0},
       {.label = "quit", .enabled = 0},
@@ -173,13 +197,22 @@ int main(void) {
   CTUI_WIDGET main_border = ctui_widget_make(
       0, 0, 0, 0, &border_style, ctui_border_render, main_border_layout);
 
-  /* main area's content: a menu on top, a debug-info panel revealed below
-   * it once "debug info" is picked (see main_split_handle_debug_toggle()).
-   * Neither child widget's own x/y/w/h matter here -- ctui_split_layout()
-   * (called from main_split_layout()) overwrites them every time. */
+  /* main area's content: a menu on top, and a second pane revealed below it
+   * once either "debug info" or "dump palette" is picked (see
+   * main_split_handle_panel_toggle()). Neither child widget's own x/y/w/h
+   * matter here -- ctui_split_layout() (called from main_split_layout())
+   * overwrites them every time. debug_info/dump_palette are built here but
+   * assigned to their file-scope pointers (declared above
+   * main_split_handle_panel_toggle()) so that handler can identify them;
+   * they stay alive because main()'s stack frame lives for the whole
+   * program, same as every other widget below. */
   CTUI_WIDGET menu = ctui_widget_make(0, 0, 0, 0, &data, ctui_menu_render, NULL);
   CTUI_WIDGET debug_info =
       ctui_widget_make(0, 0, 0, 0, NULL, ctui_debug_info_render, NULL);
+  CTUI_WIDGET dump_palette =
+      ctui_widget_make(0, 0, 0, 0, NULL, ctui_dump_palette_render, NULL);
+  debug_info_widget = &debug_info;
+  dump_palette_widget = &dump_palette;
   CTUI_WIDGET *main_split_children[] = {&menu, &debug_info};
   CTUI_SPLIT main_split = {
       .mode = CTUI_SPLIT_V, .children = main_split_children, .count = 1};
@@ -213,7 +246,7 @@ int main(void) {
   ctui_event_register("menu", CTUI_VALUE_CHANGED_EVENT, &status,
                       ctui_status_handle_value_changed);
   ctui_event_register("menu", CTUI_VALUE_CHANGED_EVENT, &main_split_widget,
-                      main_split_handle_debug_toggle);
+                      main_split_handle_panel_toggle);
 
   ctui_logf(E_INF,
             "[DEMO:APP] - widgets wired (header, main, footer) @ tick %d, "
