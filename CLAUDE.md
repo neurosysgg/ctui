@@ -146,54 +146,102 @@ itself, since every widget pays whatever it costs, forever.
 
 ## Testing approach
 
-This is a raw-mode terminal app — you can't just run it and read
-stdout normally. What's worked this session:
+Two harnesses, for two different layers — reach for the C one first;
+it's faster and has no process/pty overhead. Drop to the pty one only
+when the thing you're checking actually lives in the terminal I/O
+layer.
 
-- **Quick smoke test**: `script -qc "timeout 1 ./ctui-demo" /dev/null | cat -v`
-  captures one rendered frame's raw ANSI as text you can read directly.
-- **Interaction test**: pipe delayed keystrokes in —
-  `(sleep 0.3; printf '\x1b[B'; sleep 0.1; printf '\r') | script -qc "timeout 1 ./ctui-demo" /dev/null`.
-  The `sleep 0.3` before the first keystroke matters: `ctui_init()`
-  calls `tcsetattr(..., TCSAFLUSH, ...)`, which discards any input
-  already sitting in the terminal buffer, so a keystroke sent too
-  early gets silently eaten.
-- **Resize test**: needs a real controlling terminal, which `script`
-  doesn't give you enough control over. Use Python's `pty.fork()`
-  (it sets up the child as a session leader with the pty as its
-  controlling terminal for you) plus `fcntl.ioctl(master_fd,
-  termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))` — the
-  kernel delivers real `SIGWINCH` to the child when the size actually
-  changes. Use non-blocking reads with `select()`-based "drain until
-  quiet" polling, not blocking reads assuming EOF — the demo never
-  sends EOF, it just idles waiting for input, so a blocking read loop
-  hangs forever.
-- **Verifying rendered output**: for anything beyond "does this
-  substring appear," reconstruct the actual screen grid from the raw
-  ANSI stream (track cursor-position escapes, place characters,
-  handle `\x1b[2J` as a full clear) rather than eyeballing escape
-  codes — stale-content and overlap bugs are easy to miss by
-  inspection but obvious once rendered back to a grid.
+### `tools/ctui_test.h` — widget/event/layout logic (default choice)
+
+A header-only C driver, built purely on the public `ctui.h` API (see
+`tests/menu_status_test.c` for a full example). A test file is
+structured like a real app's `main()` minus `ctui_app_run()`: call
+`ctui_log_init(verbosity)` instead of `ctui_init()` (no tty needed —
+that's the whole point), build widgets and `ctui_event_register()`
+wiring exactly like the app does, then drive it:
+
+```c
+ctui_app_render(&app, screen);
+CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 4, "> alpha"), "...");
+ctui_test_key(&app, screen, CTUI_KEY_DOWN, 0);
+CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 5, "> beta"), "...");
+ctui_test_resize(&app, screen, 40, 100);
+return ctui_test_summary();
+```
+
+`ctui_test_key()`/`ctui_test_resize()` inject through the exact same
+`ctui_handle_event()`/`ctui_app_resize()` paths a real keypress or
+`SIGWINCH` would hit, then re-render — so `screen->cells` is the real
+output, not a simulation of it. `ctui_test_cell()`/
+`ctui_test_row_contains()` read it back directly for assertions.
+`CTUI_TEST_ASSERT(cond, fmt, ...)` prints ok/FAIL per check;
+`ctui_test_summary()` prints the tally and returns a process exit
+code. New tests go in `tests/*.c`; `make test` builds and runs every
+one, failing the build if any assertion fails.
+
+This can't reach real-terminal concerns — it never calls
+`ctui_input_loop()`, so it doesn't exercise raw-mode byte/ESC-sequence
+decoding, actual `SIGWINCH` delivery, or the literal ANSI bytes
+`ctui_screen_flush()` emits. For those, see below.
+
+### `tools/pty_harness.py` — real terminal I/O layer
+
+A pty-based driver for what only exists once a real terminal is
+involved: `ctui_input_loop()`'s byte-level input parsing, genuine
+`SIGWINCH` signal delivery, and the actual rendered ANSI stream. Spawns
+the binary under a real pty, injects keystrokes/resizes on a timed
+script, and prints back the rendered screen as a reconstructed text
+grid instead of raw ANSI:
+
+- **Quick smoke test**: `tools/pty_harness.py ./ctui-demo` — default
+  steps (`wait:1,dump`) capture one rendered frame as a grid.
+- **Interaction test**: `tools/pty_harness.py ./ctui-demo --steps
+  "wait:0.3,key:DOWN,wait:0.1,key:ENTER,wait:0.2,dump"`. The initial
+  `wait:0.3` before the first keystroke matters: `ctui_init()` calls
+  `tcsetattr(..., TCSAFLUSH, ...)`, which discards any input already
+  sitting in the terminal buffer, so a keystroke sent too early gets
+  silently eaten. `key:` accepts `UP`/`DOWN`/`LEFT`/`RIGHT`/`ENTER`/
+  `ESC`/`TAB` or any literal character.
+- **Resize test**: `tools/pty_harness.py ./ctui-demo --rows 24 --cols 80
+  --steps "wait:0.3,resize:40x100,wait:0.3,dump"` — a real
+  `TIOCSWINSZ` ioctl on the pty, so the kernel delivers a genuine
+  `SIGWINCH` to the child, same as an actual terminal resize.
+- **Verifying rendered output**: always `dump` and read the
+  reconstructed grid rather than eyeballing raw escape codes —
+  stale-content and overlap bugs are easy to miss by inspection but
+  obvious once rendered back to a grid. Use the `raw` step instead of
+  `dump` only when you need the literal ANSI bytes (e.g. checking
+  which color escapes were actually emitted).
+- The same harness works for every binary under `examples_apps/`
+  (`./ctui-clock`, `./ctui-file_browser`, ...) — just swap the binary
+  path. Run `tools/pty_harness.py --help` for the full step vocabulary.
+
+### Both harnesses
+
 - **Cross-check against the log**: `ctui.log` (gitignored) records
-  every `ctui_logf()` call. Grepping it for specific tags
-  (`[CTUI:EVENT]`, `[CTUI:SPLIT]`, `putc out of widget bounds`, ...)
-  is often faster and more precise than parsing terminal output, and
-  catches internal state that never reaches the screen at all.
-- **Always verify, don't just reason.** Several real bugs this session
-  (a `CTUI_GROUP` misuse, a split height overlapping a border, the
+  every `ctui_logf()` call. `pty_harness.py --grep '\[CTUI:EVENT\]'`
+  (or `[CTUI:SPLIT]`, `putc out of widget bounds`, ...) prints matching
+  log lines after the run; for `ctui_test.h` tests just `grep` it
+  directly. Often faster and more precise than parsing terminal
+  output, and catches internal state that never reaches the screen at
+  all.
+- **Always verify, don't just reason.** Several real bugs found this
+  way (a `CTUI_GROUP` misuse, a split height overlapping a border, the
   stale-compositor-content bug) were only caught by actually running
-  the demo, not by re-reading the code. "Should work" isn't a
-  substitute for a pty run.
+  the app, not by re-reading the code. "Should work" isn't a
+  substitute for actually running one of these.
 - Clean up scratch test scripts/output/logs after verifying — nothing
   from a testing pass should linger in the repo or scratchpad.
-- The same patterns apply verbatim to every binary under `examples_apps/`
-  (`./ctui-clock`, `./ctui-file_browser`, ...) — just swap the binary
-  name.
+  `tools/pty_harness.py`, `tools/ctui_test.h`, and everything under
+  `tests/` are the testing infrastructure that *does* belong in the
+  repo; don't delete them after a session.
 
 ## Workflow
 
 - Build with `make` (`-Wall -Wextra -std=c11`) for the demo, `make all`
-  for every binary under `examples_apps/`; a change isn't done until it
-  compiles warning-free *and* has been run/verified per Testing above.
+  for every binary under `examples_apps/`, `make test` for everything
+  under `tests/`; a change isn't done until it compiles warning-free
+  *and* has been run/verified per Testing above.
 - Update `PROGRESS.md`/`README.md` when asked to document, or when a
   change is significant enough that a future session would otherwise
   have to rediscover it (new core mechanism, a real bug fix, a

@@ -105,6 +105,20 @@ terminal resize.
   alternate screen buffer, `SIGWINCH` handling. Kitty protocol / better
   input handling is a possible future upgrade, not a near-term
   priority.
+- **Testing**: `ctui_init()` was split so its logger setup is now its
+  own public function, `ctui_log_init()` — `ctui_init()` still calls it
+  as the first step, but headless callers (namely `tools/ctui_test.h`)
+  can now get a working `ctui_logf()` without a real tty, since the
+  rest of `ctui_init()` (`tcgetattr`/`tcsetattr` raw mode) would
+  otherwise fail outside one. `tools/ctui_test.h` and `tests/*.c` (run
+  via `make test`) exercise widget/event/layout logic directly —
+  inject a key or resize through the real `ctui_handle_event()`/
+  `ctui_app_resize()` paths, assert against `screen->cells` — with no
+  pty or subprocess involved. `tools/pty_harness.py` still covers what
+  that can't reach: raw-mode byte/ESC-sequence decoding in
+  `ctui_input_loop()`, real `SIGWINCH` delivery, and the literal ANSI
+  bytes `ctui_screen_flush()` emits. See `CLAUDE.md`'s Testing approach
+  for when to reach for which.
 
 ## Fixed / addressed
 
@@ -156,6 +170,47 @@ terminal resize.
 - [x] `CTUI_TICK_EVENT` / `ctui_app_run(..., tick_ms)`: apps can now
       redraw on a timer, not just on keypress/resize (needed by `clock`).
       See Architecture above.
+- [x] `calculator` example app added (`CTUI_DISPLAY` readout + a keyed
+      grid of buttons), with its 4-function engine kept entirely free of
+      `ctui.h` — `calc.h`/`calc.c` know nothing about widgets or events;
+      `main.c` is a thin translation layer mapping grid presses to
+      `CALC_TOKEN`s and copying `CALC_RESULT.text` back into the display.
+      The grid itself started as an app-local `CTUI_KEYPAD`, then was
+      generalized into `CTUI_GRID` (rows x cols of navigable, keyable
+      cells; arrows + Enter, or type a cell's shortcut char directly) and
+      promoted straight to `src/widgets/` on request — the only widget so
+      far promoted before a second app needed it, rather than through the
+      usual staging-in-`examples_apps/*/widgets/`-first path.
+- [x] Demo's `"vm stats"` menu placeholder renamed to `"dump palette"` and
+      given real behavior: a new app-local widget,
+      `examples_apps/demo/widgets/dump_palette.c` (staged, not yet
+      promoted — only demo needs it so far), renders every basic ANSI
+      color as a filled swatch in the fewest rows (>=2) that evenly divide
+      the color count into columns (3x3 for the current 9 colors), each
+      swatch's name centered on top in default fg/bg so it stays legible
+      regardless of the swatch's own color. Reveals below the menu the
+      same way `"debug info"` already did, via a generalized
+      `main_split_handle_panel_toggle()` (replacing the old
+      `main_split_handle_debug_toggle()`) that lets `"debug info"` and
+      `"dump palette"` share the split's one optional second-pane slot —
+      toggling one on swaps it into `split->children[1]`; toggling one off
+      only closes the pane if it's the one currently occupying that slot.
+      Two file-scope pointers (`debug_info_widget`/`dump_palette_widget`)
+      let the handler identify which built widget a toggled label
+      corresponds to, since it only receives the split widget itself as
+      `self` — same single-module-state pattern `ctui.c` already uses for
+      `g_app`.
+- [x] Headless C testing added: `ctui_init()` split into `ctui_log_init()`
+      (logger only) + the existing tty setup, and `ctui_screen_resize()`'s
+      `\x1b[2J` terminal-clear guarded behind `isatty(STDOUT_FILENO)` — it
+      was unconditional before, which spammed a raw escape sequence into
+      stdout whenever `ctui_app_resize()` ran without a real terminal
+      behind it (harmless-looking but wrong regardless of testing: any
+      non-tty stdout, not just a test run, would have gotten corrupted
+      output). `tools/ctui_test.h` + `tests/menu_status_test.c` (real
+      `CTUI_MENU`/`CTUI_STATUS` wired through actual event registration,
+      7 assertions covering selection, event propagation, and resize) are
+      the first use of both. `make test` target added.
 
 ## Known issues / deliberately deferred
 

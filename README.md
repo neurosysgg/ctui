@@ -18,6 +18,7 @@ across three areas that reflow correctly on terminal resize. See
 ```sh
 make          # builds ctui-demo
 make all      # builds every example app under examples_apps/
+make test     # builds and runs everything under tests/
 ./ctui-demo
 ```
 
@@ -31,16 +32,27 @@ removes all built binaries.
   compositor, widget lifecycle, groups, resize handling, event registry,
   string-layout utilities. Has no knowledge of any specific widget.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
-  `menu`, `status`, `debug_info`), each a small `.c`/`.h` pair built
-  entirely on the public `ctui.h` API.
+  `menu`, `status`, `debug_info`, `grid`), each a small `.c`/`.h` pair
+  built entirely on the public `ctui.h` API.
 - `examples_apps/` — real, runnable ctui apps, one subfolder each
   (`examples_apps/<name>/main.c` + an optional local `widgets/`):
   `demo` (the original 3-area header/main/footer layout demonstrating
   resizing and event wiring), `clock` (a ticking clock, driving the
-  `CTUI_TICK_EVENT` timer mechanism), and `file_browser` (a scrollable,
-  navigable directory listing). An app's local `widgets/` is where new
-  stdlib candidates get proven out before graduating to `src/widgets/`
-  once a second app needs them.
+  `CTUI_TICK_EVENT` timer mechanism), `file_browser` (a scrollable,
+  navigable directory listing), and `calculator` (a 4-function calculator —
+  a right-aligned `CTUI_DISPLAY` readout above a navigable `CTUI_GRID` of
+  buttons; the arithmetic itself is a small, ctui-independent state machine
+  in its own `calc.h`/`calc.c`, with `main.c` translating between `CTUI_GRID`
+  presses and its tokens). An app's local `widgets/` is where new stdlib
+  candidates get proven out before graduating to `src/widgets/` once a
+  second app needs them.
+- `tests/` — headless C tests, run via `make test`. Each one wires up
+  real widgets/events like an app's `main()` would, injects input via
+  `tools/ctui_test.h`, and asserts against the rendered screen buffer.
+- `tools/` — testing infrastructure: `ctui_test.h` (the headless C test
+  driver `tests/` builds on) and `pty_harness.py` (drives a binary
+  under a real pty for terminal-I/O-layer testing — raw input decoding,
+  actual `SIGWINCH`, real ANSI output).
 
 ## Architecture at a glance
 

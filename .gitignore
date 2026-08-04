@@ -1,4 +1,5 @@
 ctui-*
+test-*
 PROGRESS.md
 *.o
 ctui.log

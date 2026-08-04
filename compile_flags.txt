@@ -2,3 +2,4 @@
 -Wextra
 -std=c11
 -Isrc
+-Itools

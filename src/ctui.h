@@ -287,6 +287,12 @@ int ctui_init(int verbosity);
 void ctui_shutdown(void);
 void ctui_get_termsize(int *rows, int *cols);
 
+/* the logging half of ctui_init(), split out so headless callers (the test
+ * harness in tools/ctui_test.h, which injects events directly instead of
+ * reading a real terminal) can get a working ctui_logf() without a tty --
+ * ctui_init() calls this itself, so normal apps don't need it. */
+void ctui_log_init(int verbosity);
+
 /* logging; negative return means the write failed, non-negative is the
  * number of bytes written (0 if filtered out by verbosity). level is
  * exactly one of E_DBG/E_WRN/E_INF/E_ERR (see logger.h) */

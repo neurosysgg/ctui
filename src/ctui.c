@@ -126,12 +126,16 @@ const char *ctui_eventtype_name(CTUI_EVENTTYPE type) {
   return "UNKNOWN";
 }
 
-int ctui_init(int verbosity) {
+void ctui_log_init(int verbosity) {
   _ctui_ticks = 0;
   logger = init_logger("ctui.log", verbosity);
   ctui_tick_advance();
   ctui_logf(E_INF, "[CTUI:LOG] - logger initialised @ tick %d.\n",
             _ctui_ticks);
+}
+
+int ctui_init(int verbosity) {
+  ctui_log_init(verbosity);
 
   ctui_tick_advance();
   if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) {
@@ -239,9 +243,14 @@ void ctui_screen_resize(CTUI_SCREEN *s, int rows, int cols) {
   screen_alloc(s, rows, cols);
 
   /* clear the real terminal too -- a shrink could otherwise leave stale
-   * content from the old (larger) frame outside the new bounds */
-  printf("\x1b[2J");
-  fflush(stdout);
+   * content from the old (larger) frame outside the new bounds. Guarded by
+   * isatty() so a headless caller (tools/ctui_test.h, which drives resize
+   * through ctui_app_resize() without a real terminal on stdout) doesn't
+   * spew a raw escape sequence into a pipe/log. */
+  if (isatty(STDOUT_FILENO)) {
+    printf("\x1b[2J");
+    fflush(stdout);
+  }
 }
 
 void ctui_screen_clear(CTUI_SCREEN *s) {
