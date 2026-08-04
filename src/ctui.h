@@ -1,6 +1,10 @@
 #ifndef CTUI_H
 #define CTUI_H
 
+#include "logger.h" /* for E_DBG/E_WRN/E_INF/E_ERR/E_ALL verbosity flags */
+
+#include <stddef.h>
+
 typedef struct {
   char ch;
   unsigned char fg;
@@ -55,11 +59,32 @@ struct CTUI_WIDGET {
   void *widget_data;
 
   /* callback to run when a widget is sent an event; return 0 to reject event or
-   * signal an error, and 1 to signal success */
+   * signal an error, and 1 to signal success. NULL is a valid no-op: callers
+   * are guarded (see ctui_process_event in ctui.c), so a widget that never
+   * handles events can pass NULL instead of a stub function. */
   int (*on_event)(CTUI_WIDGET *self, CTUI_EVENT *ev);
   // int (*init)(void);
+  /* render callback, called unconditionally per frame -- unlike on_event,
+   * this one must never be NULL. */
   void (*render)(CTUI_WIDGET *self, CTUI_SCREEN *screen);
 };
+
+/* Trips if a field is appended to CTUI_WIDGET without updating
+ * ctui_widget_make() (ctui.c) to initialize it; a designated initializer
+ * silently zero-fills an omitted field instead of erroring, so this struct
+ * should always be built via ctui_widget_make() rather than a literal. Does
+ * NOT catch a field inserted before `render` -- review ctui_widget_make()
+ * by hand if you do that. */
+_Static_assert(offsetof(CTUI_WIDGET, render) +
+                       sizeof(((CTUI_WIDGET *)0)->render) ==
+                   sizeof(CTUI_WIDGET),
+               "CTUI_WIDGET changed shape; update ctui_widget_make()");
+
+CTUI_WIDGET ctui_widget_make(int x, int y, int w, int h, void *widget_data,
+                             int (*on_event)(CTUI_WIDGET *self,
+                                             CTUI_EVENT *ev),
+                             void (*render)(CTUI_WIDGET *self,
+                                            CTUI_SCREEN *screen));
 
 typedef struct {
   CTUI_WIDGET **widgets;
@@ -79,10 +104,21 @@ enum {
   CTUI_COLOR_WHITE,
 };
 
-/* terminal lifecycle */
-int ctui_init(void);
+/* terminal lifecycle; verbosity is a bitmask of E_DBG/E_WRN/E_INF/E_ERR
+ * (see logger.h) controlling which ctui_log/ctui_logf calls actually get
+ * written */
+int ctui_init(int verbosity);
 void ctui_shutdown(void);
 void ctui_get_termsize(int *rows, int *cols);
+
+/* logging; negative return means the write failed, non-negative is the
+ * number of bytes written (0 if filtered out by verbosity). level is
+ * exactly one of E_DBG/E_WRN/E_INF/E_ERR (see logger.h) */
+int ctui_log(int level, const char *log_str);
+int ctui_logf(int level, const char *fmt, ...);
+int ctui_tick_advance(void);
+const char *ctui_keytype_name(CTUI_KEYTYPE type);
+const char *ctui_eventtype_name(CTUI_EVENTTYPE type);
 
 /* screen buffer */
 CTUI_SCREEN *ctui_screen_create(int rows, int cols);
@@ -101,5 +137,4 @@ void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen);
 int ctui_input_loop(CTUI_EVENT *ev); /* blocking; returns 0 on EOF/error */
 void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen); /* blocks until ESC */
 int ctui_process_event(CTUI_EVENT *ev);
-
 #endif
