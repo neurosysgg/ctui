@@ -141,3 +141,40 @@ void ctui_widget_puts_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
     ctui_widget_putc_256(widget, comp, row, col + i, str[i], fg256, bg256);
   }
 }
+
+void ctui_widget_putc_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, char ch, unsigned char fg_r,
+                          unsigned char fg_g, unsigned char fg_b,
+                          unsigned char bg_r, unsigned char bg_g,
+                          unsigned char bg_b) {
+  CTUI_CELL *cell = widget_cell_at(widget, comp, row, col);
+  if (cell == NULL) {
+    return;
+  }
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - putc_rgb @ tick %d (row=%d, col=%d, ch='%c')\n",
+            ctui_tick_advance(), row, col, ch);
+  cell->ch = ch;
+  cell->fg_r = fg_r;
+  cell->fg_g = fg_g;
+  cell->fg_b = fg_b;
+  cell->bg_r = bg_r;
+  cell->bg_g = bg_g;
+  cell->bg_b = bg_b;
+  cell->color_mode = CTUI_COLOR_MODE_RGB;
+}
+
+void ctui_widget_puts_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, const char *str, unsigned char fg_r,
+                          unsigned char fg_g, unsigned char fg_b,
+                          unsigned char bg_r, unsigned char bg_g,
+                          unsigned char bg_b) {
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - puts_rgb @ tick %d (row=%d, col=%d, len=%zu): "
+            "\"%s\"\n",
+            ctui_tick_advance(), row, col, strlen(str), str);
+  for (int i = 0; str[i] != '\0'; i++) {
+    ctui_widget_putc_rgb(widget, comp, row, col + i, str[i], fg_r, fg_g, fg_b,
+                         bg_r, bg_g, bg_b);
+  }
+}

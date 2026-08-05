@@ -90,4 +90,20 @@ void ctui_widget_puts_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           int col, const char *str, unsigned char fg256,
                           unsigned char bg256);
 
+/* same as ctui_widget_putc()/puts() above, except fg/bg are full 24-bit
+ * (CTUI_COLOR_MODE_RGB) instead of a palette index -- opt-in for a widget
+ * that explicitly wants truecolor. Requires the app to have negotiated at
+ * least CTUI_GFX_TRUECOLOR via ctui_init(); nothing at this layer enforces
+ * that yet (see GFX_DESIGN.md's Phase 4, deferred). */
+void ctui_widget_putc_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, char ch, unsigned char fg_r,
+                          unsigned char fg_g, unsigned char fg_b,
+                          unsigned char bg_r, unsigned char bg_g,
+                          unsigned char bg_b);
+void ctui_widget_puts_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, const char *str, unsigned char fg_r,
+                          unsigned char fg_g, unsigned char fg_b,
+                          unsigned char bg_r, unsigned char bg_g,
+                          unsigned char bg_b);
+
 #endif

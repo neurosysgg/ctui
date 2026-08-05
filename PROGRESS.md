@@ -415,6 +415,63 @@ terminal resize.
       Truecolor/RGB widget entry points
       (`ctui_widget_putc_rgb()`/`puts_rgb()`) and Phase 4 stay deferred
       until something actually needs them -- see `GFX_DESIGN.md`.
+- [x] `CTUI_GFX_TRUECOLOR` widget entry points landed:
+      `ctui_widget_putc_rgb()`/`puts_rgb()` (`src/core/widget.c`/`.h`),
+      same shape as the `_256` pair but taking `fg_r/g/b`, `bg_r/g/b`
+      directly and setting `color_mode = CTUI_COLOR_MODE_RGB` -- the cell
+      fields and `ctui_screen_flush()`'s `38;2;r;g;b`/`48;2;r;g;b`
+      emission already existed from the ANSI256 pass, so this was purely
+      the widget-facing entry point that was deferred at the time.
+      `debug_info` (`src/widgets/debug_info.c`) is the proving ground:
+      `widget_data` is now optional (`NULL`, unchanged behavior, or a
+      `CTUI_GFX_MODE*` -- same convention as `demo`'s `dump_palette`),
+      and shows a `"gfx: <tier>"` line plus a `"color_mode: <basic|256|
+      rgb>"` line -- the two are deliberately separate lines, not one,
+      since `CTUI_GFX_MODE` (terminal capability) and
+      `CTUI_COLOR_MODE_*` (per-cell encoding) are different enums (see
+      "Resolved open questions" above); `gfx_mode_color_mode()` maps one
+      to the other for display. Then, only when the negotiated mode
+      reads back `CTUI_GFX_TRUECOLOR` and `self->h >= 6`, a bottom row
+      sweeps a full-saturation HSV hue gradient via
+      `ctui_widget_putc_rgb()` -- a smooth 24-bit gradient a 256-color
+      ramp can only band, so it's a direct visual proof truecolor is
+      actually active, not just requested. `demo`'s `main()` now requests
+      `CTUI_GFX_TRUECOLOR` (up from `CTUI_GFX_ANSI256`) as the richer
+      proving-ground tier, threading `&gfx_mode` into `debug_info` the
+      same way it already did for `dump_palette`. This meant
+      `dump_palette`'s existing 256-ramp condition (`*gfx_mode ==
+      CTUI_GFX_ANSI256`) had to widen to `== CTUI_GFX_ANSI256 ||  ==
+      CTUI_GFX_TRUECOLOR`, since `ctui_init()` can now legitimately hand
+      back either tier depending on what the terminal actually supports,
+      and a truecolor terminal is a 256-color terminal too (per
+      `ctui_gfx_detect_caps()`) -- without the widen, `dump_palette`'s
+      ramp would have silently stopped rendering on the *best* terminals.
+      Verified directly: a non-pty C harness against `ctui_app_render()`
+      confirmed the hue-sweep cells carry `color_mode ==
+      CTUI_COLOR_MODE_RGB` with a smoothly varying `bg_r/g/b` ramp, and
+      against `ctui_screen_flush()`'s actual emitted bytes (40 real
+      `\x1b[38;2;r;g;b;48;2;r;g;b m` escapes, one per hue-sweep cell);
+      `tools/pty_harness.py` against the real `ctui-demo` binary across
+      three `TERM`/`COLORTERM` combinations -- full truecolor (`gfx:
+      truecolor` line, `dump_palette` ramp still renders), 256-only
+      (`ctui_init()` negotiates down to `0x2`, ramp still renders via the
+      widened condition), and a plain terminal (`env -u COLORTERM -u
+      KITTY_WINDOW_ID TERM=xterm`, negotiates down to `0x1`, shows `gfx:
+      ansi16`, hue sweep correctly omitted, no crash). `dump_palette` got
+      the same truecolor row as a follow-up, not just the ramp-condition
+      widen: below its existing 256-color ramp, a second bottom row (only
+      when the granted tier is `CTUI_GFX_TRUECOLOR` specifically and
+      `self->h >= 6`) sweeps the same hue gradient via
+      `ctui_widget_putc_rgb()` -- `hue_to_rgb()` duplicated locally in
+      `examples_apps/demo/widgets/dump_palette.c` rather than shared,
+      since it's a demo-app-local widget, not library code. Verified the
+      same way: a non-pty C harness confirmed row 4 is `color_mode ==
+      CTUI_COLOR_MODE_256` (the ramp) and row 5 is `CTUI_COLOR_MODE_RGB`
+      (the sweep) when truecolor is granted at `self->h == 6`, and that
+      the ramp alone shifts down to fill the freed row (no RGB row) when
+      only `CTUI_GFX_ANSI256` is granted. Phase 4
+      (`supported_gfx_modes`/`ctui_widget_set_gfx_renderer()`) stays
+      deferred, same reasoning as before.
 - **Found, not fixed: `tools/pty_harness.py`'s `raw` step is broken.**
   Every step's loop iteration unconditionally drains+feeds+clears the
   captured byte buffer into `grid` *before* dispatching on the step's own
@@ -487,9 +544,6 @@ terminal resize.
 - Fix `tools/pty_harness.py`'s `raw` step (see Known issues above) --
   have it snapshot/print the buffer the preceding step's preamble just
   drained instead of a fresh (empty) one.
-- `CTUI_GFX_TRUECOLOR`/`ctui_widget_putc_rgb()`/`puts_rgb()`, once a
-  widget actually wants truecolor -- the cell fields and flush-side RGB
-  emission already exist (see `GFX_DESIGN.md`).
 - GFX Phase 4 (`supported_gfx_modes` on `CTUI_WIDGET`,
   `ctui_widget_set_gfx_renderer()`), once a widget exists that can't
   degrade to text -- a Kitty-graphics widget for `player`'s album art is

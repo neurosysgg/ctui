@@ -136,9 +136,10 @@ ctui_shutdown();
 
 For anything beyond this — events between widgets, splits, groups,
 resizing, timers — see `PROGRESS.md` for the current architecture and the
-other apps under `examples_apps/` for worked examples of each. (Deeper
-per-topic docs are planned; this README and `PROGRESS.md` are the current
-source of truth.)
+other apps under `examples_apps/` for worked examples of each. Deeper
+per-topic docs live under `docs/` as they're written — currently just
+`docs/protocol.md` (how to add a new graphics protocol); this README and
+`PROGRESS.md` remain the source of truth for everything else.
 
 ## Project layout
 
@@ -176,6 +177,9 @@ source of truth.)
   driver `tests/` builds on) and `pty_harness.py` (drives a binary
   under a real pty for terminal-I/O-layer testing — raw input decoding,
   actual `SIGWINCH`, real ANSI output).
+- `docs/` — per-topic docs, written up once a topic's substantial enough
+  to outgrow a `PROGRESS.md` entry. Currently just `protocol.md` (the
+  recipe for adding a new graphics protocol tier).
 
 ## Architecture at a glance
 

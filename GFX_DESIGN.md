@@ -1,9 +1,12 @@
 # Graphics protocol support — design plan
 
-Status: **Phases 1-3 implemented for `CTUI_GFX_ANSI256`** (this pass).
-Phase 4 (per-widget renderer declaration, needed for Kitty and other
-non-degradable protocols) is still just a plan — see "Resolved open
-questions" below for what changed on the way to real code, and
+Status: **Phases 1-3 implemented for both `CTUI_GFX_ANSI256` and
+`CTUI_GFX_TRUECOLOR`** (the RGB cell fields and flush-side emission
+landed in the ANSI256 pass; `ctui_widget_putc_rgb()`/`puts_rgb()` and a
+proving-ground widget — `debug_info`'s truecolor hue sweep — landed in a
+later pass). Phase 4 (per-widget renderer declaration, needed for Kitty
+and other non-degradable protocols) is still just a plan — see "Resolved
+open questions" below for what changed on the way to real code, and
 `PROGRESS.md` for the concrete result. See `CLAUDE.md` for the
 philosophy/conventions this plan is written to follow.
 
@@ -228,10 +231,6 @@ for all of them:
 
 ## Deferred (not this pass)
 
-- `ctui_widget_putc_rgb()`/`puts_rgb()` and any widget actually using
-  `CTUI_COLOR_MODE_RGB` — the cell fields and flush-side emission exist
-  (cheap to build alongside 256 since it's the same switch), but no
-  widget-facing entry point until something needs truecolor specifically.
 - Phase 4 in full: `supported_gfx_modes` on `CTUI_WIDGET`,
   `ctui_widget_set_gfx_renderer()`, and `ctui_app_init()`/
   `ctui_app_render()` validating/dispatching on it. Not needed until a
