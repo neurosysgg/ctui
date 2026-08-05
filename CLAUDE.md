@@ -28,7 +28,7 @@ just as fast.
 
 Weigh this against "minimal by default" (below): don't add
 flexibility nothing asked for, but when building what *was* asked
-for, look for the version that's also tight — especially in `ctui.c`
+for, look for the version that's also tight — especially in `src/core/`
 itself, since every widget pays whatever it costs, forever.
 
 ## Naming conventions
@@ -82,14 +82,30 @@ itself, since every widget pays whatever it costs, forever.
 
 ## Architecture patterns to follow
 
-- **Core (`ctui.c`/`ctui.h`) vs. widgets (`src/widgets/`)**: the core
-  has zero knowledge of any specific widget. Something belongs in the
-  core only if it's a generic mechanism usable by *any* widget
-  (`CTUI_GROUP`, `CTUI_SPLIT`, the event registry). A themed,
-  content-bearing widget (border, menu, label, ...) belongs in
-  `src/widgets/` as its own `.c`/`.h` pair, built entirely on the
-  public `ctui.h` API — it should never need to reach into `ctui.c`
-  internals.
+- **Core (`src/core/`, fronted by `src/ctui.h`) vs. widgets
+  (`src/widgets/`)**: the core has zero knowledge of any specific
+  widget. Something belongs in the core only if it's a generic
+  mechanism usable by *any* widget (`CTUI_GROUP`, `CTUI_SPLIT`, the
+  event registry). A themed, content-bearing widget (border, menu,
+  label, ...) belongs in `src/widgets/` as its own `.c`/`.h` pair,
+  built entirely on the public `ctui.h` API — it should never need to
+  reach into `src/core/` internals (or, for that matter, know that
+  `src/core/` is split into multiple files at all).
+  - `src/core/` is one `.c`/`.h` pair per subsystem (`screen`,
+    `compositor`, `widget`, `event`, `app`, `group`, `split`, `term`,
+    `input`, `log`, `util`, plus `cell.h` for the shared `CTUI_CELL`).
+    `src/ctui.h` is the only header anything outside `src/core/`
+    includes — it just `#include`s every `core/*.h` in dependency
+    order, so adding a public declaration means adding it to the right
+    `core/*.h`, not to `ctui.h` directly.
+  - A few statics genuinely need to cross `src/core/`'s own internal
+    file boundaries — `g_app` (set by `ctui_app_init()` in `app.c`,
+    read by `ctui_event_register()`/`ctui_handle_event()` in
+    `event.c`) and `g_resize_pending` (set by `term.c`'s `SIGWINCH`
+    handler, polled by `input.c`). These live in
+    `src/core/ctui_internal.h`, a header included only by `core/*.c`
+    files, never by `ctui.h` — keep it that way; it's not part of the
+    public surface.
 - **`layout()` is how geometry becomes dynamic.** Don't compute a
   widget's `x/y/w/h` once and hardcode it — write a `layout()`
   callback that derives it from `comp->rows/cols` (and, for split

@@ -122,6 +122,19 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] `src/ctui.c`/`src/ctui.h` split into `src/core/`, one `.c`/`.h`
+      pair per subsystem (`screen`, `compositor`, `widget`, `event`,
+      `app`, `group`, `split`, `term`, `input`, `log`, `util`, plus a
+      shared `cell.h`). `src/ctui.h` is now a thin aggregator that
+      `#include`s every `core/*.h` in dependency order, so apps/widgets
+      are unaffected — they still only ever `#include "ctui.h"`.
+      Cross-file statics that used to be plain file-scope globals in
+      the monolithic `ctui.c` (`g_app`, `g_resize_pending`) now live
+      behind `extern` declarations in a private `src/core/
+      ctui_internal.h`, included only by `core/*.c` files. Confirmed
+      warning-free build (`make all`), all `make test` assertions still
+      pass, and a `pty_harness.py` smoke run of `ctui-demo` renders
+      identically to before.
 - [x] Include guard renamed from `CTUI` to `CTUI_H` (avoid future
       macro/type name collisions).
 - [x] Vtable function pointers changed from empty-paren

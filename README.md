@@ -28,9 +28,15 @@ removes all built binaries.
 
 ## Project layout
 
-- `src/ctui.c` / `src/ctui.h` — the core engine: screen buffer,
-  compositor, widget lifecycle, groups, resize handling, event registry,
-  string-layout utilities. Has no knowledge of any specific widget.
+- `src/ctui.h` — the single public header; apps and widgets only ever
+  `#include "ctui.h"`. It's a thin aggregator that pulls in every header
+  under `src/core/`, in dependency order.
+- `src/core/` — the core engine, one `.c`/`.h` pair per subsystem (screen
+  buffer, compositor, widget lifecycle, groups, splits, event registry,
+  terminal I/O, string-layout utilities, logging) plus a private
+  `ctui_internal.h` for the handful of statics (`g_app`,
+  `g_resize_pending`) shared only between core translation units. Has no
+  knowledge of any specific widget.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
   `menu`, `status`, `debug_info`, `grid`), each a small `.c`/`.h` pair
   built entirely on the public `ctui.h` API.

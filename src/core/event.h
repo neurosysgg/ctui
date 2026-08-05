@@ -1,0 +1,109 @@
+#ifndef CTUI_EVENT_H
+#define CTUI_EVENT_H
+
+#include "widget.h"
+
+typedef enum {
+  CTUI_KEY_NONE = 0,
+  CTUI_KEY_UP,
+  CTUI_KEY_DOWN,
+  CTUI_KEY_LEFT,
+  CTUI_KEY_RIGHT,
+  CTUI_KEY_ENTER,
+  CTUI_KEY_ESC,
+  CTUI_KEY_TAB,
+  CTUI_KEY_CHAR,
+} CTUI_KEYTYPE;
+
+typedef struct {
+  CTUI_KEYTYPE type;
+  char ch;
+} CTUI_KEYPRESS_EVENT_DATA;
+
+typedef struct {
+  int rows, cols; /* new terminal size */
+} CTUI_RESIZE_EVENT_DATA;
+
+typedef struct {
+  const char *value; /* the new value; lifetime is the emitting widget's
+                      * responsibility -- listeners should copy it out, not
+                      * retain the pointer past their handler call */
+  int enabled;        /* generic on/off flag alongside value, e.g. a menu
+                       * item's toggled state -- not every emitter
+                       * populates this meaningfully, so treat it as
+                       * informational unless you know the specific source
+                       * sets it (see ctui_menu_handle_keypress()) */
+} CTUI_VALUE_CHANGED_EVENT_DATA;
+
+typedef enum {
+  CTUI_KEYPRESS_EVENT,
+  CTUI_FOCUS_EVENT,
+  CTUI_WIDGET_REDRAW,
+  CTUI_RESIZE_EVENT,
+  CTUI_TICK_EVENT, /* periodic timer tick; emitted by ctui_app_run() (via
+                    * ctui_input_loop()) when no input arrives within its
+                    * tick_ms interval. No payload -- event_data is NULL.
+                    * ev_source is "timer". See ctui_app_run(). */
+  CTUI_VALUE_CHANGED_EVENT, /* a widget's value changed; see
+                            * CTUI_VALUE_CHANGED_EVENT_DATA. Any widget can
+                            * emit one by calling ctui_handle_event() from
+                            * within its own handler -- see
+                            * ctui_menu_handle_keypress() for the pattern. */
+  CTUI_DUMMY_EVENT,
+} CTUI_EVENTTYPE;
+
+typedef enum {
+  CTUI_EVENT_SCOPE_GLOBAL,
+} CTUI_EVENT_SCOPE;
+
+typedef struct {
+  CTUI_EVENTTYPE type;
+  CTUI_EVENT_SCOPE scope;
+  /* identifies who emitted this event, e.g. "menu" or "input" -- a plain
+   * string convention shared between emitter and listener, not derived
+   * from any widget pointer/identity. Forms half of the registration key
+   * (paired with type) that ctui_event_register()/ctui_handle_event() match
+   * on; see those for the full contract. */
+  const char *ev_source;
+  void *event_data;
+} CTUI_EVENT;
+
+const char *ctui_keytype_name(CTUI_KEYTYPE type);
+const char *ctui_eventtype_name(CTUI_EVENTTYPE type);
+
+/* opaque: one (source, type) -> (widget, handler) registration. Full
+ * definition lives in core/event.c -- callers only ever touch entries
+ * through ctui_event_register()/ctui_handle_event(), never construct or read
+ * one directly. */
+typedef struct CTUI_EVENT_HANDLER CTUI_EVENT_HANDLER;
+
+/* event handler registry -- addEventListener()-style: widgets no longer
+ * implement a catch-all on_event() that checks whether it cares about each
+ * incoming event; instead, register a handler for exactly the (source,
+ * type) pair you want, and ctui_handle_event() only ever calls handlers
+ * that match. Requires ctui_app_init() to have run first (registrations are
+ * stored on the current app, tracked the same way g_app is). */
+
+/* registers handler to run against widget whenever ctui_handle_event() sees
+ * an event with ev->ev_source equal to source (compared with strcmp) and
+ * ev->type equal to type. Multiple handlers can be registered for the same
+ * (source, type) pair -- e.g. two different widgets both listening for
+ * ("menu", CTUI_VALUE_CHANGED_EVENT) -- and ctui_handle_event() fires all of
+ * them, in registration order. source is a plain string convention agreed
+ * on between whoever emits events under that name and whoever listens for
+ * them (see CTUI_EVENT.ev_source); it is not derived from any widget
+ * pointer/identity, so two widget instances of the same kind currently
+ * can't be told apart by source alone. */
+void ctui_event_register(const char *source, CTUI_EVENTTYPE type,
+                         CTUI_WIDGET *widget,
+                         int (*handler)(CTUI_WIDGET *self, CTUI_EVENT *ev));
+
+/* walks the registry built by ctui_event_register(), calling handler(widget,
+ * ev) for every registration whose (source, type) matches
+ * (ev->ev_source, ev->type). Returns 1 if any handler returned 1 (a visible
+ * change occurred, so the caller should re-render), 0 otherwise. Widgets
+ * emit their own events by calling this from within a handler -- see
+ * ctui_menu_handle_keypress() for the pattern. */
+int ctui_handle_event(CTUI_EVENT *ev);
+
+#endif
