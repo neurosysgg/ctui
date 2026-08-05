@@ -150,7 +150,13 @@ static void status_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
 int main(void) {
   /* E_ALL & ~E_DBG: everything except per-primitive putc/puts/byte-read
    * tracing. Pass E_ALL (or E_DBG on its own) to see that level too. */
-  if (ctui_init(E_INF | E_WRN | E_ERR) != 0) {
+  /* demo asks for ANSI256, but must still run on a plain terminal --
+   * ctui_init() negotiates down instead of failing if the terminal can't
+   * do it, rewriting gfx_mode to whatever it actually granted (see
+   * ctui_dump_palette_render()'s use of it below, via widget_data). Only
+   * the mandatory ANSI16 floor itself can fail this call. */
+  CTUI_GFX_MODE gfx_mode = CTUI_GFX_ANSI256;
+  if (ctui_init(E_INF | E_WRN | E_ERR, &gfx_mode) != 0) {
     fprintf(stderr, "failed to init ctui\n");
     return 1;
   }
@@ -209,8 +215,8 @@ int main(void) {
   CTUI_WIDGET menu = ctui_widget_make(0, 0, 0, 0, &data, ctui_menu_render, NULL);
   CTUI_WIDGET debug_info =
       ctui_widget_make(0, 0, 0, 0, NULL, ctui_debug_info_render, NULL);
-  CTUI_WIDGET dump_palette =
-      ctui_widget_make(0, 0, 0, 0, NULL, ctui_dump_palette_render, NULL);
+  CTUI_WIDGET dump_palette = ctui_widget_make(
+      0, 0, 0, 0, &gfx_mode, ctui_dump_palette_render, NULL);
   debug_info_widget = &debug_info;
   dump_palette_widget = &dump_palette;
   CTUI_WIDGET *main_split_children[] = {&menu, &debug_info};

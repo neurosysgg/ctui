@@ -19,6 +19,21 @@ void ctui_dump_palette_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
             "[CTUI:DUMP_PALETTE] - rendering @ tick %d (%d colors, %dx%d)\n",
             ctui_tick_advance(), PALETTE_COUNT, self->w, self->h);
 
+  /* bottom row is a 256-color ramp (ctui_widget_putc_256()) when there's
+   * room for it AND main() actually got CTUI_GFX_ANSI256 out of
+   * ctui_init() -- widget_data is the same CTUI_GFX_MODE main() passed
+   * ctui_init(), post-negotiation, so this only draws in 256-color codes
+   * once the terminal has actually proven it supports them. Equality
+   * (not a bitmask test) is correct here: ctui_init() never negotiates
+   * *up* past what was requested, so *gfx_mode is either exactly
+   * CTUI_GFX_ANSI256 (granted as asked) or the floor it got downgraded
+   * to instead. */
+  CTUI_GFX_MODE *gfx_mode = self->widget_data;
+  int ramp_h =
+      (gfx_mode != NULL && *gfx_mode == CTUI_GFX_ANSI256 && self->h >= 4) ? 1
+                                                                          : 0;
+  int grid_h = self->h - ramp_h;
+
   /* fewest rows (>=2) that evenly divide PALETTE_COUNT into columns -- for
    * the current 9 basic colors that's 3x3, but this stays correct if the
    * palette ever grows/shrinks */
@@ -33,8 +48,8 @@ void ctui_dump_palette_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
    * row/col so the grid fills self exactly */
   int base_w = self->w / cols;
   int rem_w = self->w - base_w * cols;
-  int base_h = self->h / rows;
-  int rem_h = self->h - base_h * rows;
+  int base_h = grid_h / rows;
+  int rem_h = grid_h - base_h * rows;
 
   int base_row = 0;
   for (int r = 0; r < rows; r++) {
@@ -62,5 +77,21 @@ void ctui_dump_palette_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       base_col += cell_w;
     }
     base_row += cell_h;
+  }
+
+  if (ramp_h > 0) {
+    /* 16..231 is the 6x6x6 color cube of the 256-color palette -- skips
+     * the 16 basic-equivalent indices (0-15) and the grayscale ramp
+     * (232-255) so this visibly demonstrates color_mode == 256 rather
+     * than just reproducing the swatches above in a different encoding */
+    for (int col = 0; col < self->w; col++) {
+      unsigned char idx = (unsigned char)(16 + col * 216 / self->w);
+      ctui_widget_putc_256(self, comp, grid_h, col, ' ', CTUI_COLOR_DEFAULT,
+                           idx);
+    }
+    ctui_logf(E_DBG,
+              "[CTUI:DUMP_PALETTE] - 256-color ramp drawn @ tick %d (row=%d, "
+              "w=%d)\n",
+              ctui_tick_advance(), grid_h, self->w);
   }
 }

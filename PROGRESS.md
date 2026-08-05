@@ -342,6 +342,93 @@ terminal resize.
       `30;42` while a mid-volume tone played, `30;40` for the unfilled
       remainder), and a live resize mid-layout.
 
+- [x] `CTUI_GFX_ANSI256` support landed (Phases 1-3 of `GFX_DESIGN.md`; Phase 4
+      -- per-widget renderer declaration for non-degradable protocols like
+      Kitty -- is still just a plan, not needed until a widget exists that
+      can't degrade to text). `CTUI_CELL` (`src/core/cell.h`) gained
+      `color_mode` (`CTUI_COLOR_MODE_BASIC`/`_256`/`_RGB`) plus `fg_r/g/b`,
+      `bg_r/g/b`, all defaulting to `BASIC`/zero so every existing
+      `CTUI_COLOR_*` literal and `ctui_widget_putc()` call keeps compiling
+      and behaving identically. New `src/core/gfx.c`/`gfx.h`:
+      `CTUI_GFX_MODE` is a bit-flag enum (`ANSI16=1<<0` .. `KITTY=1<<3`,
+      not sequential indices -- the doc's original draft used sequential
+      values, which can't be tested with `&`), and
+      `ctui_gfx_detect_caps()` env-sniffs `TERM`/`COLORTERM`/
+      `KITTY_WINDOW_ID`, unconditionally setting the `ANSI16` bit rather
+      than deriving it (2026-era floor assumption, see `GFX_DESIGN.md`).
+      `ctui_init()` gained a `CTUI_GFX_MODE *mode` param -- in/out, not a
+      plain value: it hard-fails (logged, `-1`) only if the mandatory
+      `ANSI16` floor itself is missing; if the *requested* tier is
+      missing, it instead logs a warning and overwrites `*mode` with the
+      highest tier the terminal actually supports, then continues, so an
+      app asking for something above the floor still starts on a plainer
+      terminal rather than refusing to run. Either way the (possibly
+      downgraded) result is stored in `g_gfx_mode` (new cross-file
+      static, same pattern as `g_app`/`g_resize_pending`). All 7
+      `examples_apps/*/main.c` call sites now pass the address of a local
+      `CTUI_GFX_MODE` set to `CTUI_GFX_ANSI16` (behaviorally unchanged --
+      the floor can only be negotiated *to*, never below, so these 6
+      never need to inspect it afterward) except `demo`, which requests
+      `CTUI_GFX_ANSI256` as this feature's proving ground and does
+      inspect the result. New `ctui_widget_putc_256()`/`puts_256()`
+      (same signature as the plain versions -- `fg`/`bg` are already a
+      `0-255`-wide `unsigned char`, just reinterpreted as a palette
+      index) let a widget opt in; `demo`'s `dump_palette` widget draws a
+      256-color-cube ramp (indices 16-231) across its bottom row via
+      `putc_256()` whenever it has >= 4 rows *and* `main()`'s negotiated
+      `CTUI_GFX_MODE` (passed down as `widget_data`, a `CTUI_GFX_MODE*`)
+      still reads `CTUI_GFX_ANSI256` -- so `demo` runs correctly either
+      way: full ramp on a 256-color terminal, plain swatches-only on a
+      basic one, verified both ways via `pty_harness.py` under
+      `TERM=xterm` (negotiates `0x2 -> 0x1`, ramp skipped) and
+      `TERM=xterm-256color` (negotiates `0x2` cleanly, ramp drawn).
+      `ctui_screen_flush()` now switches on each cell's own `color_mode`
+      to emit `38;5;n`/`48;5;n` (256) or the original `30-37`/`40-47`
+      (`BASIC`) SGR codes -- driven purely by the cell, not by
+      `g_gfx_mode`, so richer color is orthogonal to widget logic exactly
+      as designed. Two correctness fixes this surfaced: the shadow-buffer
+      diff (`ctui_compare_ctuicell`) and the last-emitted-color tracking
+      in `ctui_screen_flush` both had to grow to compare `color_mode`
+      (and the rgb fields, when relevant) alongside `fg`/`bg`, or a
+      256-mode cell with the same numeric `fg`/`bg` as a prior basic-mode
+      cell would wrongly read as "unchanged"/"same color" and never get
+      its real escape emitted; and `ctui_compositor_clear()`/
+      `ctui_screen_clear()` now reset `color_mode` to `BASIC` every frame
+      (previously only `ch`/`fg`/`bg`), otherwise a cell drawn via
+      `putc_256()` one frame and plain `putc()` the next at the same
+      coordinate would keep misreading the new basic `fg`/`bg` as a
+      256-index. Verified via a direct (non-pty) C harness against
+      `ctui_screen_flush()`'s actual emitted bytes (confirmed
+      `\x1b[38;5;196;48;5;21m` for a `putc_256(fg=196,bg=21)` cell, plain
+      cells unchanged, and a second flush with no changes correctly
+      emitting nothing but the trailing reset -- proving the diff fix
+      works); the floor hard-fail and the requested-tier
+      downgrade-instead-of-fail path both verified directly against
+      `ctui_init()`'s return code/`*mode` output and `[CTUI:GFX]` log
+      lines under different `TERM`/`COLORTERM` combinations; and
+      `tools/pty_harness.py` against the real `ctui-demo` binary in both
+      directions -- `TERM=xterm-256color` (caps detected, `ANSI256`
+      negotiated cleanly, `dump_palette` panel rendered with its ramp)
+      and `TERM=xterm` (negotiated down to `ANSI16`, `demo` still starts
+      and runs, `dump_palette` correctly omits the ramp) -- with no new
+      bounds warnings from the new code across several resizes.
+      Truecolor/RGB widget entry points
+      (`ctui_widget_putc_rgb()`/`puts_rgb()`) and Phase 4 stay deferred
+      until something actually needs them -- see `GFX_DESIGN.md`.
+- **Found, not fixed: `tools/pty_harness.py`'s `raw` step is broken.**
+  Every step's loop iteration unconditionally drains+feeds+clears the
+  captured byte buffer into `grid` *before* dispatching on the step's own
+  kind -- so by the time a `raw` step's own handler runs, whatever bytes
+  arrived during the preceding `wait`/`key`/etc. have already been
+  consumed and discarded into `grid`, and `raw` prints an effectively
+  empty buffer. `dump` still works (it reads accumulated `grid` state,
+  not `buf`). Worked around this pass by writing a small throwaway
+  non-pty C program that calls `ctui_screen_flush()` directly and reads
+  its `write()` output, rather than fixing the harness -- flagging here
+  since `CLAUDE.md`'s Testing section calls `raw` out specifically for
+  checking literal emitted ANSI bytes (color codes), which is exactly
+  what doesn't currently work.
+
 ## Known issues / deliberately deferred
 
 - **`player` stutters every few seconds on longer real-world WAV files**
@@ -397,6 +484,16 @@ terminal resize.
 
 ## Next up
 
+- Fix `tools/pty_harness.py`'s `raw` step (see Known issues above) --
+  have it snapshot/print the buffer the preceding step's preamble just
+  drained instead of a fresh (empty) one.
+- `CTUI_GFX_TRUECOLOR`/`ctui_widget_putc_rgb()`/`puts_rgb()`, once a
+  widget actually wants truecolor -- the cell fields and flush-side RGB
+  emission already exist (see `GFX_DESIGN.md`).
+- GFX Phase 4 (`supported_gfx_modes` on `CTUI_WIDGET`,
+  `ctui_widget_set_gfx_renderer()`), once a widget exists that can't
+  degrade to text -- a Kitty-graphics widget for `player`'s album art is
+  the plausible first candidate per `GFX_DESIGN.md`.
 - Promote `CTUI_CLOCK` from its `examples_apps/clock/widgets/` staging
   spot to `src/widgets/`, once a second app actually needs it — see the
   `examples_apps/` entry above for the promotion criterion. (`CTUI_LIST`

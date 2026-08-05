@@ -77,4 +77,17 @@ void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                       int col, const char *str, unsigned char fg,
                       unsigned char bg);
 
+/* same as ctui_widget_putc()/puts() above, except fg/bg are read as a
+ * 0-255 ANSI 256-color index (CTUI_COLOR_MODE_256) instead of a basic
+ * CTUI_COLOR_* index -- opt-in for a widget that explicitly wants the
+ * richer palette. Requires the app to have negotiated at least
+ * CTUI_GFX_ANSI256 via ctui_init(); nothing at this layer enforces that
+ * yet (see GFX_DESIGN.md's Phase 4, deferred). */
+void ctui_widget_putc_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, char ch, unsigned char fg256,
+                          unsigned char bg256);
+void ctui_widget_puts_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, const char *str, unsigned char fg256,
+                          unsigned char bg256);
+
 #endif

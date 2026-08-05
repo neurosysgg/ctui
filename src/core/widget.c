@@ -55,21 +55,24 @@ void ctui_widget_init(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp) {
             widget->w, widget->h);
 }
 
-void ctui_widget_putc(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
-                      int col, char ch, unsigned char fg, unsigned char bg) {
+/* shared bounds-checking/resolution for every putc variant below -- widget
+ * not bound, out of widget bounds, or out of compositor bounds all log +
+ * return NULL rather than write anywhere */
+static CTUI_CELL *widget_cell_at(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
+                                 int row, int col) {
   if (widget->buf == NULL) {
     ctui_logf(E_WRN,
               "[CTUI:WIDGET] - putc rejected @ tick %d, widget %p not bound "
               "to a compositor slice (call ctui_widget_init() first)\n",
               ctui_tick_advance(), (void *)widget);
-    return;
+    return NULL;
   }
   if (row < 0 || row >= widget->h || col < 0 || col >= widget->w) {
     ctui_logf(E_WRN,
               "[CTUI:WIDGET] - putc out of widget bounds @ tick %d (row=%d, "
               "col=%d, size=%dx%d)\n",
               ctui_tick_advance(), row, col, widget->w, widget->h);
-    return;
+    return NULL;
   }
   int abs_row = widget->y + row;
   int abs_col = widget->x + col;
@@ -79,15 +82,24 @@ void ctui_widget_putc(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
               "[CTUI:WIDGET] - putc out of compositor bounds @ tick %d "
               "(row=%d, col=%d, compositor=%dx%d)\n",
               ctui_tick_advance(), abs_row, abs_col, comp->cols, comp->rows);
+    return NULL;
+  }
+  return widget->buf + (size_t)row * (size_t)comp->cols + (size_t)col;
+}
+
+void ctui_widget_putc(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                      int col, char ch, unsigned char fg, unsigned char bg) {
+  CTUI_CELL *cell = widget_cell_at(widget, comp, row, col);
+  if (cell == NULL) {
     return;
   }
   ctui_logf(E_DBG,
             "[CTUI:WIDGET] - putc @ tick %d (row=%d, col=%d, ch='%c')\n",
             ctui_tick_advance(), row, col, ch);
-  CTUI_CELL *cell = widget->buf + (size_t)row * (size_t)comp->cols + (size_t)col;
   cell->ch = ch;
   cell->bg = bg;
   cell->fg = fg;
+  cell->color_mode = CTUI_COLOR_MODE_BASIC;
 }
 
 void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
@@ -99,5 +111,33 @@ void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
             ctui_tick_advance(), row, col, strlen(str), str);
   for (int i = 0; str[i] != '\0'; i++) {
     ctui_widget_putc(widget, comp, row, col + i, str[i], fg, bg);
+  }
+}
+
+void ctui_widget_putc_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, char ch, unsigned char fg256,
+                          unsigned char bg256) {
+  CTUI_CELL *cell = widget_cell_at(widget, comp, row, col);
+  if (cell == NULL) {
+    return;
+  }
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - putc_256 @ tick %d (row=%d, col=%d, ch='%c')\n",
+            ctui_tick_advance(), row, col, ch);
+  cell->ch = ch;
+  cell->fg = fg256;
+  cell->bg = bg256;
+  cell->color_mode = CTUI_COLOR_MODE_256;
+}
+
+void ctui_widget_puts_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, const char *str, unsigned char fg256,
+                          unsigned char bg256) {
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - puts_256 @ tick %d (row=%d, col=%d, len=%zu): "
+            "\"%s\"\n",
+            ctui_tick_advance(), row, col, strlen(str), str);
+  for (int i = 0; str[i] != '\0'; i++) {
+    ctui_widget_putc_256(widget, comp, row, col + i, str[i], fg256, bg256);
   }
 }

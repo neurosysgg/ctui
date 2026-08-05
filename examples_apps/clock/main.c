@@ -19,7 +19,11 @@ static void clock_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
 }
 
 int main(void) {
-  if (ctui_init(E_INF | E_WRN | E_ERR) != 0) {
+  /* ANSI16 is the mandatory floor -- ctui_init() can only negotiate
+   * *down* to it, never below, so this app never needs to inspect
+   * gfx_mode again after the call */
+  CTUI_GFX_MODE gfx_mode = CTUI_GFX_ANSI16;
+  if (ctui_init(E_INF | E_WRN | E_ERR, &gfx_mode) != 0) {
     fprintf(stderr, "failed to init ctui\n");
     return 1;
   }

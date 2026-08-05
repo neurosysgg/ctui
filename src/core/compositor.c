@@ -37,6 +37,10 @@ void ctui_compositor_clear(CTUI_COMPOSITOR *comp) {
     comp->cells[i].ch = ' ';
     comp->cells[i].fg = CTUI_COLOR_DEFAULT;
     comp->cells[i].bg = CTUI_COLOR_DEFAULT;
+    /* a cell drawn via ctui_widget_putc_256()/rgb() last frame must not
+     * keep that color_mode if this frame's widget draws it via plain
+     * putc() instead -- see GFX_DESIGN.md's "Resolved open questions" */
+    comp->cells[i].color_mode = CTUI_COLOR_MODE_BASIC;
   }
 }
 

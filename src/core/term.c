@@ -20,14 +20,53 @@
 static struct termios orig_termios;
 
 volatile sig_atomic_t g_resize_pending = 0;
+unsigned int g_gfx_mode = 0;
 
 static void handle_sigwinch(int sig) {
   (void)sig;
   g_resize_pending = 1;
 }
 
-int ctui_init(int verbosity) {
+/* highest single CTUI_GFX_MODE tier actually present in caps -- used to
+ * negotiate down when the requested tier isn't there. Tiers are
+ * cumulative in what ctui_gfx_detect_caps() sets (a KITTY terminal's caps
+ * also carries TRUECOLOR/ANSI256's bits), so checking top-down and
+ * returning the first hit is enough. */
+static CTUI_GFX_MODE gfx_max_supported(unsigned int caps) {
+  if (caps & CTUI_GFX_KITTY) {
+    return CTUI_GFX_KITTY;
+  }
+  if (caps & CTUI_GFX_TRUECOLOR) {
+    return CTUI_GFX_TRUECOLOR;
+  }
+  if (caps & CTUI_GFX_ANSI256) {
+    return CTUI_GFX_ANSI256;
+  }
+  return CTUI_GFX_ANSI16;
+}
+
+int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
   ctui_log_init(verbosity);
+
+  unsigned int caps = ctui_gfx_detect_caps();
+  if (!(caps & CTUI_GFX_ANSI16)) {
+    ctui_log(E_ERR,
+             "[CTUI:GFX] - ANSI16 floor unsupported by this terminal, "
+             "cannot continue\n");
+    return -1;
+  }
+  if (!(caps & (unsigned int)*mode)) {
+    CTUI_GFX_MODE negotiated = gfx_max_supported(caps);
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - requested mode 0x%x not supported @ tick %d "
+              "(caps=0x%x), negotiating down to 0x%x\n",
+              (unsigned int)*mode, ctui_tick_advance(), caps,
+              (unsigned int)negotiated);
+    *mode = negotiated;
+  }
+  g_gfx_mode = (unsigned int)*mode;
+  ctui_logf(E_INF, "[CTUI:GFX] - negotiated mode 0x%x @ tick %d\n",
+            g_gfx_mode, ctui_tick_advance());
 
   ctui_tick_advance();
   if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) {

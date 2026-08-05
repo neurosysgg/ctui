@@ -61,6 +61,7 @@ void ctui_screen_clear(CTUI_SCREEN *s) {
     s->cells[i].ch = ' ';
     s->cells[i].fg = CTUI_COLOR_DEFAULT;
     s->cells[i].bg = CTUI_COLOR_DEFAULT;
+    s->cells[i].color_mode = CTUI_COLOR_MODE_BASIC;
   }
 }
 
@@ -80,6 +81,7 @@ void ctui_screen_putc(CTUI_SCREEN *s, int row, int col, char ch,
   cell->ch = ch;
   cell->bg = bg;
   cell->fg = fg;
+  cell->color_mode = CTUI_COLOR_MODE_BASIC;
 }
 
 void ctui_screen_puts(CTUI_SCREEN *s, int row, int col, const char *str,
@@ -100,19 +102,69 @@ static int ansi_bg_code(unsigned char c) {
   return c == CTUI_COLOR_DEFAULT ? 49 : 40 + (c - 1);
 }
 
+/* whichever fields matter for a cell's color_mode -- BASIC and 256 both
+ * key off plain fg/bg (just different index spaces), RGB off fg_r../bg_r.. */
 static int ctui_compare_ctuicell(CTUI_CELL *lhs, CTUI_CELL *rhs) {
-  return (lhs->ch == rhs->ch && lhs->bg == rhs->bg && lhs->fg == rhs->fg);
+  if (lhs->ch != rhs->ch || lhs->color_mode != rhs->color_mode) {
+    return 0;
+  }
+  if (lhs->color_mode == CTUI_COLOR_MODE_RGB) {
+    return lhs->fg_r == rhs->fg_r && lhs->fg_g == rhs->fg_g &&
+          lhs->fg_b == rhs->fg_b && lhs->bg_r == rhs->bg_r &&
+          lhs->bg_g == rhs->bg_g && lhs->bg_b == rhs->bg_b;
+  }
+  return lhs->fg == rhs->fg && lhs->bg == rhs->bg;
+}
+
+/* same field-set-per-mode logic as ctui_compare_ctuicell(), but against the
+ * last cell actually emitted this flush (to decide whether a fresh SGR
+ * escape is needed), not the previous frame's shadow buffer */
+static int color_changed(const CTUI_CELL *cur, const CTUI_CELL *last) {
+  if (cur->color_mode != last->color_mode) {
+    return 1;
+  }
+  if (cur->color_mode == CTUI_COLOR_MODE_RGB) {
+    return cur->fg_r != last->fg_r || cur->fg_g != last->fg_g ||
+          cur->fg_b != last->fg_b || cur->bg_r != last->bg_r ||
+          cur->bg_g != last->bg_g || cur->bg_b != last->bg_b;
+  }
+  return cur->fg != last->fg || cur->bg != last->bg;
+}
+
+static size_t emit_color(char *out, size_t cap, size_t len,
+                         const CTUI_CELL *cell) {
+  switch (cell->color_mode) {
+  case CTUI_COLOR_MODE_256:
+    return len + (size_t)snprintf(out + len, cap - len,
+                                  "\x1b[38;5;%d;48;5;%dm", cell->fg,
+                                  cell->bg);
+  case CTUI_COLOR_MODE_RGB:
+    return len +
+          (size_t)snprintf(out + len, cap - len,
+                            "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm", cell->fg_r,
+                            cell->fg_g, cell->fg_b, cell->bg_r, cell->bg_g,
+                            cell->bg_b);
+  default:
+    return len + (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dm",
+                                  ansi_fg_code(cell->fg),
+                                  ansi_bg_code(cell->bg));
+  }
 }
 
 void ctui_screen_flush(CTUI_SCREEN *s) {
   ctui_logf(E_INF, "[CTUI:SCREEN] - flush starting @ tick %d\n",
             ctui_tick_advance());
-  size_t cap = (size_t)s->rows * (size_t)s->cols * 24 + 64;
+  /* worst case is an RGB cell's escape, "\x1b[38;2;255;255;255;48;2;255;
+   * 255;255m" (~38 bytes) plus a position escape (~11) plus the glyph
+   * itself -- 64/cell budget covers that with room to spare */
+  size_t cap = (size_t)s->rows * (size_t)s->cols * 64 + 64;
   char *out = malloc(cap);
   size_t len = 0;
 
   int last_row = -1, last_col = -1;
-  int last_fg = -1, last_bg = -1;
+  /* 0xff isn't a real CTUI_COLOR_MODE_* value, so the first emitted cell
+   * always mismatches and gets its own color escape */
+  CTUI_CELL last_color = {.color_mode = 0xff};
 
   // iterate over cells, compare to our buffer and rewrite accordingly
   for (int r = 0; r < s->rows; r++) {
@@ -128,11 +180,9 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
             (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dH", r + 1, c + 1);
       }
 
-      if (cur->fg != last_fg || cur->bg != last_bg) {
-        len += (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dm",
-                                ansi_fg_code(cur->fg), ansi_bg_code(cur->bg));
-        last_fg = cur->fg;
-        last_bg = cur->bg;
+      if (color_changed(cur, &last_color)) {
+        len = emit_color(out, cap, len, cur);
+        last_color = *cur;
       }
 
       out[len++] = cur->ch;
