@@ -27,6 +27,119 @@ buffer). `make examples` builds just the non-demo apps; `make clean`
 removes all built binaries. `ctui-player` additionally links `-lasound`
 (ALSA dev headers/lib) — every other target only depends on libc.
 
+## Usage
+
+The smallest complete app is
+[`examples_apps/hello/main.c`](examples_apps/hello/main.c) — a full-screen
+border with a centered label inside it, quitting on ESC. Build and run it
+with:
+
+```sh
+make ctui-hello
+./ctui-hello
+```
+
+Walking through it (full file:
+[`examples_apps/hello/main.c`](examples_apps/hello/main.c)):
+
+**[Includes](examples_apps/hello/main.c#L1-L3)** — apps only ever include
+the single public `ctui.h` front door, plus one header per widget they use.
+
+```c
+#include "ctui.h"
+#include "widgets/border.h"
+#include "widgets/label.h"
+```
+
+**[`layout()` callbacks](examples_apps/hello/main.c#L7-L19)** — each
+widget's `layout()` derives its `x/y/w/h` from the compositor's current
+`rows`/`cols` instead of a hardcoded size, so it's re-run automatically on
+every terminal resize. The label insets by one cell on each side so it
+never shares a cell with the border.
+
+```c
+static void border_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  self->x = 0;
+  self->y = 0;
+  self->w = comp->cols;
+  self->h = comp->rows;
+}
+
+static void label_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  self->x = 1;
+  self->y = 1;
+  self->w = comp->cols - 2;
+  self->h = comp->rows - 2;
+}
+```
+
+**[`ctui_init()`](examples_apps/hello/main.c#L22-L26)** — sets up the
+terminal (raw mode, alternate screen buffer) and negotiates a graphics
+mode; every app needs this before touching anything else.
+
+```c
+CTUI_GFX_MODE gfx_mode = CTUI_GFX_ANSI16;
+if (ctui_init(E_INF | E_WRN | E_ERR, &gfx_mode) != 0) {
+  fprintf(stderr, "failed to init ctui\n");
+  return 1;
+}
+```
+
+**[Widget data + construction](examples_apps/hello/main.c#L33-L43)** —
+each widget is a small `widget_data` struct (`CTUI_BORDER`, `CTUI_LABEL`)
+plus a `CTUI_WIDGET` binding it to a `render()` and `layout()` via
+`ctui_widget_make()`. Position/size are left `0,0,0,0` here since
+`layout()` computes them.
+
+```c
+CTUI_BORDER border_style = ctui_border_make(CTUI_COLOR_WHITE);
+CTUI_LABEL label_data = {
+    .text = "hello, ctui! (ESC to quit)",
+    .fg = CTUI_COLOR_CYAN,
+    .bg = CTUI_COLOR_DEFAULT,
+};
+
+CTUI_WIDGET border = ctui_widget_make(0, 0, 0, 0, &border_style,
+                                      ctui_border_render, border_layout);
+CTUI_WIDGET label = ctui_widget_make(0, 0, 0, 0, &label_data,
+                                     ctui_label_render, label_layout);
+```
+
+**[`ctui_app_init()`](examples_apps/hello/main.c#L45-L47)** — allocates
+the shared compositor and binds every widget to its slice of it.
+
+```c
+CTUI_WIDGET *widgets[] = {&border, &label};
+CTUI_APP app;
+ctui_app_init(&app, widgets, 2, rows, cols);
+```
+
+**[`ctui_app_run()`](examples_apps/hello/main.c#L51)** — the blocking
+event loop; renders, flushes to the terminal, and handles input until ESC.
+The final `0` argument means "block on input only" — pass a millisecond
+interval instead to also wake on a timer (see
+[`examples_apps/clock/main.c`](examples_apps/clock/main.c) for a
+`CTUI_TICK_EVENT`-driven widget).
+
+```c
+ctui_app_run(&app, screen, 0);
+```
+
+**[Teardown](examples_apps/hello/main.c#L55-L57)** — free the app, free
+the screen, restore the terminal.
+
+```c
+ctui_app_free(&app);
+ctui_screen_free(screen);
+ctui_shutdown();
+```
+
+For anything beyond this — events between widgets, splits, groups,
+resizing, timers — see `PROGRESS.md` for the current architecture and the
+other apps under `examples_apps/` for worked examples of each. (Deeper
+per-topic docs are planned; this README and `PROGRESS.md` are the current
+source of truth.)
+
 ## Project layout
 
 - `src/ctui.h` — the single public header; apps and widgets only ever
@@ -43,6 +156,7 @@ removes all built binaries. `ctui-player` additionally links `-lasound`
   pair built entirely on the public `ctui.h` API.
 - `examples_apps/` — real, runnable ctui apps, one subfolder each
   (`examples_apps/<name>/main.c` + an optional local `widgets/`):
+  `hello` (the minimal border + label app walked through in Usage above),
   `demo` (the original 3-area header/main/footer layout demonstrating
   resizing and event wiring), `clock` (a ticking clock, driving the
   `CTUI_TICK_EVENT` timer mechanism), `file_browser` (a scrollable,
