@@ -42,6 +42,8 @@ const char *ctui_eventtype_name(CTUI_EVENTTYPE type) {
     return "RESIZE";
   case CTUI_TICK_EVENT:
     return "TICK";
+  case CTUI_TIMER_EVENT:
+    return "TIMER";
   case CTUI_VALUE_CHANGED_EVENT:
     return "VALUE_CHANGED";
   case CTUI_DUMMY_EVENT:

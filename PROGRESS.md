@@ -89,6 +89,61 @@ terminal resize.
   `RESIZE` or `ESC`, so it already falls through to the generic
   `ctui_handle_event()` → re-render-if-changed path. Added to drive the
   `examples_apps/clock` app.
+- **Timers** (`src/core/timer.c`/`timer.h`, new subsystem): a second,
+  independent ticking mechanism alongside `CTUI_TICK_EVENT` above, for
+  widgets that each want their *own* period instead of sharing the
+  app's one `tick_ms`. `ctui_timer_register(duration_ms, widget,
+  handler)` registers a standalone timer with its own private
+  countdown. `ctui_timer_register_synchronized(duration_ms, widget,
+  handler)` instead buckets every registration sharing the same
+  `duration_ms` into one `CTUI_TIMER_GROUP` with a single shared
+  deadline, so e.g. three widgets all registered at 300ms fire in the
+  same `ctui_timer_tick()` call, frame after frame, rather than three
+  independently-scheduled 300ms timers that would eventually drift
+  apart. Both public functions share a `make_timer()` helper for the
+  actual `CTUI_TIMER` allocation/fill (`group` is `NULL` for an
+  independent timer, or the shared group being joined otherwise) —
+  they differ only in which array the new timer gets appended to and
+  whether that array is a group's `members` or the flat independent
+  list. Both registries are file-static in `timer.c` (not stored on
+  `CTUI_APP`, unlike the event handler registry) — simpler, and there's
+  only ever one live app per process anyway; `ctui_timer_reset()`
+  clears them, called by both `ctui_app_init()` (fresh slate) and
+  `ctui_app_free()` (teardown). `ctui_app_run()` calls
+  `ctui_timer_tick()` once per loop iteration and folds its return into
+  the same changed-so-render check `ctui_handle_event()` already
+  feeds — so a timer's real firing resolution is bounded by whatever
+  `tick_ms` the app's `ctui_app_run()` call was given, same limitation
+  `CTUI_TICK_EVENT` already has. A fired timer dispatches a
+  `CTUI_TIMER_EVENT` (source `"timer"`, no payload) directly to its own
+  `(widget, handler)` pair — not through `ctui_handle_event()`'s
+  registry, since the whole point is the timer subsystem already knows
+  exactly who to call. `src/widgets/periodic.c`/`periodic.h` is timer
+  glue and nothing else: `ctui_periodic_register(widget, duration_ms,
+  synchronized, handler)` wraps `ctui_timer_register()`/
+  `ctui_timer_register_synchronized()` so a caller never touches
+  `core/timer.h` directly, just this one widget-level call — it holds
+  no `widget_data` or render of its own, `handler` is the caller's.
+  `CTUI_FLICKER` (`examples_apps/flicker/widgets/flicker.c`/`flicker.h`)
+  is the actual content built on top: a hashed random char-or-blank
+  fill, reseeded on every timer fire it's wired to via
+  `ctui_periodic_register()`. Keeping these separate (rather than one
+  widget owning both the render and its own registration, an earlier
+  pass at this got called out for) means `periodic.c` stays reusable
+  by any future self-scheduling widget, not just this one. Only
+  `periodic.c`/`periodic.h` went straight into `src/widgets/` — a
+  deliberate exception to the usual second-app-needs-it promotion bar
+  (see `CLAUDE.md`), since `ctui_periodic_register()` reads as
+  generically reusable timer glue on its own; `CTUI_FLICKER` itself is
+  the specific, unproven-generic content, so it stays staged
+  app-local like any other new widget until a second app actually
+  wants a hashed-fill effect. Demonstrated by the `examples_apps/
+  flicker` app: six `CTUI_FLICKER` panes, three synchronized at
+  300ms, two more at 600ms, and one independent widget at 450ms that
+  visibly drifts in and out of phase with both groups. See
+  `tests/timer_test.c` for real
+  wall-clock (`nanosleep`-driven) proof that a synchronized pair fires
+  together while an independent timer fires on its own schedule.
 - **`examples_apps/`**: real, runnable ctui apps now live here, one
   subfolder per app (`main.c` + an optional local `widgets/`), moved out
   of `src/` so `src/` stays core-engine-and-stdlib-only. `demo` moved in
@@ -224,6 +279,26 @@ terminal resize.
       `CTUI_MENU`/`CTUI_STATUS` wired through actual event registration,
       7 assertions covering selection, event propagation, and resize) are
       the first use of both. `make test` target added.
+- [x] `CTUI_TIMER` core mechanism added (`src/core/timer.c`/`timer.h`):
+      `ctui_timer_register()` for independent per-widget periods,
+      `ctui_timer_register_synchronized()` to bucket same-duration
+      registrations into one shared-deadline group. Wired into
+      `ctui_app_init()`/`ctui_app_free()`/`ctui_app_run()`; new
+      `CTUI_TIMER_EVENT` added alongside `CTUI_TICK_EVENT` in
+      `core/event.h`. New `examples_apps/flicker` app (+ app-local
+      `CTUI_FLICKER` widget) demonstrates it: six panes reseeding a
+      hashed random fill, three synced at 300ms, two synced at 600ms,
+      one independent at 450ms. `tests/timer_test.c` proves the
+      grouping/independence with real `nanosleep()`-driven timing.
+      Verifying this against `tools/pty_harness.py` surfaced a real,
+      pre-existing bug in the harness itself: `drain()`'s inner loop
+      reused its caller-supplied `timeout` on every `select()` call
+      instead of budgeting total elapsed time, so a target that keeps
+      emitting output on a cadence shorter than that timeout (true of
+      flicker's staggered sub-second timers, unlike e.g. `clock`'s
+      once-a-second cadence with long quiet gaps) could keep `drain()`
+      finding fresh data forever and never return. Fixed by giving
+      `drain()` its own deadline computed once up front.
 
 ## Known issues / deliberately deferred
 
@@ -252,6 +327,10 @@ terminal resize.
   counterpart to remove a registration; fine while the demo's widgets
   live for the whole program, would matter for widgets that come and
   go dynamically.
+- **No timer unregistration either**, same reasoning as event handlers
+  above — `ctui_timer_register()`/`ctui_timer_register_synchronized()`
+  return a `CTUI_TIMER *` but there's no `ctui_timer_cancel()` yet to
+  do anything with it.
 - **`CTUI_SPLIT` only divides evenly, no per-child weights/ratios.** On
   a short terminal, the demo's 2-pane split (menu + debug_info, each
   wanting 7 rows) gets capped to whatever the main area's inner height

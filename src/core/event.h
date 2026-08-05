@@ -44,6 +44,16 @@ typedef enum {
                     * ctui_input_loop()) when no input arrives within its
                     * tick_ms interval. No payload -- event_data is NULL.
                     * ev_source is "timer". See ctui_app_run(). */
+  CTUI_TIMER_EVENT, /* fired by ctui_timer_tick() when a registered
+                     * CTUI_TIMER (or synchronized group) reaches its
+                     * deadline. No payload -- event_data is NULL.
+                     * ev_source is "timer", same string CTUI_TICK_EVENT
+                     * uses, but dispatched directly to each timer's own
+                     * (widget, handler) pair by core/timer.c, not through
+                     * ctui_handle_event()'s registry -- see
+                     * ctui_timer_register()/
+                     * ctui_timer_register_synchronized() in
+                     * core/timer.h. */
   CTUI_VALUE_CHANGED_EVENT, /* a widget's value changed; see
                             * CTUI_VALUE_CHANGED_EVENT_DATA. Any widget can
                             * emit one by calling ctui_handle_event() from

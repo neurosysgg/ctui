@@ -3,6 +3,7 @@
 #include "ctui_internal.h"
 #include "input.h"
 #include "log.h"
+#include "timer.h"
 
 #include <stdlib.h>
 
@@ -17,6 +18,7 @@ void ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
   app->handler_count = 0;
   app->handler_cap = 0;
   g_app = app;
+  ctui_timer_reset();
   ctui_logf(E_INF,
             "[CTUI:APP] - app initialised @ tick %d (%d widgets, %dx%d "
             "compositor)\n",
@@ -31,6 +33,7 @@ void ctui_app_free(CTUI_APP *app) {
   ctui_logf(E_INF, "[CTUI:APP] - freeing app @ tick %d\n",
             ctui_tick_advance());
   free(app->handlers);
+  ctui_timer_reset();
   ctui_compositor_free(app->comp);
 }
 
@@ -110,7 +113,11 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
       }
     }
 
-    if (ctui_handle_event(&ev)) {
+    int changed = ctui_handle_event(&ev);
+    if (ctui_timer_tick()) {
+      changed = 1;
+    }
+    if (changed) {
       ctui_app_render(app, screen);
       ctui_screen_flush(screen);
     }

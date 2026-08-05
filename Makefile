@@ -21,7 +21,13 @@ ctui-file_browser: $(CORE_SRC) $(CORE_HDR) examples_apps/file_browser/main.c $(w
 ctui-calculator: $(CORE_SRC) $(CORE_HDR) examples_apps/calculator/main.c examples_apps/calculator/calc.c examples_apps/calculator/calc.h $(wildcard examples_apps/calculator/widgets/*)
 	$(CC) $(CFLAGS) -o ctui-calculator $(CORE_SRC) examples_apps/calculator/main.c examples_apps/calculator/calc.c $(wildcard examples_apps/calculator/widgets/*.c)
 
-examples: ctui-clock ctui-file_browser ctui-calculator
+ctui-flicker: $(CORE_SRC) $(CORE_HDR) examples_apps/flicker/main.c $(wildcard examples_apps/flicker/widgets/*)
+	$(CC) $(CFLAGS) -o ctui-flicker $(CORE_SRC) examples_apps/flicker/main.c $(wildcard examples_apps/flicker/widgets/*.c)
+
+ctui-matrix: $(CORE_SRC) $(CORE_HDR) examples_apps/matrix/main.c $(wildcard examples_apps/matrix/widgets/*)
+	$(CC) $(CFLAGS) -o ctui-matrix $(CORE_SRC) examples_apps/matrix/main.c $(wildcard examples_apps/matrix/widgets/*.c)
+
+examples: ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix
 
 all: ctui-demo examples
 
@@ -32,6 +38,6 @@ test: $(TEST_BIN)
 	@for t in $(TEST_BIN); do echo "-- $$t --"; ./$$t || exit 1; done
 
 clean:
-	rm -f ctui-demo ctui-clock ctui-file_browser ctui-calculator $(TEST_BIN)
+	rm -f ctui-demo ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix $(TEST_BIN)
 
 .PHONY: clean examples all test

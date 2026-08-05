@@ -125,9 +125,20 @@ def set_winsize(fd, rows, cols):
 
 
 def drain(fd, buf, timeout=0.05):
-    """Read whatever is available right now, looping until quiet."""
+    """Read whatever is available right now, looping until quiet -- bounded
+    to timeout total, not timeout per read. A target that keeps emitting
+    output on a cadence shorter than timeout (e.g. several staggered
+    sub-second periodic timers, each just quiet long enough on its own)
+    would otherwise keep this loop's select() finding fresh data forever,
+    since re-passing the same fixed timeout to every iteration never
+    accounts for time already spent -- this hung indefinitely against the
+    flicker example app before being bounded here."""
+    deadline = time.time() + timeout
     while True:
-        r, _, _ = select.select([fd], [], [], timeout)
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return
+        r, _, _ = select.select([fd], [], [], remaining)
         if fd not in r:
             return
         try:
