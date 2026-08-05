@@ -24,7 +24,8 @@ make test     # builds and runs everything under tests/
 
 Requires a C11 compiler and a real terminal (raw mode + alternate screen
 buffer). `make examples` builds just the non-demo apps; `make clean`
-removes all built binaries.
+removes all built binaries. `ctui-player` additionally links `-lasound`
+(ALSA dev headers/lib) — every other target only depends on libc.
 
 ## Project layout
 
@@ -38,20 +39,22 @@ removes all built binaries.
   `g_resize_pending`) shared only between core translation units. Has no
   knowledge of any specific widget.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
-  `menu`, `status`, `debug_info`, `grid`), each a small `.c`/`.h` pair
-  built entirely on the public `ctui.h` API.
+  `menu`, `status`, `debug_info`, `grid`, `list`), each a small `.c`/`.h`
+  pair built entirely on the public `ctui.h` API.
 - `examples_apps/` — real, runnable ctui apps, one subfolder each
   (`examples_apps/<name>/main.c` + an optional local `widgets/`):
   `demo` (the original 3-area header/main/footer layout demonstrating
   resizing and event wiring), `clock` (a ticking clock, driving the
   `CTUI_TICK_EVENT` timer mechanism), `file_browser` (a scrollable,
-  navigable directory listing), and `calculator` (a 4-function calculator —
+  navigable directory listing), `calculator` (a 4-function calculator —
   a right-aligned `CTUI_DISPLAY` readout above a navigable `CTUI_GRID` of
   buttons; the arithmetic itself is a small, ctui-independent state machine
   in its own `calc.h`/`calc.c`, with `main.c` translating between `CTUI_GRID`
-  presses and its tokens). An app's local `widgets/` is where new stdlib
-  candidates get proven out before graduating to `src/widgets/` once a
-  second app needs them.
+  presses and its tokens), and `player` (a WAV player with a live VU-meter
+  viz, playing through ALSA — see `examples_apps/player/DESIGN.md` for the
+  full design notes on its decoder/output/process pipeline). An app's local
+  `widgets/` is where new stdlib candidates get proven out before
+  graduating to `src/widgets/` once a second app needs them.
 - `tests/` — headless C tests, run via `make test`. Each one wires up
   real widgets/events like an app's `main()` would, injects input via
   `tools/ctui_test.h`, and asserts against the rendered screen buffer.

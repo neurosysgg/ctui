@@ -27,7 +27,10 @@ ctui-flicker: $(CORE_SRC) $(CORE_HDR) examples_apps/flicker/main.c $(wildcard ex
 ctui-matrix: $(CORE_SRC) $(CORE_HDR) examples_apps/matrix/main.c $(wildcard examples_apps/matrix/widgets/*)
 	$(CC) $(CFLAGS) -o ctui-matrix $(CORE_SRC) examples_apps/matrix/main.c $(wildcard examples_apps/matrix/widgets/*.c)
 
-examples: ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix
+ctui-player: $(CORE_SRC) $(CORE_HDR) examples_apps/player/main.c $(wildcard examples_apps/player/audio/*) $(wildcard examples_apps/player/decoders/*) $(wildcard examples_apps/player/outputs/*) $(wildcard examples_apps/player/widgets/*)
+	$(CC) $(CFLAGS) -o ctui-player $(CORE_SRC) examples_apps/player/main.c $(wildcard examples_apps/player/decoders/*.c) $(wildcard examples_apps/player/outputs/*.c) $(wildcard examples_apps/player/widgets/*.c) -lasound -lm
+
+examples: ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player
 
 all: ctui-demo examples
 
@@ -38,6 +41,6 @@ test: $(TEST_BIN)
 	@for t in $(TEST_BIN); do echo "-- $$t --"; ./$$t || exit 1; done
 
 clean:
-	rm -f ctui-demo ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix $(TEST_BIN)
+	rm -f ctui-demo ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player $(TEST_BIN)
 
 .PHONY: clean examples all test

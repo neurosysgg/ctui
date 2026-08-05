@@ -300,8 +300,63 @@ terminal resize.
       finding fresh data forever and never return. Fixed by giving
       `drain()` its own deadline computed once up front.
 
+- [x] `examples_apps/player` added: a terminal WAV player with a live
+      VU-meter level display, playing through ALSA. Design decided up
+      front in `examples_apps/player/DESIGN.md` before any code existed
+      (three independent stages — decoder, output, process — tee'd off
+      the same interleaved-float32 buffer; a single ~20ms `CTUI_TIMER`
+      tick drives all three each frame, no playback thread/ring buffer).
+      `CTUI_DECODER`/`CTUI_AUDIO_OUTPUT` (`examples_apps/player/audio/`)
+      mirror `CTUI_WIDGET`'s render/layout function-pointer dispatch.
+      `decoders/wav.c` is a from-scratch canonical-PCM RIFF parser
+      (8/16/24/32-bit integer, rejects IEEE float and
+      WAVE_FORMAT_EXTENSIBLE) kept entirely free of `ctui.h`, same
+      precedent as calculator's `calc.c` — verified standalone against a
+      synthetic WAV before anything else was wired to it.
+      `outputs/alsa.c`/`outputs/null.c` implement `CTUI_AUDIO_OUTPUT`;
+      ALSA is opened `SND_PCM_NONBLOCK` and `main.c` falls back to
+      `null_output` (drops frames, keeps the meter/UI alive) if opening
+      the real device fails, so the app still runs headless without
+      audio hardware. `alsa.c`/`alsa.h` need `_GNU_SOURCE` defined as the
+      including `.c` file's first line (before any `#include`) —
+      `alsa/asoundlib.h`'s own `struct timespec` fallback collides with
+      glibc's under plain `-std=c11` otherwise; same convention already
+      used for `_POSIX_C_SOURCE` in `core/term.c`/`core/input.c`/
+      `core/timer.c`/`file_browser`'s `main.c`. The viz is a single
+      VU-style bar (`examples_apps/player/widgets/meter.c`, app-local —
+      nothing else needs it yet), fed each timer tick by an RMS
+      computed over the same chunk the decoder handed output, per the
+      design's read-only-tap decision (process never touches the
+      buffer output plays). File selection reuses `file_browser`'s list
+      navigation unchanged; since `player` is a second consumer,
+      `CTUI_LIST` (`list.c`/`list.h`) was promoted from
+      `examples_apps/file_browser/widgets/` straight to `src/widgets/`
+      per `CLAUDE.md`'s promotion rule (`git mv`, no code changes, no
+      include-path surgery — `file_browser`'s own `#include
+      "widgets/list.h"` now falls back to the stdlib copy automatically).
+      New `ctui-player` Makefile target links `-lasound -lm` for that
+      target only, every other binary still depends on libc alone.
+      Verified via `tools/pty_harness.py`: directory navigation filtered
+      to `*.wav` + subdirs, playback start/EOF/stop lifecycle, the
+      meter's RMS-driven level and color zones (confirmed via raw ANSI —
+      `30;42` while a mid-volume tone played, `30;40` for the unfilled
+      remainder), and a live resize mid-layout.
+
 ## Known issues / deliberately deferred
 
+- **`player` stutters every few seconds on longer real-world WAV files**
+  (reported against an FL Studio export; a full clean stop-then-restart,
+  not pitch tearing/glitching mid-sample, and it catches up ~100ms
+  later). Not yet reproduced with the short synthetic test tones used
+  during initial verification, so root cause is unconfirmed — leading
+  suspects are the single-threaded 20ms timer tick occasionally missing
+  its deadline (main loop busy elsewhere that tick) or an ALSA
+  underrun/`-EPIPE` recovery cycle in `alsa_write()`. DESIGN.md flagged
+  this exact tradeoff up front ("Revisit only if underruns actually show
+  up in testing — don't preemptively build the threaded version"); this
+  is that signal, but not chased down yet. Next step would be logging
+  `alsa_write()`'s returned frame count and `playback_tick()`'s own call
+  interval to see which side is actually missing its deadline.
 - **`ctui_screen_flush` buffer sizing is fragile.** `snprintf` returns
   the length it *would* write, not what it actually wrote if the
   destination is too small — `len` isn't guarded against this, so an
@@ -342,10 +397,16 @@ terminal resize.
 
 ## Next up
 
-- Promote `CTUI_CLOCK` and `CTUI_LIST` from their `examples_apps/*/
-  widgets/` staging spots to `src/widgets/`, once a second app actually
-  needs either of them — see the `examples_apps/` entry above for the
-  promotion criterion.
+- Promote `CTUI_CLOCK` from its `examples_apps/clock/widgets/` staging
+  spot to `src/widgets/`, once a second app actually needs it — see the
+  `examples_apps/` entry above for the promotion criterion. (`CTUI_LIST`
+  made this jump already, promoted alongside `player`.)
+- `player`'s `CTUI_METER` (currently staged in
+  `examples_apps/player/widgets/`) is a similar promotion candidate once
+  a second app wants a level meter/viz.
+- FLAC decoder for `player`, once the WAV decoder + `CTUI_DECODER`
+  interface have proven themselves further — deferred from v1 by design,
+  see `examples_apps/player/DESIGN.md`.
 - Weighted/unequal `CTUI_SPLIT` panes, once the even-split limitation
   above actually bites on a real layout.
 - Per-instance event identity, if/when a second instance of the same
