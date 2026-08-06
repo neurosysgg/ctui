@@ -1,5 +1,9 @@
 # ctui-demo-advanced — build process notes
 
+## preamble
+
+advanced-ish demo app for the ctui ui library, built entirely by claude code in one prompt with zero refinement. the main reason for this approach is to prove API sane-ness and simplicity.
+
 A record of how this app got built in one session, kept for the same reason
 `player/DESIGN.md` exists: so a future session (or a future me) doesn't have
 to re-derive the reasoning from the diff alone. This one is written
@@ -11,6 +15,7 @@ asked, what was explored, and why each decision landed where it did.
 > lets make a demo-advanced example app.
 >
 > in principle, it's the same as the existing app, BUT;
+>
 > - truecolor (v1)
 > - header stays
 > - add a new navbar widget below the header
