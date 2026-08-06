@@ -63,7 +63,8 @@ int ctui_menu_handle_keypress(CTUI_WIDGET *self, CTUI_EVENT *ev) {
     CTUI_EVENT changed_ev = {.type = CTUI_VALUE_CHANGED_EVENT,
                              .scope = CTUI_EVENT_SCOPE_GLOBAL,
                              .ev_source = "menu",
-                             .event_data = &changed};
+                             .event_data = &changed,
+                             .origin = self};
     ctui_handle_event(&changed_ev);
 
     return 1;

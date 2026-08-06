@@ -67,16 +67,39 @@ struct CTUI_WIDGET {
    * g_gfx_mode. NULL (the ctui_widget_make() default) means "no
    * alternate renderer" -- every widget just uses render. */
   void (*gfx_render)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
+
+  /* the widget this one is nested inside via CTUI_SPLIT/CTUI_GROUP, or
+   * NULL for any top-level widget (ctui_app_init() never sets this) --
+   * see EVENT_DESIGN.md. Set by ctui_split_layout() (per active child,
+   * every layout pass) and ctui_group_init() (from CTUI_GROUP.parent,
+   * every member); nothing else touches it. This is the one piece of
+   * tree structure event bubbling needs that nothing else tracks --
+   * parents already know their children (split->children, group-
+   * >members), nothing walked the other direction before this. */
+  CTUI_WIDGET *parent;
+
+  /* set on a PARENT widget (self) by ctui_split_layout() to a checker
+   * that reports whether child is currently one of self's active
+   * children (split->children[0..count)); NULL means "always active,"
+   * which is correct both for an ordinary widget (nothing ever walks up
+   * INTO one, since only split/group ever set a child's parent) and for
+   * a CTUI_GROUP parent (ctui_group_init() never sets this -- a group
+   * has no active/inactive subset, every member is always active). Read
+   * only by ctui_handle_event()'s CTUI_EVENT_SCOPE_BUBBLE walk, on the
+   * parent of whichever widget the walk is currently at, to decide
+   * whether the walk may continue past it. See EVENT_DESIGN.md's Phase
+   * 3 and Resolved open question 2. */
+  int (*is_active_child)(CTUI_WIDGET *parent, CTUI_WIDGET *child);
 };
 
 /* Trips if a field is appended to CTUI_WIDGET without updating
  * ctui_widget_make() (core/widget.c) to initialize it; a designated
  * initializer silently zero-fills an omitted field instead of erroring, so
  * this struct should always be built via ctui_widget_make() rather than a
- * literal. Does NOT catch a field inserted before `gfx_render` -- review
- * ctui_widget_make() by hand if you do that. */
-_Static_assert(offsetof(CTUI_WIDGET, gfx_render) +
-                       sizeof(((CTUI_WIDGET *)0)->gfx_render) ==
+ * literal. Does NOT catch a field inserted before `is_active_child` --
+ * review ctui_widget_make() by hand if you do that. */
+_Static_assert(offsetof(CTUI_WIDGET, is_active_child) +
+                       sizeof(((CTUI_WIDGET *)0)->is_active_child) ==
                    sizeof(CTUI_WIDGET),
                "CTUI_WIDGET changed shape; update ctui_widget_make()");
 

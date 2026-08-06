@@ -116,7 +116,10 @@ One allocation (`cells`) backing every widget's buffer — see
 The widget contract: `x, y, w, h`, `widget_data`, a required
 `render()`, an optional `layout()`, plus the Phase 4 (non-degradable
 graphics) fields (`supported_gfx_modes`, `gfx_render_mode`,
-`gfx_render`) that ordinary widgets never touch.
+`gfx_render`) that ordinary widgets never touch, plus `parent`/
+`is_active_child` — event-bubbling plumbing (see `event.h` below and
+`EVENT_DESIGN.md`) that only `ctui_split_layout()`/`ctui_group_init()`
+ever set; every other widget leaves both `NULL`.
 
 - `ctui_widget_make(x, y, w, h, widget_data, render, layout)` — always
   construct a `CTUI_WIDGET` through this, not a struct literal (a
@@ -151,18 +154,30 @@ addEventListener()-style: widgets register interest in one
 - `CTUI_EVENTTYPE` — `CTUI_KEYPRESS_EVENT`, `CTUI_RESIZE_EVENT`,
   `CTUI_TICK_EVENT`, `CTUI_TIMER_EVENT`, `CTUI_VALUE_CHANGED_EVENT`,
   plus unused `CTUI_FOCUS_EVENT`/`CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
+- `CTUI_EVENT_SCOPE` — `CTUI_EVENT_SCOPE_GLOBAL` (default; every
+  matching `(source, type)` handler runs, `origin` ignored) or
+  `CTUI_EVENT_SCOPE_BUBBLE` (only handlers registered on `ev->origin`
+  or one of its ancestors via `CTUI_WIDGET.parent` run, pruned at any
+  `CTUI_SPLIT` step where the child isn't currently active — see
+  `EVENT_DESIGN.md`). `origin`'s own handlers always run regardless of
+  pruning; pruning only gates whether the walk continues past it.
 - `ctui_event_register(source, type, widget, handler)` — `source` is a
   plain string convention agreed between emitter and listener
   (`"input"`, `"terminal"`, `"menu"`, ...), *not* derived from widget
-  identity — two instances of the same widget kind can't currently be
-  told apart by source alone. Requires `ctui_app_init()` to have run
-  first (registrations live on `g_app`).
-- `ctui_handle_event(ev)` — fires every handler whose `(source, type)`
-  matches `ev`, in registration order; returns `1` if any handler
-  returned `1` (a visible change occurred → caller should re-render).
-  A widget emits its own event by building a `CTUI_EVENT` and calling
-  this again from inside a handler — see `ctui_menu_handle_keypress()`
-  for the pattern.
+  identity — two instances of the same widget kind can't be told apart
+  by source alone under `GLOBAL` scope (`CTUI_EVENT_SCOPE_BUBBLE` +
+  `.origin = self` fixes this per-registration, opt-in). Requires
+  `ctui_app_init()` to have run first (registrations live on `g_app`).
+- `ctui_handle_event(ev)` — under `GLOBAL`, fires every handler whose
+  `(source, type)` matches `ev`, in registration order; under `BUBBLE`,
+  fires only handlers whose `(source, type, widget)` all match a widget
+  actually on `ev->origin`'s (pruned) ancestor chain. Returns `1` if any
+  handler returned `1` (a visible change occurred → caller should
+  re-render). A widget emits its own event by building a `CTUI_EVENT`
+  and calling this again from inside a handler — see
+  `ctui_menu_handle_keypress()` for the pattern (and `.origin = self`,
+  set at all four `CTUI_VALUE_CHANGED_EVENT` emit sites in
+  `src/widgets/`, ready for a listener to opt into `BUBBLE`).
 
 ## `timer.h` — self-scheduling widgets
 
@@ -195,7 +210,12 @@ Layering: members share one compositor slice (bound from
 - `ctui_group_init(group, comp)` — binds every member to the *same*
   slice; members after the first do **not** get a slice from their own
   `(x,y)` — see `CLAUDE.md`'s "Getting group vs. independent wrong is
-  a real bug" note before reaching for this.
+  a real bug" note before reaching for this. Also sets every member's
+  `->parent` to `group->parent` (a plain `CTUI_GROUP` field, `NULL`
+  unless the caller sets it — see `EVENT_DESIGN.md`, since a group
+  isn't itself wrapped in a `CTUI_WIDGET` the way a split is, so there's
+  no `self` to derive this from). Never sets `is_active_child` on a
+  member — a group has no active/inactive subset for one to check.
 - `ctui_group_render(group, comp)` — calls each member's `render()` in
   order via `ctui_widget_dispatch_render()`; doesn't blit itself.
 
@@ -211,7 +231,11 @@ Partitioning: divides one region into disjoint sub-areas.
   `ctui_widget_init()` against the same real compositor (no virtual
   sub-buffer). Assign directly as a widget's `layout()` for a
   fixed-position split, or call at the end of your own `layout()` if
-  the split's own geometry is itself dynamic.
+  the split's own geometry is itself dynamic. Also sets each active
+  child's `->parent = self` and `self->is_active_child` to a checker
+  that reports whether a given child is currently in
+  `children[0..count)` — the plumbing `CTUI_EVENT_SCOPE_BUBBLE` walks
+  in `event.c`; see `EVENT_DESIGN.md`.
 - `ctui_split_render(self, comp)` — renders `children[0..count-1]` in
   order via `ctui_widget_dispatch_render()`; the split draws nothing
   of its own.
@@ -342,3 +366,7 @@ see `docs/protocol.md`.
   for verifying a change to any of the above.
 - `docs/protocol.md` — the recipe for adding a new graphics protocol
   tier, and the deeper write-up on `gfx.h`'s Phase 4 mechanism.
+- `EVENT_DESIGN.md` — the deeper write-up on `CTUI_EVENT_SCOPE_BUBBLE`:
+  why it exists (the `ctui-mus` case study), the `parent`/
+  `is_active_child` mechanism, and the open questions resolved before
+  it was implemented.

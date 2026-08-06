@@ -59,14 +59,38 @@ terminal resize.
   fires every matching handler. `source` is a plain string convention
   (`"input"` for keypresses, `"terminal"` for resizes, or whatever a
   widget chooses when emitting its own event, e.g. `"menu"`) — not tied
-  to widget identity, so two instances of the same widget kind can't
-  currently be told apart by source alone. A widget emits its own event
-  by calling `ctui_handle_event()` again from inside a handler (see
-  `ctui_menu_handle_keypress()`). `CTUI_EVENT_SCOPE` still only has one
-  member (`_GLOBAL`) and isn't used for anything yet. The registry
-  itself is a realloc-grown array with linear-scan matching, not a real
-  hash map — plenty fast at this scale, and the public API
-  (register-by-key / dispatch-by-key) would look identical either way.
+  to widget identity, so two instances of the same widget kind can't be
+  told apart by source alone *under `CTUI_EVENT_SCOPE_GLOBAL`* — see
+  `CTUI_EVENT_SCOPE_BUBBLE` below for the opt-in fix. A widget emits its
+  own event by calling `ctui_handle_event()` again from inside a handler
+  (see `ctui_menu_handle_keypress()`). The registry itself is a
+  realloc-grown array with linear-scan matching, not a real hash map —
+  plenty fast at this scale, and the public API (register-by-key /
+  dispatch-by-key) would look identical either way.
+- **Event bubbling (`CTUI_EVENT_SCOPE_BUBBLE`)**: opt-in per event,
+  `CTUI_EVENT_SCOPE_GLOBAL` stays the default and is unchanged. Every
+  `CTUI_WIDGET` now carries `parent` (set by `ctui_split_layout()` for
+  each active child, and by `ctui_group_init()` from `CTUI_GROUP.parent`
+  — see `EVENT_DESIGN.md`'s Resolved open question 1, since a group has
+  no natural "self" widget to derive this from the way a split does) and
+  `is_active_child` (set only by `ctui_split_layout()`; `NULL` on a
+  group parent, since `CTUI_GROUP` has no active/inactive subset at
+  all — every member's always active). An emitter that wants
+  disambiguated, instance-scoped delivery sets `CTUI_EVENT.origin =
+  self` and `.scope = CTUI_EVENT_SCOPE_BUBBLE`; `ctui_handle_event()`
+  then walks `origin`, then `origin->parent`, etc., running only
+  handlers registered against each widget actually on that chain.
+  `origin`'s own handlers always fire; `is_active_child` only gates
+  whether the walk is allowed to continue past a step to that step's
+  parent — pruning a still-registered handler on a widget that's no
+  longer one of its split's active children, with no per-app "is this
+  currently visible" check needed. `list.c`/`menu.c`/`navbar.c`/
+  `grid.c`'s own `CTUI_VALUE_CHANGED_EVENT` emit sites all set `.origin
+  = self` now (still `.scope = GLOBAL` there — bubbling is per-app,
+  opt-in at the registration end, not forced by the emit site). See
+  `EVENT_DESIGN.md` for the full design and `tests/event_test.c`'s
+  `test_bubble()` for the sibling-isolation / ancestor-reach /
+  active-pruning behavior verified end to end.
 - **Resize**: `SIGWINCH` sets a flag (signal-safe: just a
   `sig_atomic_t`), picked up by `ctui_input_loop()` — which relies on
   the interrupted blocking `read()` returning `EINTR` to notice
@@ -952,13 +976,14 @@ terminal resize.
   growth (`ctui_logf`'s own `malloc` is the one place that *is*
   checked). Accepted risk for now — small allocations, unlikely to hit
   OOM in practice.
-- **Event `source` is a flat string namespace, not tied to widget
-  identity.** Fine for the demo (one menu, one status), but two
-  instances of the same widget kind emitting under the same source
-  string can't be told apart by a listener. No per-instance
-  source/identity scheme designed yet.
-- **`CTUI_EVENT_SCOPE` is vestigial.** Every event is effectively
-  global; the enum exists but nothing branches on it.
+- **Event `source` is still a flat string namespace under
+  `CTUI_EVENT_SCOPE_GLOBAL`.** Fixed for an emitter that opts into
+  `CTUI_EVENT_SCOPE_BUBBLE` (sets `.origin = self`) — see
+  `EVENT_DESIGN.md` and the "Event bubbling" Architecture entry above —
+  but `GLOBAL` itself is unchanged, so two instances sharing a source
+  string still collide for any listener that hasn't opted in.
+- ~~`CTUI_EVENT_SCOPE` is vestigial.~~ **Fixed** — `CTUI_EVENT_SCOPE_
+  BUBBLE` now exists alongside `_GLOBAL`; see `EVENT_DESIGN.md`.
 - **`CTUI_FOCUS_EVENT` and `CTUI_WIDGET_REDRAW` are declared (and
   named, in `ctui_eventtype_name()`) but never emitted.** Reserved
   event types with no producer yet.
@@ -993,7 +1018,10 @@ terminal resize.
   see `examples_apps/player/DESIGN.md`.
 - Weighted/unequal `CTUI_SPLIT` panes, once the even-split limitation
   above actually bites on a real layout.
-- Per-instance event identity, if/when a second instance of the same
-  widget kind needs to emit distinguishable events.
+- ~~Per-instance event identity~~ — done via `CTUI_EVENT_SCOPE_BUBBLE`
+  (`.origin = self`); see `EVENT_DESIGN.md`. Focus for raw input events
+  (`CTUI_KEYPRESS_EVENT` has no origin widget without a focus concept)
+  is still deferred — that's a separate design (`EVENT_DESIGN.md`'s
+  Deferred section).
 - True run-length diffing in `ctui_screen_flush` (skip ahead over runs
   of unchanged cells, not just per-cell compare).

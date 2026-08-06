@@ -85,6 +85,64 @@ void ctui_event_register(const char *source, CTUI_EVENTTYPE type,
             (void *)widget);
 }
 
+/* runs every handler registered for (ev->ev_source, ev->type, widget) --
+ * the same (source, type) match ctui_handle_event()'s CTUI_EVENT_SCOPE_
+ * GLOBAL path already does, narrowed to one specific widget. Shared by
+ * both the GLOBAL loop (widget == h->widget is implicit, every handler
+ * matches) and the BUBBLE walk below (one call per widget in the
+ * ancestor chain). */
+static int ctui_event_dispatch_to_widget(CTUI_EVENT *ev,
+                                         CTUI_WIDGET *widget) {
+  int changed = 0;
+  for (int i = 0; i < g_app->handler_count; i++) {
+    CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
+    if (h->type != ev->type || h->widget != widget)
+      continue;
+    if (h->source == NULL || ev->ev_source == NULL ||
+        strcmp(h->source, ev->ev_source) != 0)
+      continue;
+    if (h->handler(h->widget, ev))
+      changed = 1;
+  }
+  return changed;
+}
+
+/* CTUI_EVENT_SCOPE_BUBBLE dispatch: walks ev->origin, then ev->origin->
+ * parent, etc. up to NULL, running each widget's own (source, type,
+ * widget) handlers as it goes -- see EVENT_DESIGN.md's Phase 2/3.
+ * ev->origin's own handlers always run; the walk only stops moving
+ * further UP once a step's parent has an is_active_child that reports
+ * the child it just ran isn't currently active (Resolved open question
+ * 3: the check gates continuing the walk, never the widget it's
+ * currently on). */
+static int ctui_event_dispatch_bubble(CTUI_EVENT *ev) {
+  if (!ev->origin) {
+    ctui_log(E_WRN,
+             "[CTUI:EVENT] - CTUI_EVENT_SCOPE_BUBBLE event with no origin, "
+             "dropping\n");
+    return 0;
+  }
+
+  int changed = 0;
+  CTUI_WIDGET *w = ev->origin;
+  while (w) {
+    if (ctui_event_dispatch_to_widget(ev, w))
+      changed = 1;
+
+    CTUI_WIDGET *parent = w->parent;
+    if (parent && parent->is_active_child &&
+       !parent->is_active_child(parent, w)) {
+      ctui_logf(E_DBG,
+                "[CTUI:EVENT] - bubble walk stopped @ tick %d, widget %p "
+                "not active in parent %p\n",
+                ctui_tick_advance(), (void *)w, (void *)parent);
+      break;
+    }
+    w = parent;
+  }
+  return changed;
+}
+
 int ctui_handle_event(CTUI_EVENT *ev) {
   int changed = 0;
   ctui_logf(E_INF,
@@ -95,15 +153,19 @@ int ctui_handle_event(CTUI_EVENT *ev) {
     ctui_log(E_WRN, "[CTUI:EVENT] - no app registered, dropping event\n");
     return 0;
   }
-  for (int i = 0; i < g_app->handler_count; i++) {
-    CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
-    if (h->type != ev->type)
-      continue;
-    if (h->source == NULL || ev->ev_source == NULL ||
-        strcmp(h->source, ev->ev_source) != 0)
-      continue;
-    if (h->handler(h->widget, ev))
-      changed = 1;
+  if (ev->scope == CTUI_EVENT_SCOPE_BUBBLE) {
+    changed = ctui_event_dispatch_bubble(ev);
+  } else {
+    for (int i = 0; i < g_app->handler_count; i++) {
+      CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
+      if (h->type != ev->type)
+        continue;
+      if (h->source == NULL || ev->ev_source == NULL ||
+          strcmp(h->source, ev->ev_source) != 0)
+        continue;
+      if (h->handler(h->widget, ev))
+        changed = 1;
+    }
   }
   ctui_logf(E_INF, "[CTUI:EVENT] - event dispatched @ tick %d (changed=%d)\n",
             ctui_tick_advance(), changed);

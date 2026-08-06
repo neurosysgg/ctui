@@ -20,9 +20,11 @@ void ctui_group_init(CTUI_GROUP *group, CTUI_COMPOSITOR *comp) {
 
   ctui_widget_init(&group->members[0], comp);
   CTUI_CELL *shared_buf = group->members[0].buf;
+  group->members[0].parent = group->parent;
 
   for (size_t i = 1; i < group->size; i++) {
     group->members[i].buf = shared_buf;
+    group->members[i].parent = group->parent;
   }
 
   ctui_logf(E_INF,

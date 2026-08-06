@@ -63,7 +63,16 @@ typedef enum {
 } CTUI_EVENTTYPE;
 
 typedef enum {
-  CTUI_EVENT_SCOPE_GLOBAL,
+  CTUI_EVENT_SCOPE_GLOBAL, /* every matching (source, type) handler runs,
+                           * regardless of origin -- today's behavior,
+                           * unchanged. origin is ignored even if set. */
+  CTUI_EVENT_SCOPE_BUBBLE, /* only handlers registered on ev->origin
+                           * itself, or on one of its ancestors via
+                           * CTUI_WIDGET.parent, run -- and only as far up
+                           * the chain as every CTUI_SPLIT/CTUI_GROUP step
+                           * currently has the child on its active path
+                           * (CTUI_WIDGET.is_active_child). Requires
+                           * ev->origin to be set; see EVENT_DESIGN.md. */
 } CTUI_EVENT_SCOPE;
 
 typedef struct {
@@ -76,6 +85,12 @@ typedef struct {
    * on; see those for the full contract. */
   const char *ev_source;
   void *event_data;
+  /* the widget that produced this event, or NULL. Ignored under
+   * CTUI_EVENT_SCOPE_GLOBAL. Required under CTUI_EVENT_SCOPE_BUBBLE --
+   * an emitter that wants bubble semantics sets this to `self` (see
+   * ctui_list_handle_keypress() and the other three CTUI_VALUE_CHANGED_
+   * EVENT emit sites for the pattern). See EVENT_DESIGN.md. */
+  CTUI_WIDGET *origin;
 } CTUI_EVENT;
 
 const char *ctui_keytype_name(CTUI_KEYTYPE type);
@@ -108,12 +123,20 @@ void ctui_event_register(const char *source, CTUI_EVENTTYPE type,
                          CTUI_WIDGET *widget,
                          int (*handler)(CTUI_WIDGET *self, CTUI_EVENT *ev));
 
-/* walks the registry built by ctui_event_register(), calling handler(widget,
- * ev) for every registration whose (source, type) matches
- * (ev->ev_source, ev->type). Returns 1 if any handler returned 1 (a visible
- * change occurred, so the caller should re-render), 0 otherwise. Widgets
- * emit their own events by calling this from within a handler -- see
- * ctui_menu_handle_keypress() for the pattern. */
+/* walks the registry built by ctui_event_register(). Under
+ * CTUI_EVENT_SCOPE_GLOBAL, calls handler(widget, ev) for every
+ * registration whose (source, type) matches (ev->ev_source, ev->type).
+ * Under CTUI_EVENT_SCOPE_BUBBLE (requires ev->origin), instead walks
+ * ev->origin, then ev->origin->parent, etc. up to NULL -- pruned early if
+ * a step's parent has a non-NULL is_active_child that reports the child
+ * isn't currently active -- and at each widget in that (possibly
+ * truncated) chain calls handler(widget, ev) for every registration whose
+ * (source, type, widget) all match. ev->origin's own handlers always run,
+ * regardless of pruning; see EVENT_DESIGN.md for the full design. Returns
+ * 1 if any handler returned 1 (a visible change occurred, so the caller
+ * should re-render), 0 otherwise. Widgets emit their own events by
+ * calling this from within a handler -- see ctui_menu_handle_keypress()
+ * for the pattern. */
 int ctui_handle_event(CTUI_EVENT *ev);
 
 #endif

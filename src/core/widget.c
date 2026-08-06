@@ -29,7 +29,9 @@ CTUI_WIDGET ctui_widget_make(int x, int y, int w, int h, void *widget_data,
       .supported_gfx_modes =
           CTUI_GFX_ANSI16 | CTUI_GFX_ANSI256 | CTUI_GFX_TRUECOLOR,
       .gfx_render_mode = 0,
-      .gfx_render = NULL};
+      .gfx_render = NULL,
+      .parent = NULL,
+      .is_active_child = NULL};
 }
 
 void ctui_widget_tick_advance(CTUI_WIDGET *widget) { ++widget->ticks; }

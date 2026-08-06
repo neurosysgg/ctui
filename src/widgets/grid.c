@@ -50,7 +50,7 @@ void ctui_grid_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   }
 }
 
-static void grid_press(CTUI_GRID *grid, int row, int col) {
+static void grid_press(CTUI_WIDGET *self, CTUI_GRID *grid, int row, int col) {
   CTUI_GRID_ITEM *item = &grid->items[row * grid->cols + col];
   grid->sel_row = row;
   grid->sel_col = col;
@@ -62,7 +62,8 @@ static void grid_press(CTUI_GRID *grid, int row, int col) {
   CTUI_EVENT changed_ev = {.type = CTUI_VALUE_CHANGED_EVENT,
                            .scope = CTUI_EVENT_SCOPE_GLOBAL,
                            .ev_source = "grid",
-                           .event_data = &changed};
+                           .event_data = &changed,
+                           .origin = self};
   ctui_handle_event(&changed_ev);
 }
 
@@ -93,7 +94,7 @@ int ctui_grid_handle_keypress(CTUI_WIDGET *self, CTUI_EVENT *ev) {
       return 1;
     }
   } else if (kd->type == CTUI_KEY_ENTER) {
-    grid_press(grid, grid->sel_row, grid->sel_col);
+    grid_press(self, grid, grid->sel_row, grid->sel_col);
     return 1;
   } else if (kd->type == CTUI_KEY_CHAR) {
     /* most terminals send DEL (0x7f) for the physical Backspace key, some
@@ -105,7 +106,7 @@ int ctui_grid_handle_keypress(CTUI_WIDGET *self, CTUI_EVENT *ev) {
         CTUI_GRID_ITEM *item = &grid->items[r * grid->cols + c];
         if (item->code && tolower((unsigned char)item->code) ==
                               tolower((unsigned char)ch)) {
-          grid_press(grid, r, c);
+          grid_press(self, grid, r, c);
           return 1;
         }
       }

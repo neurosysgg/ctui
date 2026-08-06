@@ -13,9 +13,25 @@ static int ctui_split_grid_cols(int count) {
   return cols;
 }
 
+/* self->is_active_child, set below -- reports whether child is currently
+ * one of parent's active children (children[0..count)). See
+ * EVENT_DESIGN.md's Phase 3 / Resolved open question 2: ctui_group_init()
+ * never sets is_active_child, so this is the only checker that ever
+ * runs. */
+static int ctui_split_is_active_child(CTUI_WIDGET *parent, CTUI_WIDGET *child) {
+  CTUI_SPLIT *split = parent->widget_data;
+  for (int i = 0; i < split->count; i++) {
+    if (split->children[i] == child) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   CTUI_SPLIT *split = self->widget_data;
   split->comp = comp;
+  self->is_active_child = ctui_split_is_active_child;
 
   if (split->count <= 0) {
     ctui_logf(E_WRN,
@@ -36,6 +52,7 @@ void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       child->y = y;
       child->h = base + (i == split->count - 1 ? remainder : 0);
       y += child->h;
+      child->parent = self;
       ctui_widget_init(child, comp);
     }
   } else if (split->mode == CTUI_SPLIT_H) {
@@ -49,6 +66,7 @@ void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       child->x = x;
       child->w = base + (i == split->count - 1 ? remainder : 0);
       x += child->w;
+      child->parent = self;
       ctui_widget_init(child, comp);
     }
   } else {
@@ -63,6 +81,7 @@ void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       child->w = base_w + (c == cols - 1 ? rem_w : 0);
       child->y = self->y + r * base_h;
       child->h = base_h + (r == rows - 1 ? rem_h : 0);
+      child->parent = self;
       ctui_widget_init(child, comp);
     }
   }
