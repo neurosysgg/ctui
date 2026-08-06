@@ -724,6 +724,29 @@ terminal resize.
   correctly collapses back to just the menu (`V, 1 active children`)
   once the last panel is disabled. `make all`/`make test` warning-free
   throughout (25 assertions).
+- [x] Two new `core/util.c`/`util.h` geometry helpers: `ctui_util_rescale_i()`
+      (clamped linear integer rescale from one range to another — e.g.
+      mapping a column index to a 256-color cube index) and
+      `ctui_util_inset()`/`ctui_margin_uniform()` (sets a content
+      widget's `x/y/w/h` to an outer widget's *current* `x/y/w/h`, inset
+      by a `CTUI_MARGIN` on each side). The latter formalizes the
+      "border draws its full box, content is a separate, inset widget"
+      pattern the demo already did by hand — `demo`'s
+      `header_title_layout()` now calls `ctui_util_inset(self,
+      header_border_widget, ctui_margin_uniform(1))` instead of
+      re-deriving the header's box from scratch, reading `header_border`'s
+      already-laid-out geometry off a new file-scope widget pointer
+      (same pattern as `debug_info_widget` etc.). `dump_palette`'s
+      256-color ramp now builds its per-column index via
+      `ctui_util_rescale_i(col, 0, self->w - 1, 16, 231)` instead of
+      inline `16 + col * 216 / self->w` math. Both fail (log `E_WRN`,
+      leave output untouched) rather than produce a degenerate result —
+      `rescale_i` on `in_min == in_max`, `inset` on a margin that
+      consumes the whole outer width/height. `tests/util_test.c` covers
+      both directly (clamping, midpoint, zero-width degenerate case,
+      symmetric/asymmetric margins, rejected-inset leaves geometry
+      untouched); `make all`/`make test` warning-free, `pty_harness.py`
+      confirms the demo's header title still renders identically.
 
 ## Known issues / deliberately deferred
 

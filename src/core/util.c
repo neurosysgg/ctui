@@ -57,6 +57,57 @@ int ctui_util_truncate_str(char *str, size_t desired, char *trunc) {
   return 0;
 }
 
+int ctui_util_rescale_i(int value, int in_min, int in_max, int out_min,
+                        int out_max) {
+  if (in_min == in_max) {
+    ctui_logf(E_WRN,
+              "[CTUI:UTIL] - rescale_i rejected @ tick %d, in_min == in_max "
+              "(%d)\n",
+              ctui_tick_advance(), in_min);
+    return out_min;
+  }
+
+  if (value < in_min) {
+    value = in_min;
+  } else if (value > in_max) {
+    value = in_max;
+  }
+
+  return out_min + (value - in_min) * (out_max - out_min) / (in_max - in_min);
+}
+
+CTUI_MARGIN ctui_margin_uniform(int n) {
+  return (CTUI_MARGIN){.top = n, .right = n, .bottom = n, .left = n};
+}
+
+int ctui_util_inset(CTUI_WIDGET *content, CTUI_WIDGET *outer,
+                    CTUI_MARGIN margin) {
+  int w = outer->w - margin.left - margin.right;
+  int h = outer->h - margin.top - margin.bottom;
+
+  if (w <= 0 || h <= 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:UTIL] - inset rejected @ tick %d, margin "
+              "(top=%d,right=%d,bottom=%d,left=%d) leaves no room in "
+              "outer's %dx%d box\n",
+              ctui_tick_advance(), margin.top, margin.right, margin.bottom,
+              margin.left, outer->w, outer->h);
+    return -1;
+  }
+
+  content->x = outer->x + margin.left;
+  content->y = outer->y + margin.top;
+  content->w = w;
+  content->h = h;
+
+  ctui_logf(E_DBG,
+            "[CTUI:UTIL] - inset @ tick %d (outer %dx%d @ %d,%d -> content "
+            "%dx%d @ %d,%d)\n",
+            ctui_tick_advance(), outer->w, outer->h, outer->x, outer->y, w,
+            h, content->x, content->y);
+  return 0;
+}
+
 static const char base64_alphabet[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

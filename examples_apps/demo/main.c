@@ -30,13 +30,18 @@ static void header_border_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   self->h = header_h;
 }
 
+/* header_border_widget is laid out first (see widgets[] in main() below),
+ * so its x/y/w/h are already current here -- ctui_util_inset() reads them
+ * straight off it instead of re-deriving the header's box from scratch,
+ * the "border draws its full box, content gets margin'd inside it"
+ * pattern (see core/util.h). Margin of 1 == the border's own edge
+ * thickness (see ctui_border_render()), so the title sits fully inside
+ * it, never sharing a cell with the border. */
+static CTUI_WIDGET *header_border_widget;
+
 static void header_title_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
-  int header_h, main_h, footer_h;
-  demo_area_heights(comp->rows, &header_h, &main_h, &footer_h);
-  self->x = 1;
-  self->y = 1;
-  self->w = comp->cols - 2;
-  self->h = header_h - 2;
+  (void)comp;
+  ctui_util_inset(self, header_border_widget, ctui_margin_uniform(1));
 }
 
 static void main_border_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
@@ -268,6 +273,7 @@ int main(void) {
    * immediately overwritten before anything reads it. */
   CTUI_WIDGET header_border = ctui_widget_make(
       0, 0, 0, 0, &border_style, ctui_border_render, header_border_layout);
+  header_border_widget = &header_border;
   CTUI_WIDGET header_title = ctui_widget_make(
       0, 0, 0, 0, &title, ctui_label_render, header_title_layout);
   CTUI_WIDGET main_border = ctui_widget_make(

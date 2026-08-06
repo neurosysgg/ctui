@@ -144,7 +144,8 @@ void ctui_dump_palette_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
      * (232-255) so this visibly demonstrates color_mode == 256 rather
      * than just reproducing the swatches above in a different encoding */
     for (int col = 0; col < self->w; col++) {
-      unsigned char idx = (unsigned char)(16 + col * 216 / self->w);
+      unsigned char idx = (unsigned char)ctui_util_rescale_i(
+          col, 0, self->w - 1, 16, 231);
       ctui_widget_putc_256(self, comp, grid_h, col, ' ', CTUI_COLOR_DEFAULT,
                            idx);
     }
