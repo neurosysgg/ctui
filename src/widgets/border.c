@@ -74,8 +74,13 @@ void ctui_border_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
 #define CTUI_BORDER_PX_PER_ROW 16
 /* stroke width in pixels, centered on the rounded-rect boundary (half
  * inside, half outside) -- a few pixels reads as a crisp line at this
- * assumed cell size without looking like a filled band */
-#define CTUI_BORDER_STROKE_PX 3.0
+ * assumed cell size without looking like a filled band. Bumped from the
+ * original 3.0: once every tile got its own border too (see ctui-mus's
+ * gui/widgets/tile.c), a 3px stroke on an inner tile border read as too
+ * thin against the same-weight outer frame right next to it; 5px still
+ * reads as a line, not a filled band, at the ~8x16px assumed cell size
+ * below. */
+#define CTUI_BORDER_STROKE_PX 5.0
 
 /* 4x4 ordered-dither (Bayer) matrix, values 0-15 -- used by the dithered
  * stroke path below to decide stroke-vs-accent per pixel instead of a
