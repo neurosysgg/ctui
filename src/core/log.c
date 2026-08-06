@@ -74,3 +74,6 @@ void ctui_log_init(int verbosity) {
 }
 
 void ctui_log_shutdown(void) { shutdown_logger(&logger); }
+
+void ctui_log_set_buffered(void) { logger_set_buffered(&logger, 1); }
+void ctui_log_set_unbuffered(void) { logger_set_buffered(&logger, 0); }

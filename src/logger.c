@@ -14,16 +14,23 @@ CTUI_LOGGER init_logger(char *path, int verbosity) {
             "stderr\n",
             path);
   }
-  CTUI_LOGGER logger = {
-      .file = f, .log_entry = log_entry, .path = path, .verbosity = verbosity};
+  CTUI_LOGGER logger = {.file = f,
+                        .log_entry = log_entry,
+                        .path = path,
+                        .verbosity = verbosity,
+                        .buffered = 0};
   return logger;
 }
 
 void shutdown_logger(CTUI_LOGGER *logger) {
   if (logger->file != NULL && logger->file != stderr) {
-    fclose(logger->file);
+    fclose(logger->file); /* always flushes, even in buffered mode */
   }
   logger->file = NULL;
+}
+
+void logger_set_buffered(CTUI_LOGGER *logger, int buffered) {
+  logger->buffered = buffered;
 }
 
 static int log_entry(CTUI_LOGGER *self, int level, const char *log_str) {
@@ -35,7 +42,9 @@ static int log_entry(CTUI_LOGGER *self, int level, const char *log_str) {
 
   size_t len = strlen(log_str);
   size_t written = fwrite(log_str, sizeof(char), len, self->file);
-  fflush(self->file);
+  if (!self->buffered) {
+    fflush(self->file);
+  }
   if (written != len)
     return -1;
   return (int)written;

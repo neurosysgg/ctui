@@ -1,5 +1,6 @@
 #include "gfx.h"
 
+#include "cell.h"
 #include "log.h"
 #include "util.h"
 
@@ -37,6 +38,26 @@ unsigned int ctui_gfx_detect_caps(void) {
             colorterm ? colorterm : "(unset)",
             kitty_window ? kitty_window : "(unset)");
   return caps;
+}
+
+/* xterm's standard 16-color palette, normal-intensity half (indices 0-7,
+ * matching CTUI_COLOR_BLACK..WHITE) -- see the doc comment on
+ * ctui_gfx_ansi16_rgb() in gfx.h for what this table is/isn't claiming. */
+static const unsigned char ctui_ansi16_rgb_table[9][3] = {
+    [CTUI_COLOR_DEFAULT] = {0, 0, 0},     [CTUI_COLOR_BLACK] = {0, 0, 0},
+    [CTUI_COLOR_RED] = {205, 0, 0},       [CTUI_COLOR_GREEN] = {0, 205, 0},
+    [CTUI_COLOR_YELLOW] = {205, 205, 0},  [CTUI_COLOR_BLUE] = {0, 0, 238},
+    [CTUI_COLOR_MAGENTA] = {205, 0, 205}, [CTUI_COLOR_CYAN] = {0, 205, 205},
+    [CTUI_COLOR_WHITE] = {229, 229, 229},
+};
+
+void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
+                         unsigned char *g, unsigned char *b) {
+  const unsigned char *rgb =
+      ctui_ansi16_rgb_table[color <= CTUI_COLOR_WHITE ? color : 0];
+  *r = rgb[0];
+  *g = rgb[1];
+  *b = rgb[2];
 }
 
 /* kitty splits the *encoded* payload into chunks, not the raw pixel data
@@ -93,9 +114,20 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
        * for raw formats since there's no container header to read them
        * from. c/r: scale the image to cover this many character cells.
        * q=2: suppress both success and error responses -- ctui has no
-       * code path that reads stdin for an APC reply. */
+       * code path that reads stdin for an APC reply. C=1: don't move the
+       * cursor after displaying -- the protocol default (C=0) moves it to
+       * just past the image, as if it had been printed as text, which for
+       * an image tall/low enough to reach the terminal's last row forces
+       * the terminal to scroll the whole screen to keep the cursor
+       * visible. ctui always repositions the cursor explicitly (the CUP
+       * escape right above, and again before every ctui_screen_flush()
+       * write) rather than relying on wherever a previous write left it,
+       * so a side-effect cursor move here only ever fights that -- this
+       * surfaced as the whole screen drifting upward on every redraw once
+       * a Kitty image (ctui-mus's footer border) first reached the last
+       * row. */
       n = snprintf(out, sizeof out,
-                   "\x1b_Ga=T,f=32,s=%d,v=%d,c=%d,r=%d,i=%u,q=2,m=%d;",
+                   "\x1b_Ga=T,f=32,s=%d,v=%d,c=%d,r=%d,i=%u,q=2,C=1,m=%d;",
                    width, height, cell_cols, cell_rows, image_id, more);
     } else {
       /* continuation chunks repeat only m -- every other key was already

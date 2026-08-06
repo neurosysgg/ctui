@@ -24,6 +24,17 @@ typedef enum {
  * terminals may simply not bother setting. */
 unsigned int ctui_gfx_detect_caps(void);
 
+/* approximates one of the 9 CTUI_COLOR_* basic-palette indices (cell.h) as
+ * a 24-bit RGB triple -- xterm's standard normal-intensity palette values,
+ * close enough to "the same color" for a pixel-tier (Kitty) renderer that
+ * has to draw the same zone/accent coloring its ANSI16 sibling uses, not
+ * itself a claim about what any given user's terminal theme actually maps
+ * those indices to. Promoted here once a second consumer (widgets/border.c's
+ * Kitty gfx_render, alongside ctui-mus's own meter widget) needed the exact
+ * same table -- see CLAUDE.md's promotion rule. */
+void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
+                         unsigned char *g, unsigned char *b);
+
 /* transmits and displays a width x height RGBA image via the Kitty
  * graphics protocol (https://sw.kovidgoyal.net/kitty/graphics-protocol/),
  * writing the APC escape sequence straight to stdout -- unlike every

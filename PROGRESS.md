@@ -940,6 +940,138 @@ terminal resize.
       backgrounds in the raw stream) — zero `E_WRN` log lines either way.
       `make`/`make all`/`make test` all warning-free.
 
+- [x] **`CTUI_BORDER` gained a Kitty pixel tier**
+      (`src/widgets/border.{h,c}`), the first widget besides the meter/
+      splash/kitty_image family to get a real `gfx_render()` — driven by
+      `ctui-mus` wanting its always-on-screen header/main/footer borders to
+      "pop" under Kitty the same way its viz meter already does. Three
+      pieces:
+      - `ctui_gfx_ansi16_rgb()` promoted from a private table duplicated in
+        `ctui-mus`'s own `meter.c` into `core/gfx.c`/`gfx.h` — the second
+        consumer (border's Kitty renderer, needing the same ANSI16-index
+        -> approximate-RGB mapping) is this repo's own promotion trigger
+        (`CLAUDE.md`).
+      - `ctui_border_render()` (the existing text-tier renderer) now
+        dispatches on `edge`/`corner`'s own `CTUI_CELL.color_mode`
+        (`putc`/`putc_256`/`putc_rgb`) instead of hardcoding the basic-ANSI
+        one — previously the only widget in `src/widgets/` that silently
+        ignored a cell's own `color_mode` and always drew ANSI16 regardless
+        of what a caller built. Fully backward compatible:
+        `ctui_border_make()`'s default `color_mode` is still `BASIC` (plain
+        zero-fill), so every existing caller's rendering is unchanged;
+        this only matters to a caller that explicitly builds a richer
+        `edge`/`corner` cell, which none did before this.
+      - `ctui_border_kitty_gfx_render()`: a pixel-perfect, ~1px-antialiased
+        outline traced around a rounded-rect signed-distance field (Inigo
+        Quilez's `roundedBox` formula), interior *and* exterior left at
+        alpha 0 so whatever's already drawn underneath (the text-tier
+        border, or a separately-positioned inset content widget) shows
+        through untouched — this only ever adds an outline, never a filled
+        panel. Two new opt-in `CTUI_BORDER` fields drive it: `rounded`
+        (square corners if unset) and `dither` (ordered/Bayer-dithered
+        two-tone stroke between `stroke_r/g/b` and `accent_r/g/b` instead
+        of solid, both seeded from `block_color` by `ctui_border_make()`
+        so they're inert unless a caller opts in). `image_id` is derived
+        from the *widget's* own pointer identity, not stored on
+        `CTUI_BORDER` — needed because a single `CTUI_BORDER` instance
+        commonly backs multiple border widgets at once (see
+        `examples_apps/demo-advanced`'s shared `border_style`), and each
+        needs its own stable, non-colliding Kitty image id.
+      - Fallout: `border.c` (now used by essentially every example app)
+        started calling `sqrt`/`fmod`, which broke every `Makefile` target
+        except `ctui-demo-advanced`/`ctui-player` (the only two that
+        already linked `-lm`). Fixed by adding a shared `LDLIBS = -lm` and
+        appending `$(LDLIBS)` to every link line, including `test-%`,
+        rather than special-casing border's own dependency per target.
+      - Verified via `tools/pty_harness.py` under three env combos (plain
+        `TERM=xterm`, `TERM=xterm-256color COLORTERM=truecolor`, and
+        `KITTY_WINDOW_ID`/`TERM=xterm-kitty`, explicitly unsetting
+        `KITTY_WINDOW_ID`/`COLORTERM` for the first two since a real Kitty
+        dev shell already exports them ambiently): zero `E_WRN`/`E_ERR` at
+        every tier, the `raw` step's captured escapes show the exact
+        `38;2;63;81;181`/`38;2;26;35;126` truecolor pair at the truecolor
+        tier, and a decoded+reassembled (multi-chunk) Kitty RGBA payload
+        at the Kitty tier confirms alpha=0 through the entire interior, a
+        genuine antialiased quarter-circle at each rounded corner (printed
+        as an ASCII alpha map to eyeball it), and both dither colors
+        present along a straight edge. `make`/`make all`/`make test` all
+        warning-free.
+
+- [x] **`ctui_gfx_kitty_display()` was moving the terminal cursor as a
+      side effect, causing the whole screen to scroll on every redraw.**
+      Found immediately after the border Kitty entry above shipped:
+      ctui-mus's footer border is the first Kitty image ever placed close
+      enough to the terminal's last row to expose it. The Kitty graphics
+      protocol's `a=T` display action moves the cursor to just past the
+      image by default (`C=0`, as if it had been printed as text) unless
+      `C=1` is passed; nothing in `ctui_gfx_kitty_display()`'s escape
+      previously set it. An image tall/low enough to push that
+      post-display cursor position past the last row forces the terminal
+      to scroll to keep the cursor visible — and since every Kitty widget
+      retransmits every frame (`ctui_widget_flush_gfx()`, called after
+      every `ctui_screen_flush()`), that happened on every redraw,
+      reading as continuous upward drift from launch. ctui always
+      repositions the cursor explicitly before every write anyway (the
+      CUP escape `ctui_gfx_kitty_display()` already emits, and again on
+      the next frame's flush), so there was never a reason for the
+      image's own placement to move it too. Fixed by adding `C=1` to the
+      transmission escape's key list. Latent for every existing Kitty
+      widget (meter/splash/kitty_image), just never triggered before
+      since none of their placements previously reached the last row.
+      Verified via `tools/pty_harness.py`'s `raw` step (`C=1` present in
+      the captured escape) plus `make`/`make all`/`make test` warning-free
+      in both this repo and `ctui-mus`.
+
+- [x] **Two follow-up fixes after real-terminal use of ctui-mus's new
+      Kitty border surfaced them** (high CPU usage, and a visible flicker
+      on every redraw):
+      - **Logger gained opt-in buffering.** `logger.c`'s `log_entry()`
+        called `fflush()` after every single entry, unconditionally. Fine
+        for an app that only logs on user input, but ctui-mus's 20ms
+        periodic redraw tick (`ctui_periodic_register()`) means a full
+        render pass, and therefore a fresh batch of `E_INF` lifecycle log
+        lines, fires 50x/sec regardless of whether anything visibly
+        changed -- a `write()` syscall per log line per frame, real,
+        measurable CPU cost from nothing but log I/O (reported as fans
+        spinning up). Added `CTUI_LOGGER.buffered` (default 0, unchanged
+        behavior -- every existing app keeps the immediate-flush,
+        always-current-on-disk log `CLAUDE.md`'s "grep the log, don't
+        guess" workflow assumes) plus `logger_set_buffered()`
+        (`src/logger.c`/`.h`) and the public, no-`CTUI_LOGGER*`-needed
+        `ctui_log_set_buffered()`/`ctui_log_set_unbuffered()`
+        (`core/log.c`/`.h`). `ctui-mus`'s `main()` opts in right after
+        `ctui_init()`. Tradeoff documented on the struct field itself: a
+        crash before a clean shutdown loses whatever's sitting in the
+        unflushed stdio buffer (`shutdown_logger()`'s `fclose()` still
+        always flushes on a normal exit).
+      - **`CTUI_BORDER`'s Kitty renderer retransmitted its full pixel
+        buffer every single frame**, even though its geometry -- and
+        therefore its content -- never changes without an actual resize.
+        Wasted CPU recomputing the per-pixel SDF every frame, and a
+        visible flicker each time the terminal recomposited an identical
+        image on top of itself. Fixed with a small pointer-keyed cache in
+        `border.c` (same flat-realloc-grown-array shape as
+        `core/widget.c`'s own `gfx_pending` queue) of each widget's
+        last-transmitted `w`/`h`; `ctui_border_kitty_gfx_render()` now
+        returns immediately, before either the SDF computation or
+        `ctui_gfx_kitty_display()`, when geometry is unchanged since the
+        last call for that exact widget. Keyed by the `CTUI_WIDGET*`
+        itself rather than stored on `CTUI_BORDER` for the same reason
+        `image_id` already is (a shared `CTUI_BORDER` instance backing
+        several border widgets at once).
+      - Verified via `tools/pty_harness.py` against the real `ctui-mus`
+        binary: a `key:RIGHT/LEFT/RIGHT` sequence with waits in between
+        (several redundant 20ms-tick-driven redraws with no actual
+        geometry change) shows exactly 2 `kitty_display` log lines total
+        (one per border widget's *first* frame), not one per frame; two
+        `resize:` steps show exactly 2 more `kitty_display` calls each
+        (one retransmit per border widget, at the new geometry) -- 6
+        total across two resizes, matching "initial + one per resize,"
+        never "one per frame." Zero `E_WRN`/`E_ERR` throughout, and the
+        buffered logger's output still lands correctly on disk after a
+        normal shutdown. `make`/`make all`/`make test` all warning-free
+        in both this repo and `ctui-mus`.
+
 ## Known issues / deliberately deferred
 
 - **`src/core` coverage gaps left by design, not oversight**: `gfx.c`/

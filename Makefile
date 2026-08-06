@@ -1,5 +1,6 @@
 CC = cc
 CFLAGS = -Wall -Wextra -std=c11 -Isrc -g
+LDLIBS = -lm
 
 CORE_SRC = $(wildcard src/*.c src/core/*.c src/widgets/*.c)
 CORE_HDR = $(wildcard src/*.h src/core/*.h src/widgets/*.h)
@@ -10,41 +11,41 @@ TEST_BIN = $(patsubst tests/%.c,test-%,$(TEST_SRC))
 .DEFAULT_GOAL := ctui-demo
 
 ctui-demo: $(CORE_SRC) $(CORE_HDR) examples_apps/demo/main.c $(wildcard examples_apps/demo/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-demo $(CORE_SRC) examples_apps/demo/main.c $(wildcard examples_apps/demo/widgets/*.c)
+	$(CC) $(CFLAGS) -o ctui-demo $(CORE_SRC) examples_apps/demo/main.c $(wildcard examples_apps/demo/widgets/*.c) $(LDLIBS)
 
 ctui-demo-advanced: $(CORE_SRC) $(CORE_HDR) examples_apps/demo-advanced/main.c $(wildcard examples_apps/demo-advanced/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-demo-advanced $(CORE_SRC) examples_apps/demo-advanced/main.c $(wildcard examples_apps/demo-advanced/widgets/*.c) -lm
+	$(CC) $(CFLAGS) -o ctui-demo-advanced $(CORE_SRC) examples_apps/demo-advanced/main.c $(wildcard examples_apps/demo-advanced/widgets/*.c) $(LDLIBS)
 
 ctui-hello: $(CORE_SRC) $(CORE_HDR) examples_apps/hello/main.c $(wildcard examples_apps/hello/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-hello $(CORE_SRC) examples_apps/hello/main.c $(wildcard examples_apps/hello/widgets/*.c)
+	$(CC) $(CFLAGS) -o ctui-hello $(CORE_SRC) examples_apps/hello/main.c $(wildcard examples_apps/hello/widgets/*.c) $(LDLIBS)
 
 ctui-clock: $(CORE_SRC) $(CORE_HDR) examples_apps/clock/main.c $(wildcard examples_apps/clock/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-clock $(CORE_SRC) examples_apps/clock/main.c $(wildcard examples_apps/clock/widgets/*.c)
+	$(CC) $(CFLAGS) -o ctui-clock $(CORE_SRC) examples_apps/clock/main.c $(wildcard examples_apps/clock/widgets/*.c) $(LDLIBS)
 
 ctui-file_browser: $(CORE_SRC) $(CORE_HDR) examples_apps/file_browser/main.c $(wildcard examples_apps/file_browser/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-file_browser $(CORE_SRC) examples_apps/file_browser/main.c $(wildcard examples_apps/file_browser/widgets/*.c)
+	$(CC) $(CFLAGS) -o ctui-file_browser $(CORE_SRC) examples_apps/file_browser/main.c $(wildcard examples_apps/file_browser/widgets/*.c) $(LDLIBS)
 
 ctui-calculator: $(CORE_SRC) $(CORE_HDR) examples_apps/calculator/main.c examples_apps/calculator/calc.c examples_apps/calculator/calc.h $(wildcard examples_apps/calculator/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-calculator $(CORE_SRC) examples_apps/calculator/main.c examples_apps/calculator/calc.c $(wildcard examples_apps/calculator/widgets/*.c)
+	$(CC) $(CFLAGS) -o ctui-calculator $(CORE_SRC) examples_apps/calculator/main.c examples_apps/calculator/calc.c $(wildcard examples_apps/calculator/widgets/*.c) $(LDLIBS)
 
 ctui-flicker: $(CORE_SRC) $(CORE_HDR) examples_apps/flicker/main.c $(wildcard examples_apps/flicker/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-flicker $(CORE_SRC) examples_apps/flicker/main.c $(wildcard examples_apps/flicker/widgets/*.c)
+	$(CC) $(CFLAGS) -o ctui-flicker $(CORE_SRC) examples_apps/flicker/main.c $(wildcard examples_apps/flicker/widgets/*.c) $(LDLIBS)
 
 ctui-matrix: $(CORE_SRC) $(CORE_HDR) examples_apps/matrix/main.c $(wildcard examples_apps/matrix/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-matrix $(CORE_SRC) examples_apps/matrix/main.c $(wildcard examples_apps/matrix/widgets/*.c)
+	$(CC) $(CFLAGS) -o ctui-matrix $(CORE_SRC) examples_apps/matrix/main.c $(wildcard examples_apps/matrix/widgets/*.c) $(LDLIBS)
 
 ctui-player: $(CORE_SRC) $(CORE_HDR) examples_apps/player/main.c $(wildcard examples_apps/player/audio/*) $(wildcard examples_apps/player/decoders/*) $(wildcard examples_apps/player/outputs/*) $(wildcard examples_apps/player/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-player $(CORE_SRC) examples_apps/player/main.c $(wildcard examples_apps/player/decoders/*.c) $(wildcard examples_apps/player/outputs/*.c) $(wildcard examples_apps/player/widgets/*.c) -lasound -lm
+	$(CC) $(CFLAGS) -o ctui-player $(CORE_SRC) examples_apps/player/main.c $(wildcard examples_apps/player/decoders/*.c) $(wildcard examples_apps/player/outputs/*.c) $(wildcard examples_apps/player/widgets/*.c) -lasound $(LDLIBS)
 
 ctui-kitty_demo: $(CORE_SRC) $(CORE_HDR) examples_apps/kitty_demo/main.c $(wildcard examples_apps/kitty_demo/widgets/*)
-	$(CC) $(CFLAGS) -o ctui-kitty_demo $(CORE_SRC) examples_apps/kitty_demo/main.c $(wildcard examples_apps/kitty_demo/widgets/*.c)
+	$(CC) $(CFLAGS) -o ctui-kitty_demo $(CORE_SRC) examples_apps/kitty_demo/main.c $(wildcard examples_apps/kitty_demo/widgets/*.c) $(LDLIBS)
 
 examples: ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo ctui-demo-advanced
 
 all: ctui-demo examples
 
 test-%: $(CORE_SRC) $(CORE_HDR) tests/%.c tools/ctui_test.h
-	$(CC) $(CFLAGS) -Itools -o $@ $(CORE_SRC) tests/$*.c
+	$(CC) $(CFLAGS) -Itools -o $@ $(CORE_SRC) tests/$*.c $(LDLIBS)
 
 test: $(TEST_BIN)
 	@for t in $(TEST_BIN); do echo "-- $$t --"; ./$$t || exit 1; done
