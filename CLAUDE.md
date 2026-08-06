@@ -31,6 +31,16 @@ flexibility nothing asked for, but when building what *was* asked
 for, look for the version that's also tight — especially in `src/core/`
 itself, since every widget pays whatever it costs, forever.
 
+This discipline matters more here than in a typical project: `.todo.md`
+(untracked, local scratchpad — not a task list) sketches where this is
+headed long-term — `ctui_sh`/`ctui_wm` as a home-grown kitty-compatible
+desktop environment, `raw_86OS` piggybacking off `ctui` for its own
+desktop layer. None of that is a near-term task. It's context for *why*
+KISS-at-the-core isn't optional taste here: every one of those layers
+inherits whatever complexity or sloppiness gets built into `src/core/`
+today. Keep it mean & lean, or the whole stack stops being sane to
+reason about a few layers up.
+
 ## Naming conventions
 
 - Public structs: `CTUI_SHOUTING_CASE` (`CTUI_WIDGET`, `CTUI_BORDER`,

@@ -2,6 +2,17 @@
 
 #include "log.h"
 
+/* smallest cols such that cols*cols >= count -- avoids pulling in <math.h>
+ * for a single ceil(sqrt()) call; count is always small (number of
+ * simultaneously-visible panes), so the linear scan is negligible */
+static int ctui_split_grid_cols(int count) {
+  int cols = 1;
+  while (cols * cols < count) {
+    cols++;
+  }
+  return cols;
+}
+
 void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   CTUI_SPLIT *split = self->widget_data;
   split->comp = comp;
@@ -27,7 +38,7 @@ void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       y += child->h;
       ctui_widget_init(child, comp);
     }
-  } else {
+  } else if (split->mode == CTUI_SPLIT_H) {
     int base = self->w / split->count;
     int remainder = self->w - base * split->count;
     int x = self->x;
@@ -40,14 +51,30 @@ void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       x += child->w;
       ctui_widget_init(child, comp);
     }
+  } else {
+    int cols = ctui_split_grid_cols(split->count);
+    int rows = (split->count + cols - 1) / cols;
+    int base_w = self->w / cols, rem_w = self->w - base_w * cols;
+    int base_h = self->h / rows, rem_h = self->h - base_h * rows;
+    for (int i = 0; i < split->count; i++) {
+      CTUI_WIDGET *child = split->children[i];
+      int r = i / cols, c = i % cols;
+      child->x = self->x + c * base_w;
+      child->w = base_w + (c == cols - 1 ? rem_w : 0);
+      child->y = self->y + r * base_h;
+      child->h = base_h + (r == rows - 1 ? rem_h : 0);
+      ctui_widget_init(child, comp);
+    }
   }
 
   ctui_logf(E_INF,
             "[CTUI:SPLIT] - widget %p laid out @ tick %d (%s, %d active "
             "children, self=%dx%d @ %d,%d)\n",
             (void *)self, ctui_tick_advance(),
-            split->mode == CTUI_SPLIT_V ? "V" : "H", split->count, self->w,
-            self->h, self->x, self->y);
+            split->mode == CTUI_SPLIT_V   ? "V"
+            : split->mode == CTUI_SPLIT_H ? "H"
+                                          : "GRID",
+            split->count, self->w, self->h, self->x, self->y);
 }
 
 void ctui_split_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {

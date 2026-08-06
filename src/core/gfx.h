@@ -51,4 +51,18 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
                             const unsigned char *rgba, int width, int height,
                             unsigned int image_id);
 
+/* removes an image previously placed by ctui_gfx_kitty_display() under
+ * image_id -- unlike a colored character cell, a Kitty-placed image is a
+ * raster overlay independent of the text grid, so it stays on screen even
+ * after whatever widget put it there stops being drawn (e.g. a toggled-off
+ * panel that ctui_split_render() simply no longer traverses). A caller
+ * whose image can become not-currently-visible must call this explicitly
+ * when that happens; there's no implicit cleanup. Deletes both the
+ * placement and the stored image data (`d=I`) -- safe here since
+ * ctui_gfx_kitty_display() always retransmits the full pixel buffer on
+ * every redisplay rather than relying on previously cached data. No-op
+ * (logs E_WRN) if stdout isn't a real terminal, same convention as
+ * ctui_gfx_kitty_display(). */
+void ctui_gfx_kitty_delete(unsigned int image_id);
+
 #endif

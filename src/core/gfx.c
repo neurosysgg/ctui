@@ -114,3 +114,20 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
             "col=%d, id=%u, %zu b64 bytes)\n",
             ctui_tick_advance(), width, height, row, col, image_id, b64_len);
 }
+
+void ctui_gfx_kitty_delete(unsigned int image_id) {
+  if (!isatty(STDOUT_FILENO)) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty_delete rejected @ tick %d, stdout isn't a "
+              "real terminal\n",
+              ctui_tick_advance());
+    return;
+  }
+
+  char out[32];
+  int n = snprintf(out, sizeof out, "\x1b_Ga=d,d=I,i=%u,q=2\x1b\\", image_id);
+  write(STDOUT_FILENO, out, (size_t)n);
+
+  ctui_logf(E_INF, "[CTUI:GFX] - kitty_delete @ tick %d (id=%u)\n",
+            ctui_tick_advance(), image_id);
+}

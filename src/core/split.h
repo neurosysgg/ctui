@@ -5,8 +5,16 @@
 #include "widget.h"
 
 typedef enum {
-  CTUI_SPLIT_V, /* stack children top-to-bottom, dividing height */
-  CTUI_SPLIT_H, /* arrange children left-to-right, dividing width */
+  CTUI_SPLIT_V,    /* stack children top-to-bottom, dividing height */
+  CTUI_SPLIT_H,    /* arrange children left-to-right, dividing width */
+  CTUI_SPLIT_GRID, /* auto-adjusting rows x cols grid, near-square
+                    * (cols = ceil(sqrt(count))), row-major -- for a
+                    * variable number of simultaneously-visible panes where
+                    * V/H's single dimension isn't enough. No rows/cols
+                    * knob: purely a function of count, recomputed by
+                    * ctui_split_layout() on every call, so growing/
+                    * shrinking count (e.g. from an event handler) reflows
+                    * the whole grid automatically, same as V/H already do. */
 } CTUI_SPLIT_MODE;
 
 typedef struct {

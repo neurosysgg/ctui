@@ -669,6 +669,61 @@ terminal resize.
   `[DEMO:APP] - "debug info" enabled, splitting main area` now correctly
   fire on that transition.
   `make all`/`make test` warning-free throughout (25 assertions).
+- **Kitty-placed images now get explicitly deleted when their pane closes.**
+  Reported bug: toggling "kitty image" off in `demo` left the raster
+  overlay on screen. Root cause: a Kitty-protocol image is a raster
+  overlay the terminal keeps showing independent of the text grid, unlike
+  a colored character cell — closing/swapping the pane just stopped
+  calling `ctui_kitty_image_gfx_render()` (`ctui_split_render()` only
+  dispatches `children[0..count-1]`), but nothing ever told the terminal
+  to actually remove the placement, so it just stayed there. Added
+  `ctui_gfx_kitty_delete()` (`src/core/gfx.c`/`.h`) — sends `a=d,d=I,i=` to
+  delete both the placement and the stored image data by id (safe since
+  `ctui_gfx_kitty_display()` always retransmits full pixel data on every
+  redisplay rather than relying on cached data). Same calling convention
+  as `ctui_gfx_kitty_display()`: this function doesn't check
+  `g_gfx_mode` itself, the caller does — `demo`'s handler gates it on a
+  `kitty_gfx_negotiated` flag captured once after `ctui_init()`, so a
+  plain terminal that never actually got an image transmitted doesn't get
+  a pointless (if harmless) delete APC either. Verified via
+  `pty_harness.py` + log: `[CTUI:GFX] - kitty_delete @ tick ... (id=1)`
+  fires exactly once, right before the pane closes, only when
+  `CTUI_GFX_KITTY` was actually negotiated.
+- **`CTUI_SPLIT` gained a third mode, `CTUI_SPLIT_GRID`, for a variable
+  number of simultaneously-visible panes.** Reported bug: `demo`'s
+  "debug info"/"dump palette"/"kitty image" menu items are independent
+  `CTUI_MENU_ITEM` checkboxes (any subset can be enabled at once), but
+  `main_split_handle_panel_toggle()` still only had one shared slot
+  (`children[1]`) — enabling a second one while the first was still
+  checked silently replaced it instead of showing both, an inconsistency
+  between what the menu displayed (multiple checked) and what was
+  actually visible (only the most recently toggled one).
+  `CTUI_SPLIT_GRID` (`src/core/split.h`/`.c`) is the fix, built as a new
+  mode on the existing `CTUI_SPLIT` rather than a parallel type — same
+  `children`/`count` shape, so "grow/shrink count later to reveal more
+  panes" already meant something for V/H and needed no new concept, just
+  a new way to partition self's area: near-square rows × cols
+  (`cols = ceil(sqrt(count))`, computed with a small integer loop, no
+  `<math.h>`), row-major, recomputed by `ctui_split_layout()` on every
+  call exactly like V/H already are. `demo` now has a `panels_grid`
+  (`CTUI_SPLIT_GRID`) nested as `main_split`'s second child in place of
+  the old single pane; `main_split_handle_panel_toggle()` tracks all
+  three panels' enabled state independently (`panels_enabled[]`) and
+  rebuilds `panels_grid`'s active `children[0..count-1]` from scratch on
+  every change, in menu order — 1 enabled fills the area, 2 sit side by
+  side, 3 form a 2×2 grid with one empty cell. Nesting a split inside a
+  split needed no new plumbing: `panels_grid_widget`'s own `.layout` is
+  set to `ctui_split_layout` directly (per `split.h`'s existing "assign
+  this directly as a widget's `layout()`" doc comment), so
+  `main_split`'s own `ctui_split_layout()` calling `ctui_widget_init()`
+  on it cascades into its own re-partition automatically. Verified via
+  `pty_harness.py` + log across enable/disable sequences in both
+  orders: `[CTUI:SPLIT] - ... (GRID, N active children, ...)` tracks N
+  correctly through 1→2→3→2→1→0, `kitty_delete` still fires at the right
+  transition when three-panel kitty gets toggled off, and `main_split`
+  correctly collapses back to just the menu (`V, 1 active children`)
+  once the last panel is disabled. `make all`/`make test` warning-free
+  throughout (25 assertions).
 
 ## Known issues / deliberately deferred
 
