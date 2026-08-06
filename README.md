@@ -143,10 +143,13 @@ ctui_shutdown();
 
 For anything beyond this — events between widgets, splits, groups,
 resizing, timers — see `PROGRESS.md` for the current architecture and the
-other apps under `examples_apps/` for worked examples of each. Deeper
-per-topic docs live under `docs/` as they're written — currently just
-`docs/protocol.md` (how to add a new graphics protocol); this README and
-`PROGRESS.md` remain the source of truth for everything else.
+other apps under `examples_apps/` for worked examples of each, or
+`docs/core-api.md` for a subsystem-by-subsystem reference of every
+public function in `src/core/`. Deeper per-topic docs live under `docs/`
+as they're written — currently `docs/core-api.md` (the core library
+reference) and `docs/protocol.md` (how to add a new graphics protocol);
+this README and `PROGRESS.md` remain the source of truth for everything
+else.
 
 ## Project layout
 
@@ -194,8 +197,10 @@ per-topic docs live under `docs/` as they're written — currently just
   under a real pty for terminal-I/O-layer testing — raw input decoding,
   actual `SIGWINCH`, real ANSI output).
 - `docs/` — per-topic docs, written up once a topic's substantial enough
-  to outgrow a `PROGRESS.md` entry. Currently just `protocol.md` (the
-  recipe for adding a new graphics protocol tier).
+  to outgrow a `PROGRESS.md` entry. `core-api.md` (a subsystem-by-
+  subsystem reference of `src/core/`'s public API and the call sequence
+  that ties it together) and `protocol.md` (the recipe for adding a new
+  graphics protocol tier).
 
 ## Architecture at a glance
 

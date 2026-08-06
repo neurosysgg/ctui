@@ -1,9 +1,13 @@
 # Working on ctui
 
 Project background/architecture/status live in `README.md` and
-`PROGRESS.md` — read those first. This file is about *how* to work in
-this codebase: conventions, philosophy, and patterns established so
-far, so a fresh session doesn't have to re-derive them.
+`PROGRESS.md` — read those first. `docs/core-api.md` is the
+subsystem-by-subsystem reference for `src/core/`'s public API (what's
+in each header, the call sequence tying them together) — reach for it
+before re-deriving a core function's contract from source. This file
+is about *how* to work in this codebase: conventions, philosophy, and
+patterns established so far, so a fresh session doesn't have to
+re-derive them.
 
 ## Philosophy
 
@@ -91,6 +95,10 @@ reason about a few layers up.
   "Next up" for what's deliberately deferred, not silently forgotten.
 
 ## Architecture patterns to follow
+
+(`docs/core-api.md` covers every function referenced below in one
+place, organized by header, if you need the full signature/contract
+rather than just the pattern.)
 
 - **Core (`src/core/`, fronted by `src/ctui.h`) vs. widgets
   (`src/widgets/`)**: the core has zero knowledge of any specific
