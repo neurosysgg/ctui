@@ -1,13 +1,56 @@
-/* Exercises core/util.c's geometry helpers -- ctui_util_rescale_i() and
+/* Exercises core/util.c's geometry/string helpers -- ctui_util_center_h(),
+ * ctui_util_truncate_str(), ctui_util_rescale_i(), and
  * ctui_util_inset()/ctui_margin_uniform() -- directly against plain values
- * and CTUI_WIDGET structs, no app/screen needed since neither touches the
- * compositor. */
+ * and CTUI_WIDGET structs, no app/screen needed since none of them touch
+ * the compositor. */
 #include "ctui.h"
 
 #include "ctui_test.h"
 
+#include <string.h>
+
 int main(void) {
   ctui_log_init(E_ALL);
+
+  char line[9];
+  strcpy(line, "        ");
+  CTUI_CELL fill = {.ch = '-'};
+  int rc = ctui_util_center_h((char[]){"hi"}, line, fill);
+  CTUI_TEST_ASSERT(rc == 0, "center_h succeeds when center_str fits");
+  CTUI_TEST_ASSERT(strcmp(line, "---hi---") == 0,
+                   "center_h centers with an even split when total_pad is "
+                   "even (8-2=6 pad -> 3/3)");
+
+  strcpy(line, "       "); /* 7 wide, odd total_pad */
+  rc = ctui_util_center_h((char[]){"hi"}, line, fill);
+  CTUI_TEST_ASSERT(rc == 0 && strcmp(line, "--hi---") == 0,
+                   "center_h puts the extra pad cell on the right when "
+                   "total_pad is odd");
+
+  strcpy(line, "ab");
+  rc = ctui_util_center_h((char[]){"abc"}, line, fill);
+  CTUI_TEST_ASSERT(rc == -1,
+                   "center_h rejects a center_str longer than line");
+
+  char buf[32];
+  strcpy(buf, "short");
+  rc = ctui_util_truncate_str(buf, 10, "...");
+  CTUI_TEST_ASSERT(rc == 0 && strcmp(buf, "short") == 0,
+                   "truncate_str no-ops when str already fits within "
+                   "desired");
+
+  strcpy(buf, "a very long string");
+  rc = ctui_util_truncate_str(buf, 10, "...");
+  CTUI_TEST_ASSERT(rc == 0 && strcmp(buf, "a very ...") == 0 &&
+                       strlen(buf) == 10,
+                   "truncate_str cuts to exactly desired chars, replacing "
+                   "the tail with trunc");
+
+  strcpy(buf, "hi");
+  rc = ctui_util_truncate_str(buf, 1, "...");
+  CTUI_TEST_ASSERT(rc == -1,
+                   "truncate_str rejects a trunc string longer than "
+                   "desired");
 
   CTUI_TEST_ASSERT(ctui_util_rescale_i(0, 0, 10, 0, 100) == 0,
                    "rescale_i maps in_min to out_min");
@@ -29,7 +72,7 @@ int main(void) {
   CTUI_WIDGET outer = ctui_widget_make(2, 3, 20, 10, NULL, NULL, NULL);
   CTUI_WIDGET content = ctui_widget_make(0, 0, 0, 0, NULL, NULL, NULL);
 
-  int rc = ctui_util_inset(&content, &outer, ctui_margin_uniform(1));
+  rc = ctui_util_inset(&content, &outer, ctui_margin_uniform(1));
   CTUI_TEST_ASSERT(rc == 0, "inset with a 1-cell margin succeeds");
   CTUI_TEST_ASSERT(content.x == 3 && content.y == 4,
                    "inset offsets content's origin by the margin");

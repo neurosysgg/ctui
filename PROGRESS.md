@@ -175,7 +175,10 @@ terminal resize.
   that can't reach: raw-mode byte/ESC-sequence decoding in
   `ctui_input_loop()`, real `SIGWINCH` delivery, and the literal ANSI
   bytes `ctui_screen_flush()` emits. See `CLAUDE.md`'s Testing approach
-  for when to reach for which.
+  for when to reach for which. `make coverage` (`tools/coverage.sh`,
+  plain `gcov`) reports current line coverage per `src/core/*.c` file
+  — see the changelog entry below for the current numbers and which
+  gaps are structural (pty-only) vs. actually missing tests.
 
 ## Fixed / addressed
 
@@ -813,7 +816,63 @@ terminal resize.
       real Kitty APC transmission still goes out correctly afterward,
       no new "not bound" warnings in the log.
 
+- [x] Test suite expanded to cover every `src/core/` subsystem that had
+      no dedicated test yet, plus a `make coverage` target to measure
+      it. New: `tests/compositor_test.c`, `tests/event_test.c`,
+      `tests/group_test.c`, `tests/split_test.c`, `tests/widget_test.c`,
+      `tests/screen_test.c`, `tests/log_test.c`; `tests/util_test.c`
+      extended with `ctui_util_center_h()`/`ctui_util_truncate_str()`
+      coverage it was previously missing entirely. `tools/coverage.sh`
+      (invoked via `make coverage`) builds every `tests/*.c` against a
+      `--coverage`-instrumented core+widgets, all sharing one `-o` name
+      (`coverage/run`) across builds so gcc emits identical
+      `.gcno`/`.gcda` paths for every translation unit and gcov's
+      runtime *adds* each run's counts into the existing `.gcda`
+      instead of overwriting it — one merged view of what the whole
+      suite exercises, not just whichever binary ran last. Chose plain
+      `gcov` (ships with gcc) over `lcov`/`gcovr` — neither was
+      installed, and a per-file "N% of M lines" table is enough to
+      answer "what's untested"; no HTML report needed yet.
+      Result: `src/core` line coverage 57.5% → 71.1%. The real find was
+      `ctui_screen_flush()` (`src/core/screen.c`) — its shadow-buffer
+      diff/color-cache engine (contiguous-run cursor-position skip,
+      unchanged-cell skip, BASIC/256/RGB escape emission) was
+      **completely unexercised** (`screen.c` at 25.8%): every existing
+      test asserted against `screen->cells` directly rather than the
+      actual ANSI byte stream `flush()` writes to `STDOUT_FILENO`.
+      `tests/screen_test.c` closes this to 95.8% by `dup2()`-ing
+      `STDOUT_FILENO` to a pipe for the duration of each
+      `ctui_screen_flush()` call (flush writes via a raw `write(2)`,
+      not stdio, so this is the only way to capture it headlessly) and
+      asserting byte-exact escape sequences. `event.c` (59.4% → 97.1%)
+      and `widget.c` (85.7% → 98.1%) picked up their enum-name helpers,
+      the "no app registered yet" reject-and-log paths (only reachable
+      before any `ctui_app_init()` call in a process, since `g_app` has
+      no public way to be unset afterward), and `puts_256()`/
+      `puts_rgb()`.
+      Deliberately not chased further: `gfx.c`/`term.c`/`input.c`
+      sitting at 0% and most of `app.c`'s remaining 36% are
+      real-terminal-only code (`ctui_input_loop()`'s byte decoding,
+      real `SIGWINCH`, Kitty APC transmission, `ctui_app_run()`'s
+      blocking loop) that `tools/ctui_test.h`'s headless harness
+      structurally can't reach — see `CLAUDE.md`'s Testing section for
+      why that's `tools/pty_harness.py`'s job, not a gap in the C
+      suite. `log.c`'s remaining 7 lines are `vsnprintf`/`malloc`
+      failure branches, not reachable without fault injection.
+      Verified: `make test` — 126 assertions across 11 binaries, all
+      passing; `make`/`make all` still warning-free.
+
 ## Known issues / deliberately deferred
+
+- **`src/core` coverage gaps left by design, not oversight**: `gfx.c`/
+  `term.c`/`input.c` (0%) and most of `ctui_app_run()` in `app.c`
+  require a real terminal (`ctui_input_loop()`'s byte-level decoding,
+  genuine `SIGWINCH`, Kitty APC transmission) that `tools/ctui_test.h`'s
+  headless harness can't provide — `tools/pty_harness.py` is the
+  intended tool for that layer, not more C-side tests. `log.c`'s last
+  few lines are `vsnprintf`/`malloc` failure branches, unreachable
+  without fault injection. Run `make coverage` for the current
+  per-file breakdown.
 
 - **`player` stutters every few seconds on longer real-world WAV files**
   (reported against an FL Studio export; a full clean stop-then-restart,

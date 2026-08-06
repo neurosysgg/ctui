@@ -46,7 +46,11 @@ test-%: $(CORE_SRC) $(CORE_HDR) tests/%.c tools/ctui_test.h
 test: $(TEST_BIN)
 	@for t in $(TEST_BIN); do echo "-- $$t --"; ./$$t || exit 1; done
 
+coverage: $(CORE_SRC) $(CORE_HDR) $(TEST_SRC) tools/ctui_test.h tools/coverage.sh
+	@bash tools/coverage.sh
+
 clean:
 	rm -f ctui-demo ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN)
+	rm -rf coverage
 
-.PHONY: clean examples all test
+.PHONY: clean examples all test coverage

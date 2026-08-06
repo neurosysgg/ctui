@@ -19,6 +19,7 @@ across three areas that reflow correctly on terminal resize. See
 make          # builds ctui-demo
 make all      # builds every example app under examples_apps/
 make test     # builds and runs everything under tests/
+make coverage # reports src/core/*.c line coverage from the test suite
 ./ctui-demo
 ```
 
@@ -193,9 +194,10 @@ else.
   real widgets/events like an app's `main()` would, injects input via
   `tools/ctui_test.h`, and asserts against the rendered screen buffer.
 - `tools/` — testing infrastructure: `ctui_test.h` (the headless C test
-  driver `tests/` builds on) and `pty_harness.py` (drives a binary
-  under a real pty for terminal-I/O-layer testing — raw input decoding,
-  actual `SIGWINCH`, real ANSI output).
+  driver `tests/` builds on), `pty_harness.py` (drives a binary under a
+  real pty for terminal-I/O-layer testing — raw input decoding, actual
+  `SIGWINCH`, real ANSI output), and `coverage.sh` (`make coverage`'s
+  `gcov`-based per-file line coverage report over `src/core/`).
 - `docs/` — per-topic docs, written up once a topic's substantial enough
   to outgrow a `PROGRESS.md` entry. `core-api.md` (a subsystem-by-
   subsystem reference of `src/core/`'s public API and the call sequence
