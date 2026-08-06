@@ -14,8 +14,8 @@ CLAUDE.md's Testing approach with a single reusable tool. Usage:
 
 Step vocabulary (comma-separated, run in order):
   wait:SECONDS      sleep, draining output as it arrives
-  key:NAME          UP/DOWN/LEFT/RIGHT/ENTER/ESC/TAB, or any single literal
-                     character (e.g. key:q)
+  key:NAME          UP/DOWN/LEFT/RIGHT/ENTER/ESC/TAB/SPACE, or any single
+                     literal character (e.g. key:q)
   resize:ROWSxCOLS  TIOCSWINSZ on the pty -> real SIGWINCH to the child
   dump              print the reconstructed screen grid so far
   raw               print the raw captured bytes so far (cat -v style)
@@ -43,6 +43,9 @@ KEY_BYTES = {
     "ENTER": b"\r",
     "ESC": b"\x1b",
     "TAB": b"\t",
+    "SPACE": b" ",  # a bare "key: " step loses its space to the per-step
+                    # strip() in main()'s steps-list comprehension, so " "
+                    # needs a name like every other non-printable key here
 }
 
 CSI_FINAL = re.compile(rb"[\x40-\x7e]")
