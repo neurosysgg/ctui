@@ -3,10 +3,17 @@
 
 #include "cell.h"
 
+#include <stddef.h>
+
 typedef struct {
   int rows, cols;
   CTUI_CELL *cells;  /* frame being built */
   CTUI_CELL *buffer; /* buffer currently displayed on screen */
+  /* internal -- ctui_screen_flush()'s scratch buffer for the ANSI byte
+   * stream, sized once (rows*cols*64 worst case) and reused every frame
+   * instead of malloc/free per flush */
+  char *out;
+  size_t out_cap;
 } CTUI_SCREEN;
 
 CTUI_SCREEN *ctui_screen_create(int rows, int cols);

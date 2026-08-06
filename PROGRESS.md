@@ -748,6 +748,54 @@ terminal resize.
       untouched); `make all`/`make test` warning-free, `pty_harness.py`
       confirms the demo's header title still renders identically.
 
+- **Two perf fixes to the core, found during a review pass with no
+  profiler involved — both just misplaced work, not algorithmic
+  problems.**
+  1. `ctui_logf()` (`src/core/log.c`) was formatting every message
+     (`vsnprintf` twice, `malloc`, `free`) *before* `log_entry()`
+     (`src/logger.c`) checked whether the verbosity mask would even
+     keep it. Harmless in isolation, but `ctui_logf(E_DBG, ...)` sits
+     in the actual hot path — once per character in
+     `ctui_widget_putc()`/`ctui_screen_putc()`, twice per widget per
+     frame in `ctui_app_render()`/`ctui_group_render()`/
+     `ctui_split_render()` — so a normal app run (`E_INF|E_WRN|E_ERR`,
+     no `E_DBG`; see every `examples_apps/*/main.c`'s `ctui_init()`
+     call) was paying full format-and-discard cost on every one of
+     those calls for a string nothing ever reads. Fixed by moving the
+     identical `verbosity & level` check to the top of `ctui_logf()`,
+     ahead of any formatting — same short-circuit `log_entry()`
+     already did, just far enough upstream to actually save the work.
+  2. `ctui_screen_flush()` (`src/core/screen.c`) `malloc`'d and
+     `free`'d its `rows*cols*64`-byte ANSI scratch buffer on *every*
+     call — once per rendered frame, the entire time an app runs, for
+     memory whose worst-case size never changes between frames.
+     Turned into `CTUI_SCREEN`'s own `out`/`out_cap` fields, sized once
+     in `screen_alloc()` (both `ctui_screen_create()` and
+     `ctui_screen_resize()` go through it, so a resize still resizes
+     the scratch buffer correctly) and freed once in
+     `ctui_screen_free()`/on the next resize — `ctui_screen_flush()`
+     itself no longer allocates anything.
+  Neither changes any observable behavior — both are pure
+  moved-earlier/made-persistent fixes. Considered, deliberately not
+  done: adding a separate log level so `E_DBG` could relax its
+  `fflush()`-per-write in `log_entry()`. Grepping call sites confirmed
+  `E_DBG` is already the *only* level used for per-primitive tracing
+  (`E_INF` is per-frame/per-widget, not per-character; `E_WRN`/`E_ERR`
+  are rare anomalies), and it's already opt-in — only `tests/*.c`
+  (`E_ALL`) and a deliberate debugging session ever enable it. Turning
+  `E_DBG` on already *is* the "I want a reliable, flush-per-line trace
+  even if the process crashes mid-run" signal; a new level would just
+  restate that. `log_entry()` left as-is.
+  Verified: `make`/`make all`/`make test` warning-free, all 40
+  assertions across `tests/*.c` still pass. `tools/pty_harness.py`
+  against `ctui-demo` at 24x80 and again after a live `resize:40x100`
+  (exercises `screen_alloc()`'s resize path for the new `out` buffer)
+  renders identically to before the change. Confirmed the fixes
+  introduce no new `[CTUI:WIDGET] - putc out of widget bounds`
+  warnings by diffing `ctui.log` against an unmodified-`main` run of
+  the same steps — the 22 that do show up are a pre-existing,
+  unrelated demo-layout warning present on `main` too.
+
 ## Known issues / deliberately deferred
 
 - **`player` stutters every few seconds on longer real-world WAV files**

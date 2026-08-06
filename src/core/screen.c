@@ -17,6 +17,12 @@ static void screen_alloc(CTUI_SCREEN *s, int rows, int cols) {
     s->cells[i].ch = ' ';
     s->buffer[i].ch = '\0'; /* force buffer flush on next draw */
   }
+
+  /* worst case is an RGB cell's escape, "\x1b[38;2;255;255;255;48;2;255;
+   * 255;255m" (~38 bytes) plus a position escape (~11) plus the glyph
+   * itself -- 64/cell budget covers that with room to spare */
+  s->out_cap = (size_t)rows * (size_t)cols * 64 + 64;
+  s->out = malloc(s->out_cap);
 }
 
 CTUI_SCREEN *ctui_screen_create(int rows, int cols) {
@@ -32,6 +38,7 @@ void ctui_screen_free(CTUI_SCREEN *s) {
             s->cols, s->rows, ctui_tick_advance());
   free(s->cells);
   free(s->buffer);
+  free(s->out);
   free(s);
 }
 
@@ -41,6 +48,7 @@ void ctui_screen_resize(CTUI_SCREEN *s, int rows, int cols) {
             s->rows, cols, rows, ctui_tick_advance());
   free(s->cells);
   free(s->buffer);
+  free(s->out);
   screen_alloc(s, rows, cols);
 
   /* clear the real terminal too -- a shrink could otherwise leave stale
@@ -154,11 +162,11 @@ static size_t emit_color(char *out, size_t cap, size_t len,
 void ctui_screen_flush(CTUI_SCREEN *s) {
   ctui_logf(E_INF, "[CTUI:SCREEN] - flush starting @ tick %d\n",
             ctui_tick_advance());
-  /* worst case is an RGB cell's escape, "\x1b[38;2;255;255;255;48;2;255;
-   * 255;255m" (~38 bytes) plus a position escape (~11) plus the glyph
-   * itself -- 64/cell budget covers that with room to spare */
-  size_t cap = (size_t)s->rows * (size_t)s->cols * 64 + 64;
-  char *out = malloc(cap);
+  /* s->out is sized once (screen_alloc()) to the same worst-case-per-cell
+   * budget this used to malloc() fresh on every call -- reused here rather
+   * than allocated per flush */
+  char *out = s->out;
+  size_t cap = s->out_cap;
   size_t len = 0;
 
   int last_row = -1, last_col = -1;
@@ -196,7 +204,6 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
   write(STDOUT_FILENO, out, len);
   ctui_logf(E_INF, "[CTUI:SCREEN] - flush wrote %zu bytes @ tick %d\n", len,
             ctui_tick_advance());
-  free(out);
   memcpy(s->buffer, s->cells,
          sizeof(CTUI_CELL) * (size_t)s->rows * (size_t)s->cols);
 }

@@ -14,6 +14,15 @@ int ctui_log(int level, const char *log_str) {
 }
 
 int ctui_logf(int level, const char *fmt, ...) {
+  /* mirrors log_entry()'s own verbosity check, but ahead of the
+   * vsnprintf/malloc/free below -- without this, every call site (many of
+   * them per-primitive: one per ctui_widget_putc(), one per event
+   * dispatched) pays full formatting cost even when the level is masked
+   * out and the string is about to be discarded. */
+  if (!(logger.verbosity & level)) {
+    return 0;
+  }
+
   int err = -1;
   int f_result = 0;
   size_t size = 0;
