@@ -19,6 +19,15 @@
  * wide. */
 #define SPLASH_SRC_W 29
 #define SPLASH_SRC_H 12
+/* Kitty-tier pixel resolution -- independent of SPLASH_SRC_W/H above, and
+ * unmasked (fills its whole rectangle, see ctui_splash_make()) rather than
+ * aspect-tuned to read as a circle, so no 2.4:1 constraint applies here. */
+#define SPLASH_PX_W 256
+#define SPLASH_PX_H 128
+/* must differ from kitty_image_data's image_id (1, below) -- both can be
+ * live at once (splash always is; kitty_image once its navbar item is
+ * toggled on) and ctui_gfx_kitty_display() keys retransmission by id. */
+#define SPLASH_IMAGE_ID 2
 
 /* shared by every layout() below: header/navbar/footer get a fixed-feeling
  * share of the screen, main takes whatever's left so the four areas always
@@ -112,12 +121,12 @@ static CTUI_WIDGET *kitty_image_widget;
 static CTUI_WIDGET *panels_grid_widget;
 
 /* set once in main() right after ctui_init() negotiates gfx_mode -- this app
- * requests CTUI_GFX_TRUECOLOR (not CTUI_GFX_KITTY), so ctui_init() never
- * negotiates up to CTUI_GFX_KITTY even on a terminal that supports it (see
- * term.c's ctui_init()); this stays 0 in practice. Kept anyway so
- * kitty_image_widget's cleanup below follows the exact same "only call
- * ctui_gfx_kitty_delete() once CTUI_GFX_KITTY was actually negotiated"
- * contract every other kitty_image consumer has to honor. */
+ * requests CTUI_GFX_KITTY, so this is true on any Kitty-capable terminal and
+ * false (negotiated down to TRUECOLOR/ANSI256/16) otherwise. Read by
+ * kitty_image_widget's cleanup below, which must only call
+ * ctui_gfx_kitty_delete() once CTUI_GFX_KITTY was actually negotiated --
+ * splash_widget doesn't need the same check since it's never removed from
+ * main_split (see main_split_handle_navbar_toggle() below), only shrunk. */
 static int kitty_gfx_negotiated;
 
 /* mirrors each panel's CTUI_MENU_ITEM.enabled, indexed the same as
@@ -132,10 +141,11 @@ static int panels_enabled[3];
  * info"/"dump palette"/"kitty image", tracking each one's enabled/disabled
  * state independently and rebuilding panels_grid's active children from
  * scratch every time one changes, in navbar order. Selecting "kitty image"
- * still opens its cell even though this app never negotiates
- * CTUI_GFX_KITTY -- ctui_widget_dispatch_render() falls back to
- * ctui_kitty_image_render()'s plain "[kitty required]" text in that case,
- * exactly like any other widget's ordinary degrade path. */
+ * opens its cell whether or not CTUI_GFX_KITTY was actually negotiated --
+ * ctui_widget_dispatch_render() falls back to ctui_kitty_image_render()'s
+ * plain "[kitty required]" text on a terminal that only granted
+ * TRUECOLOR/ANSI256/16, exactly like any other widget's ordinary degrade
+ * path. */
 static int main_split_handle_navbar_toggle(CTUI_WIDGET *self, CTUI_EVENT *ev) {
   CTUI_SPLIT *main_split = self->widget_data;
   CTUI_SPLIT *grid = panels_grid_widget->widget_data;
@@ -208,15 +218,15 @@ static void status_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
 }
 
 int main(void) {
-  /* v1: request CTUI_GFX_TRUECOLOR outright rather than CTUI_GFX_KITTY --
-   * ctui_init() only ever negotiates *down* from what's requested (see
-   * term.c), so this guarantees g_gfx_mode == CTUI_GFX_TRUECOLOR on any
-   * truecolor-capable terminal (even a Kitty one) instead of leaving it to
-   * whatever the terminal happens to support. Still negotiates down to
-   * ANSI256/16 on a terminal that can't do truecolor, same "must still run
-   * on a plain terminal" guarantee the original demo makes for
-   * CTUI_GFX_KITTY. */
-  CTUI_GFX_MODE gfx_mode = CTUI_GFX_TRUECOLOR;
+  /* v2: request the richest tier, CTUI_GFX_KITTY, same as the original demo
+   * -- ctui_init() only ever negotiates *down* from what's requested (see
+   * term.c), so this still runs on a plain terminal, degrading to
+   * TRUECOLOR/ANSI256/16 as needed. splash_widget and kitty_image_widget
+   * both carry a real gfx_render() for the KITTY tier (see
+   * ctui_widget_set_gfx_renderer() calls below) and fall back to their
+   * ordinary truecolor render() otherwise -- same graceful-degrade path
+   * every Phase 4 widget gets from ctui_widget_dispatch_render(). */
+  CTUI_GFX_MODE gfx_mode = CTUI_GFX_KITTY;
   if (ctui_init(E_INF | E_WRN | E_ERR, &gfx_mode) != 0) {
     fprintf(stderr, "failed to init ctui\n");
     return 1;
@@ -244,7 +254,9 @@ int main(void) {
   CTUI_LABEL title = {.text = "ctui - demo advanced",
                       .fg = CTUI_COLOR_CYAN,
                       .bg = CTUI_COLOR_DEFAULT};
-  CTUI_SPLASH splash_data = ctui_splash_make(SPLASH_SRC_W, SPLASH_SRC_H);
+  CTUI_SPLASH splash_data = ctui_splash_make(SPLASH_SRC_W, SPLASH_SRC_H,
+                                             SPLASH_PX_W, SPLASH_PX_H,
+                                             SPLASH_IMAGE_ID);
 
   /* shared by header/main/footer borders -- ctui_border_render only reads
    * it, so one instance is enough even though three separate widgets point
@@ -273,6 +285,8 @@ int main(void) {
    * (called from main_split_layout()) overwrites them every time. */
   CTUI_WIDGET splash_widget = ctui_widget_make(
       0, 0, 0, 0, &splash_data, ctui_splash_render, splash_layout);
+  ctui_widget_set_gfx_renderer(&splash_widget, CTUI_GFX_KITTY,
+                               ctui_splash_gfx_render);
   CTUI_WIDGET debug_info = ctui_widget_make(0, 0, 0, 0, &gfx_mode,
                                             ctui_debug_info_render, NULL);
   CTUI_WIDGET dump_palette = ctui_widget_make(

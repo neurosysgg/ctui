@@ -890,6 +890,31 @@ terminal resize.
       `CTUI_GFX_KITTY`), and a resize mid-toggle reflows both the splash
       and the revealed panel grid with zero new `E_WRN` log lines.
       `make`/`make all`/`make test` all warning-free.
+- [x] `examples_apps/demo-advanced/` upgraded to request `CTUI_GFX_KITTY`
+      (v1 requested `CTUI_GFX_TRUECOLOR` outright — see the entry above),
+      same negotiate-down-on-a-plain-terminal contract the original `demo`
+      already relies on. `CTUI_SPLASH` (`widgets/splash.h/.c`) now carries a
+      real `CTUI_GFX_KITTY` render path via `ctui_widget_set_gfx_renderer()`
+      — the same dual text/gfx pattern `src/widgets/kitty_image.c`
+      established — transmitting a second, much higher-resolution (256x128)
+      pixel buffer through `ctui_gfx_kitty_display()`, independent of the
+      small 29x12 buffer still used for the truecolor char-cell degrade.
+      Splash's content changed from a plain radial hue-sweep aura to a
+      swirling "nebula": the same angle-driven hue sweep now perturbed by a
+      3-term sine plasma (both hue and brightness), plus scattered
+      single-pixel star sparkles in the pixel buffer (real resolution only
+      the Kitty path has enough of for a sparkle to read as a point rather
+      than noise). The char-cell version keeps the aura's circular alpha
+      mask; the pixel version is unmasked and fills its whole rectangle,
+      since a real image doesn't need transparency to avoid looking blocky.
+      Verified via `tools/pty_harness.py` with `KITTY_WINDOW_ID`/`TERM`
+      forcing the Kitty tier: both the splash (`i=2`) and the `kitty image`
+      panel (`i=1`) transmit distinct Kitty APC payloads at the expected
+      cell geometry, reflow correctly across a panel toggle and a resize,
+      and re-running without `KITTY_WINDOW_ID` still negotiates down to
+      truecolor and renders the char-cell nebula (confirmed via `48;2;r;g;b`
+      backgrounds in the raw stream) — zero `E_WRN` log lines either way.
+      `make`/`make all`/`make test` all warning-free.
 
 ## Known issues / deliberately deferred
 
