@@ -157,9 +157,11 @@ terminal resize.
   falling back to the real stdlib only if there isn't one, so a
   promotion is just `git mv` + deleting the local copy.
 - **Terminal I/O**: raw ANSI/terminfo escapes, termios raw mode,
-  alternate screen buffer, `SIGWINCH` handling. Kitty protocol / better
-  input handling is a possible future upgrade, not a near-term
-  priority.
+  alternate screen buffer, `SIGWINCH` handling. The Kitty *graphics*
+  protocol (pixel images, `CTUI_GFX_KITTY`) landed -- see the changelog
+  entry below and `GFX_DESIGN.md`'s Phase 4. Kitty's separate *keyboard*
+  protocol (richer key-event reporting) is still a possible future
+  upgrade, not a near-term priority.
 - **Testing**: `ctui_init()` was split so its logger setup is now its
   own public function, `ctui_log_init()` — `ctui_init()` still calls it
   as the first step, but headless callers (namely `tools/ctui_test.h`)
@@ -472,19 +474,201 @@ terminal resize.
       only `CTUI_GFX_ANSI256` is granted. Phase 4
       (`supported_gfx_modes`/`ctui_widget_set_gfx_renderer()`) stays
       deferred, same reasoning as before.
-- **Found, not fixed: `tools/pty_harness.py`'s `raw` step is broken.**
-  Every step's loop iteration unconditionally drains+feeds+clears the
-  captured byte buffer into `grid` *before* dispatching on the step's own
-  kind -- so by the time a `raw` step's own handler runs, whatever bytes
-  arrived during the preceding `wait`/`key`/etc. have already been
-  consumed and discarded into `grid`, and `raw` prints an effectively
-  empty buffer. `dump` still works (it reads accumulated `grid` state,
-  not `buf`). Worked around this pass by writing a small throwaway
-  non-pty C program that calls `ctui_screen_flush()` directly and reads
-  its `write()` output, rather than fixing the harness -- flagging here
-  since `CLAUDE.md`'s Testing section calls `raw` out specifically for
-  checking literal emitted ANSI bytes (color codes), which is exactly
-  what doesn't currently work.
+- **Kitty graphics protocol landed: the real wire emission plus all of
+  GFX Phase 4** (`docs/protocol.md`'s recipe, `GFX_DESIGN.md`'s
+  "Non-degradable protocols" section). `CTUI_GFX_KITTY` detection
+  already existed (env-sniffing `KITTY_WINDOW_ID`/`TERM=xterm-kitty`);
+  what didn't exist yet was anything that could actually *use* it, or
+  any mechanism for a widget to declare "I need this specific protocol,
+  I have no text to degrade to."
+  - `ctui_util_base64_encode()`/`ctui_util_base64_len()`
+    (`src/core/util.c`/`.h`): generic RFC 4648 base64, not
+    ctui-specific -- Kitty's transmission payload just happens to be the
+    first thing that needs it.
+  - `ctui_gfx_kitty_display()` (`src/core/gfx.c`/`.h`): builds and
+    writes the actual `\x1b_G...\x1b\\` APC escape(s) straight to
+    stdout, bypassing `CTUI_CELL` entirely (pixel graphics can't be
+    expressed as a colored character cell) -- `a=T,f=32` (transmit +
+    display, raw RGBA), `s=`/`v=` pixel dimensions, `c=`/`r=` cell
+    scaling, `q=2` (quiet -- ctui never reads APC replies), chunked at
+    4096 encoded bytes with `m=1`/`m=0` continuation flags per the
+    protocol's own chunking rule (split points are valid anywhere in
+    the *encoded* string, not tied to 3-byte raw boundaries). No-ops
+    (logged) if stdout isn't a real tty or the image is degenerate.
+  - Phase 4 on `CTUI_WIDGET` (`src/core/widget.h`/`.c`):
+    `supported_gfx_modes` (defaults to all three text tiers via
+    `ctui_widget_make()` -- every existing widget qualifies with zero
+    code changes, since text rendering degrades via each cell's own
+    `color_mode` regardless of what got negotiated) plus
+    `ctui_widget_set_gfx_renderer(widget, mode, render)`, which narrows
+    `supported_gfx_modes` to exactly `mode` and registers an alternate
+    `render()` for it -- a pixel-graphics widget has no sensible text
+    fallback, so there's nothing left to degrade to.
+  - `ctui_app_init()` (`src/core/app.c`/`.h`) now returns `int` (was
+    `void`) and hard-fails (`-1`, logged) if a widget's declared
+    non-text `supported_gfx_modes` don't overlap the negotiated
+    `g_gfx_mode` -- masking the three always-satisfiable text-tier bits
+    out of the check first is what keeps this a no-op for every
+    ordinary widget; it only ever fires for one that opted into
+    `ctui_widget_set_gfx_renderer()`. All 7 `examples_apps/*/main.c`
+    call sites (plus `tests/*.c`, unaffected since their widgets never
+    narrow) updated to check the return, same `!= 0` pattern
+    `ctui_init()` already used.
+  - `ctui_app_render()`'s dispatch skips a matched gfx widget's
+    `render()` entirely (nothing to draw into the compositor); its
+    pixels are drawn by a new `render_gfx_widgets()` static helper,
+    called from `ctui_app_run()` immediately *after* every
+    `ctui_screen_flush()`, never before -- `ctui_screen_flush()`'s
+    shadow-buffer diff would otherwise paint blank text cells back over
+    whatever pixels were just written, since the widget's (untouched,
+    still-default) compositor cells look unchanged frame to frame.
+  - Proving-ground: `examples_apps/kitty_demo` (new Makefile target
+    `ctui-kitty_demo`), requesting `CTUI_GFX_KITTY` specifically. Its
+    one widget, app-local `CTUI_KITTY_IMAGE`
+    (`examples_apps/kitty_demo/widgets/`), generates a procedural RGB
+    diagonal gradient at runtime (no image-decoding dependency) and
+    displays it via `ctui_gfx_kitty_display()`.
+  - Verified: `tests/kitty_protocol_test.c` (headless, `make test`) --
+    base64 against known RFC 4648 vectors, `ctui_widget_make()`'s
+    default `supported_gfx_modes`, `ctui_widget_set_gfx_renderer()`'s
+    narrowing, and `ctui_app_init()`'s pass/hard-fail paths (simulated
+    by redeclaring the private `g_gfx_mode` extern locally, the same
+    gray-box trick `ctui_test.h` already relies on for reading
+    `screen->cells` directly -- there's no `ctui_init()` in a headless
+    test to set it for real). The actual APC bytes were checked against
+    `ctui-kitty_demo` under `tools/pty_harness.py` (env forcing
+    `TERM=xterm-kitty KITTY_WINDOW_ID=1`) -- see the next entry below
+    for what the harness needed fixed first before that check was
+    possible.
+- **`tools/pty_harness.py`'s `raw` step fixed for real this pass** (see
+  the Kitty graphics protocol entry below for why it was actually
+  needed this time, not just nice-to-have). The bug was subtler than the
+  earlier "found, not fixed" note here described: it's not that the
+  *preceding* step's preamble drains first -- a fast target (any ctui
+  app; there's no artificial delay anywhere in the render/flush path)
+  routinely finishes writing its *entire* frame before even the *first*
+  step's own preamble drain returns, so whichever step happens to run
+  first ends up draining, feeding, and clearing the real bytes, and
+  every step after it finds nothing left. `dump` "worked" by accident --
+  it displays cumulative `grid` state, which the first step's preamble
+  had already updated, not anything its own handler drained. Fixed with
+  a `history` bytearray that every drain folds into and nothing ever
+  clears; `raw` now prints `history` in full (genuinely cumulative, "so
+  far" as the step's own doc-comment always claimed) instead of
+  whatever scraps a single step's transient `buf` still held. Verified
+  against `ctui-kitty_demo`'s real Kitty APC output: reassembled 22
+  chunks in sequence, correct `m=1`/`m=0` framing, header keys matching
+  what `ctui_gfx_kitty_display()` sent.
+- **`CTUI_KITTY_IMAGE` promoted to `src/widgets/` and folded into `demo`
+  as a real toggleable panel** -- `demo` is now a second consumer, so
+  per `CLAUDE.md`'s promotion rule this is just the file move (`mv
+  examples_apps/kitty_demo/widgets/kitty_image.{c,h} src/widgets/`, no
+  code changes, matching how `CTUI_LIST` was promoted earlier). The
+  integration itself surfaced three problems a single-purpose standalone
+  app like `kitty_demo` never hits, all generic to any future
+  non-degradable protocol, written up in full as
+  `docs/protocol.md`'s new "Integrating a non-degradable protocol into a
+  real, multi-widget app" section:
+  1. A Phase 4 widget can't be a `CTUI_SPLIT`/`CTUI_GROUP` child --
+     `ctui_split_render()`/`ctui_group_render()` call each child's
+     `render()` directly, never checking `gfx_render_mode`; only the
+     top-level `ctui_app_render()`/`render_gfx_widgets()` loop does that
+     dispatch. `demo`'s new `kitty_image_layout()`
+     (`examples_apps/demo/main.c`) reproduces the exact box a real 2nd
+     `main_split` pane would occupy instead of actually being one.
+  2. `render_gfx_widgets()` calls every matching widget's `gfx_render`
+     unconditionally, every frame -- there's no existing "skip this
+     widget this frame" mechanism the way a split naturally stops calling
+     a de-activated child's `render()`. Fixed by convention: `layout()`
+     collapses to `w=0, h=0` when not the active panel, and
+     `ctui_kitty_image_gfx_render()` (now `src/widgets/kitty_image.c`)
+     checks `self->w <= 0 || self->h <= 0` first and skips
+     transmitting -- reuses fields every widget already has rather than
+     inventing a separate visibility flag.
+  3. `demo`'s requested tier changed from `CTUI_GFX_TRUECOLOR` to
+     `CTUI_GFX_KITTY` (still degrades the same way on a plain terminal --
+     `ctui_init()` only ever negotiates down). The new "kitty image" menu
+     item always exists in `data.items[]`, on every terminal, but
+     `kitty_image`/`kitty_image_data` are only constructed -- and
+     `kitty_image_widget` only set non-NULL, only appended to the
+     `widgets[]` array passed to `ctui_app_init()` -- inside an `if
+     (gfx_mode == CTUI_GFX_KITTY)` branch in `main()`. This is the load-
+     bearing choice: `ctui_app_init()`'s Phase 4 validation never even
+     sees the widget on a terminal that can't support it, so there's
+     nothing to hard-fail. Picking "kitty image" on such a terminal is a
+     plain no-op in `main_split_handle_panel_toggle()`
+     (`kitty_image_widget == NULL` short-circuits first) -- status still
+     echoes "you picked: kitty image" via the existing generic handler,
+     just no panel opens. All three menu items (debug info/dump
+     palette/kitty image) are mutually exclusive over the same visual
+     slot, same as debug info/dump palette were before this pass.
+  Verified: `tools/pty_harness.py` against `ctui-demo` under both a
+  plain terminal (negotiates to `0x1`, "kitty image" selectable but a
+  no-op, no crash, `debug info`/`dump palette` unaffected) and
+  `TERM=xterm-kitty KITTY_WINDOW_ID=1` (negotiates `0x8`; toggling
+  "kitty image" produces a real, correctly-chunked Kitty APC transmission
+  at the expected cell geometry, `c=48,r=7`; toggling `debug info`
+  afterward correctly collapses and stops retransmitting the kitty
+  panel, confirmed via the log's `"kitty image" enabled` /`"debug info"
+  enabled, splitting main area` sequence).
+- **Generalized the fix above instead of leaving it as `demo`-local
+  plumbing: `ctui_widget_dispatch_render()`/`ctui_widget_flush_gfx()`
+  (`src/core/widget.c`/`.h`) are now the one place render-vs-gfx_render
+  gets decided, and every caller that walks widgets uses them.** The
+  previous pass's `main_split`/split-child limitation (see just above)
+  wasn't really a `demo` problem, it was `ctui_app_render()` being the
+  *only* caller that knew about Phase 4 dispatch at all —
+  `ctui_split_render()`/`ctui_group_render()` (`src/core/split.c`/
+  `group.c`) both called `child->render()`/`w->render()` directly.
+  Pulling the decision out into two shared functions and having all
+  three renderers call `ctui_widget_dispatch_render(widget, comp)`
+  instead of `widget->render(widget, comp)` fixes it at the root: a
+  Phase 4 widget now works identically whether it's top-level or nested
+  arbitrarily deep in splits/groups, with zero special-casing in the
+  caller. `ctui_widget_dispatch_render()` either calls `render()`
+  immediately (mismatch or no `gfx_render` registered) or queues the
+  widget in a small file-static realloc-grown array (same shape/
+  reasoning as `core/timer.c`'s own registries -- simpler than living on
+  `CTUI_APP`, and there's only ever one live app per process anyway);
+  `ctui_widget_flush_gfx(comp)` fires every queued widget and clears the
+  queue, called by `ctui_app_run()` right after each `ctui_screen_flush()`
+  (replacing the old `app.c`-local `render_gfx_widgets()`).
+  `ctui_app_init()`'s hard-fail validation still only covers *top-level*
+  `widgets[]` (a nested widget was never reachable from that array to
+  begin with) -- now explicitly documented as the intended behavior
+  rather than a gap, since a mismatched nested widget just falls back to
+  its own `render()` via the same dispatch path everything else uses.
+  This unlocked a real simplification of `demo`'s own integration:
+  `kitty_image` is now a genuine `main_split.children[1]` candidate,
+  built unconditionally as plain as `debug_info`/`dump_palette` (one
+  extra `ctui_widget_set_gfx_renderer()` call), with
+  `ctui_kitty_image_render()`'s `"[kitty required]"` text as its real,
+  live fallback -- every piece of the previous pass's workaround
+  (`kitty_image_layout()` duplicating the split's own division math, the
+  `kitty_visible` flag, the `kitty_image_widget == NULL` no-op guard, the
+  conditional `if (gfx_mode == CTUI_GFX_KITTY)` construction) is gone.
+  Selecting "kitty image" on a non-Kitty terminal now opens the pane and
+  shows the placeholder text instead of silently no-opping, a UX
+  improvement that fell out of the fix for free.
+  **Testing this surfaced an unrelated, pre-existing bug**, latent since
+  the original two-candidate (`debug info`/`dump palette`) version of
+  `main_split_handle_panel_toggle()`: swapping the shared pane slot
+  directly from one open pane to another (`split->count` staying at `2`
+  the whole time, only `children[1]`'s identity actually changing) never
+  re-ran `ctui_split_layout()`'s binding, since the handler only checked
+  whether `count` itself changed. The newly-swapped-in widget's `buf`
+  stayed `NULL` (never bound), so its `render()` silently dropped every
+  `ctui_widget_putc()` call (logged `E_WRN` "not bound", drew nothing).
+  Three candidates instead of two made the "switch without closing
+  first" path easy to reach in practice, where two candidates apparently
+  never had. Fixed by tracking `pane_changed` explicitly and
+  re-laying-out whenever count *or* pane identity changed, not just
+  count. Verified via `pty_harness.py`: 20 "putc rejected... not bound"
+  warnings in the log for the direct kitty-image→debug-info switch
+  before the fix, zero after, and `[CTUI:SPLIT] - ... laid out` /
+  `[DEMO:APP] - "debug info" enabled, splitting main area` now correctly
+  fire on that transition.
+  `make all`/`make test` warning-free throughout (25 assertions).
 
 ## Known issues / deliberately deferred
 
@@ -541,13 +725,6 @@ terminal resize.
 
 ## Next up
 
-- Fix `tools/pty_harness.py`'s `raw` step (see Known issues above) --
-  have it snapshot/print the buffer the preceding step's preamble just
-  drained instead of a fresh (empty) one.
-- GFX Phase 4 (`supported_gfx_modes` on `CTUI_WIDGET`,
-  `ctui_widget_set_gfx_renderer()`), once a widget exists that can't
-  degrade to text -- a Kitty-graphics widget for `player`'s album art is
-  the plausible first candidate per `GFX_DESIGN.md`.
 - Promote `CTUI_CLOCK` from its `examples_apps/clock/widgets/` staging
   spot to `src/widgets/`, once a second app actually needs it — see the
   `examples_apps/` entry above for the promotion criterion. (`CTUI_LIST`

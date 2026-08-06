@@ -41,7 +41,10 @@ int main(void) {
 
   CTUI_WIDGET *widgets[] = {&matrix_widget};
   CTUI_APP app;
-  ctui_app_init(&app, widgets, 1, rows, cols);
+  if (ctui_app_init(&app, widgets, 1, rows, cols) != 0) {
+    fprintf(stderr, "failed to init ctui app\n");
+    return 1;
+  }
 
   ctui_periodic_register(&matrix_widget, 80, 0, ctui_matrix_handle_timer);
 

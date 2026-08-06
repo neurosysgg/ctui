@@ -45,7 +45,10 @@ int main(void) {
 
   CTUI_WIDGET *widgets[] = {&border, &clock_widget};
   CTUI_APP app;
-  ctui_app_init(&app, widgets, 2, rows, cols);
+  if (ctui_app_init(&app, widgets, 2, rows, cols) != 0) {
+    fprintf(stderr, "failed to init ctui app\n");
+    return 1;
+  }
 
   ctui_event_register("timer", CTUI_TICK_EVENT, &clock_widget,
                       ctui_clock_handle_tick);

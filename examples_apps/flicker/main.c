@@ -91,7 +91,10 @@ int main(void) {
 
   CTUI_WIDGET *widgets[] = {&border, &content_split_widget};
   CTUI_APP app;
-  ctui_app_init(&app, widgets, 2, rows, cols);
+  if (ctui_app_init(&app, widgets, 2, rows, cols) != 0) {
+    fprintf(stderr, "failed to init ctui app\n");
+    return 1;
+  }
 
   ctui_periodic_register(&pane_a1, 300, 1, ctui_flicker_handle_timer);
   ctui_periodic_register(&pane_a2, 300, 1, ctui_flicker_handle_timer);

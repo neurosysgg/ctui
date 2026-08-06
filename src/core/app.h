@@ -21,9 +21,18 @@ typedef struct {
 
 /* app / event loop */
 /* allocates a rows x cols compositor and binds every widget to its slice of
- * it (see ctui_widget_init()) */
-void ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
-                   int cols);
+ * it (see ctui_widget_init()). Also validates every widget's declared
+ * supported_gfx_modes (widget.h) against the graphics mode ctui_init()
+ * negotiated: a widget that opted into a non-degradable protocol (e.g.
+ * CTUI_GFX_KITTY, via ctui_widget_set_gfx_renderer()) that wasn't actually
+ * granted has nothing sensible to draw, so this is a hard fail (-1,
+ * logged E_ERR) rather than a silent degrade -- the only failure case,
+ * same 0/-1 convention as ctui_init(). Ordinary text widgets (the
+ * ctui_widget_make() default) always pass regardless of what was
+ * negotiated, since text rendering never depends on g_gfx_mode -- see
+ * GFX_DESIGN.md's Phase 4. */
+int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
+                  int cols);
 void ctui_app_free(CTUI_APP *app); /* frees app->comp and app->handlers */
 void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen);
 /* blocks until ESC; tick_ms is passed straight through to

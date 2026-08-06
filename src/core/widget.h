@@ -31,21 +31,52 @@ struct CTUI_WIDGET {
    * x/y/w/h passed to ctui_widget_make() are left alone. */
   void (*layout)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
 
-  /* render callback, called unconditionally per frame -- must never be
-   * NULL. Draws into comp via ctui_widget_putc()/ctui_widget_puts(), using
-   * coordinates local to this widget (0,0 = top left), not the
-   * compositor's absolute coordinates. */
+  /* render callback -- must never be NULL. Draws into comp via
+   * ctui_widget_putc()/ctui_widget_puts(), using coordinates local to
+   * this widget (0,0 = top left), not the compositor's absolute
+   * coordinates. Called once per frame *if* this widget's gfx_render_mode
+   * doesn't match the negotiated mode (the common case: every ordinary
+   * widget, always) -- see ctui_widget_dispatch_render() below for the
+   * one place that decision actually gets made. Never call this
+   * directly when walking a collection of widgets (ctui_app_render(),
+   * ctui_split_render(), ctui_group_render() all route through
+   * ctui_widget_dispatch_render() instead) or a Phase 4 widget's
+   * gfx_render never fires. */
   void (*render)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
+
+  /* bitmask of CTUI_GFX_MODE tiers (core/gfx.h) this widget can render
+   * under. Set by ctui_widget_make() to every text tier (ANSI16 |
+   * ANSI256 | TRUECOLOR) -- every ordinary widget qualifies under any
+   * negotiated text tier with zero code changes, since a cell's own
+   * color_mode (not this bitmask) is what actually drives
+   * ctui_screen_flush()'s degrade-to-text-color rendering. Narrowed by
+   * ctui_widget_set_gfx_renderer() for a widget built around a
+   * non-degradable protocol (e.g. Kitty pixel graphics) that has nothing
+   * sensible to fall back to as plain text. Checked by ctui_app_init()
+   * for *top-level* widgets only -- see that function's own comment for
+   * why a widget nested in a CTUI_SPLIT/CTUI_GROUP isn't validated the
+   * same way and instead just degrades to render() if unmatched. */
+  unsigned int supported_gfx_modes;
+
+  /* the single non-text CTUI_GFX_MODE tier gfx_render below is registered
+   * for, or 0 if none -- set only by ctui_widget_set_gfx_renderer(). */
+  unsigned int gfx_render_mode;
+
+  /* alternate render callback, used by ctui_widget_dispatch_render()
+   * instead of render above when gfx_render_mode matches the negotiated
+   * g_gfx_mode. NULL (the ctui_widget_make() default) means "no
+   * alternate renderer" -- every widget just uses render. */
+  void (*gfx_render)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
 };
 
 /* Trips if a field is appended to CTUI_WIDGET without updating
  * ctui_widget_make() (core/widget.c) to initialize it; a designated
  * initializer silently zero-fills an omitted field instead of erroring, so
  * this struct should always be built via ctui_widget_make() rather than a
- * literal. Does NOT catch a field inserted before `render` -- review
+ * literal. Does NOT catch a field inserted before `gfx_render` -- review
  * ctui_widget_make() by hand if you do that. */
-_Static_assert(offsetof(CTUI_WIDGET, render) +
-                       sizeof(((CTUI_WIDGET *)0)->render) ==
+_Static_assert(offsetof(CTUI_WIDGET, gfx_render) +
+                       sizeof(((CTUI_WIDGET *)0)->gfx_render) ==
                    sizeof(CTUI_WIDGET),
                "CTUI_WIDGET changed shape; update ctui_widget_make()");
 
@@ -105,5 +136,46 @@ void ctui_widget_puts_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           unsigned char fg_g, unsigned char fg_b,
                           unsigned char bg_r, unsigned char bg_g,
                           unsigned char bg_b);
+
+/* opts widget into a non-degradable graphics protocol (currently just
+ * CTUI_GFX_KITTY, core/gfx.h) instead of the three text tiers every
+ * widget gets from ctui_widget_make() by default. mode must be exactly
+ * one CTUI_GFX_MODE bit -- pass it as CTUI_GFX_KITTY, not a combination.
+ * Sets widget->supported_gfx_modes = mode (replacing the default text
+ * bitmask entirely: a pixel-graphics widget has no sensible plain-text
+ * content, so there's nothing left to degrade to at the *top* level --
+ * see ctui_app_init()), records mode/render for
+ * ctui_widget_dispatch_render()'s dispatch. Call once per widget, after
+ * ctui_widget_make(). */
+void ctui_widget_set_gfx_renderer(CTUI_WIDGET *widget, unsigned int mode,
+                                  void (*render)(CTUI_WIDGET *self,
+                                                 CTUI_COMPOSITOR *comp));
+
+/* the single place that decides whether widget draws into comp via its
+ * plain render() (text -- the common case, and everything that isn't an
+ * exact gfx_render_mode match) or defers to its gfx_render() instead
+ * (queued here, not called yet -- see ctui_widget_flush_gfx()). Every
+ * caller that walks a collection of widgets and would otherwise call
+ * ->render() directly routes through this: ctui_app_render() for
+ * top-level app widgets, ctui_split_render()/ctui_group_render() for
+ * CTUI_SPLIT/CTUI_GROUP children. That's what makes a Phase 4 widget
+ * (ctui_widget_set_gfx_renderer()) behave identically whether it's a
+ * top-level widget or nested arbitrarily deep in splits/groups -- this
+ * function doesn't know or care which case it's in. */
+void ctui_widget_dispatch_render(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp);
+
+/* fires gfx_render() on every widget ctui_widget_dispatch_render() queued
+ * this frame -- anywhere in the tree, not just top-level -- then clears
+ * the queue. Must run after ctui_screen_flush(), never before: a
+ * non-degradable protocol's transmit function (ctui_gfx_kitty_display()
+ * for Kitty) writes straight to the terminal, bypassing CTUI_CELL/the
+ * compositor entirely, so running this first would let that frame's
+ * flush paint blank text right back over pixels that were just written
+ * (the widget's own compositor cells never change, since it never calls
+ * any ctui_widget_putc*() variant, so flush's shadow-buffer diff treats
+ * them as stale on at least the first render). ctui_app_run() is the
+ * only caller; every ctui_screen_flush() call site calls this
+ * immediately afterward. */
+void ctui_widget_flush_gfx(CTUI_COMPOSITOR *comp);
 
 #endif

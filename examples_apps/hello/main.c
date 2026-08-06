@@ -44,7 +44,10 @@ int main(void) {
 
   CTUI_WIDGET *widgets[] = {&border, &label};
   CTUI_APP app;
-  ctui_app_init(&app, widgets, 2, rows, cols);
+  if (ctui_app_init(&app, widgets, 2, rows, cols) != 0) {
+    fprintf(stderr, "failed to init ctui app\n");
+    return 1;
+  }
 
   ctui_logf(E_INF, "[HELLO:APP] - widgets wired @ tick %d, entering event loop\n",
             ctui_tick_advance());

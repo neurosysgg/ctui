@@ -24,4 +24,31 @@ typedef enum {
  * terminals may simply not bother setting. */
 unsigned int ctui_gfx_detect_caps(void);
 
+/* transmits and displays a width x height RGBA image via the Kitty
+ * graphics protocol (https://sw.kovidgoyal.net/kitty/graphics-protocol/),
+ * writing the APC escape sequence straight to stdout -- unlike every
+ * ctui_widget_putc_*() variant, this bypasses CTUI_CELL entirely, since
+ * pixel graphics can't be expressed as a colored character cell (see
+ * GFX_DESIGN.md's "Non-degradable protocols"). row/col are 1-based
+ * terminal cell coordinates (as consumed by the CUP cursor-position
+ * escape, same convention ctui_screen_flush() uses); cell_cols/cell_rows
+ * say how many character cells wide/tall the terminal should scale the
+ * image to cover. rgba must be exactly width*height*4 bytes (8-bit RGBA,
+ * row-major, no padding). image_id lets a caller re-transmit under the
+ * same id on a later frame to replace the previous one in place, instead
+ * of layering a new image on top each time -- pass any nonzero value
+ * that's stable across a widget's redraws. The payload is always sent
+ * with q=2 (quiet): ctui never reads the terminal's APC replies, success
+ * or error, so there's nothing to parse them into.
+ *
+ * Caller (ctui_app_render()'s Phase 4 dispatch, see widget.h's
+ * ctui_widget_set_gfx_renderer()) is responsible for only calling this
+ * once CTUI_GFX_KITTY is actually the negotiated g_gfx_mode -- this
+ * function itself doesn't check. No-ops (logs E_WRN) if stdout isn't a
+ * real terminal or the image is degenerate (non-positive dimensions or a
+ * NULL buffer). */
+void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
+                            const unsigned char *rgba, int width, int height,
+                            unsigned int image_id);
+
 #endif

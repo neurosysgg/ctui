@@ -65,7 +65,12 @@ void ctui_split_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
               "widget-tick %d\n",
               (void *)child, child->x, child->y, child->ticks);
 
-    child->render(child, comp);
+    /* routes through the shared render-vs-gfx_render decision point
+     * (core/widget.c) instead of calling child->render() directly -- so
+     * a Phase 4 (non-degradable-protocol) child behaves exactly like a
+     * top-level one, deferred to ctui_widget_flush_gfx() after this
+     * frame's flush rather than rendered here */
+    ctui_widget_dispatch_render(child, comp);
 
     ctui_widget_tick_advance(child);
     ctui_logf(E_DBG,

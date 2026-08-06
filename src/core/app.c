@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include "ctui_internal.h"
+#include "gfx.h"
 #include "input.h"
 #include "log.h"
 #include "timer.h"
@@ -9,8 +10,20 @@
 
 CTUI_APP *g_app = NULL;
 
-void ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
-                   int cols) {
+/* the three tiers every widget supports by default (ctui_widget_make()) --
+ * always satisfiable regardless of g_gfx_mode, since ctui_screen_flush()
+ * degrades a cell's own color_mode to whatever ANSI codes fit, independent
+ * of what got negotiated (see GFX_DESIGN.md's "Resolved open questions").
+ * Masking these out of a widget's declared supported_gfx_modes before
+ * checking against g_gfx_mode is what makes the ctui_app_init() gfx check
+ * below a no-op for ordinary text widgets -- it only ever actually fires
+ * for a widget that opted into a specific non-degradable protocol (e.g.
+ * CTUI_GFX_KITTY) via ctui_widget_set_gfx_renderer(). */
+#define CTUI_GFX_TEXT_TIERS \
+  (CTUI_GFX_ANSI16 | CTUI_GFX_ANSI256 | CTUI_GFX_TRUECOLOR)
+
+int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
+                  int cols) {
   app->widgets = widgets;
   app->count = count;
   app->comp = ctui_compositor_create(rows, cols);
@@ -24,9 +37,35 @@ void ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
             "compositor)\n",
             ctui_tick_advance(), count, cols, rows);
 
+  /* only the top-level widgets[] passed in here get validated -- a
+   * widget nested inside a CTUI_SPLIT/CTUI_GROUP isn't reachable from
+   * this array at all (it lives in the split/group's own children/
+   * members, discovered only once ctui_split_render()/
+   * ctui_group_render() walk it at render time), so there's no hard-fail
+   * check to make for it. That's fine: ctui_widget_dispatch_render()
+   * (core/widget.c) -- the single place render-vs-gfx_render actually
+   * gets decided, for top-level AND nested widgets alike -- falls back
+   * to a mismatched widget's plain render() rather than drawing nothing,
+   * so a nested gfx-mode widget degrades gracefully with no validation
+   * needed. A *top-level* widget still gets the harder guarantee (a
+   * startup failure, not a silent fallback) since it's central to the
+   * app working at all, not an optional nested extra. */
   for (int i = 0; i < count; i++) {
     ctui_widget_init(widgets[i], app->comp);
+
+    unsigned int required =
+        widgets[i]->supported_gfx_modes & ~CTUI_GFX_TEXT_TIERS;
+    if (required && !(required & g_gfx_mode)) {
+      ctui_logf(E_ERR,
+                "[CTUI:APP] - widget %p requires gfx mode 0x%x, but 0x%x "
+                "was negotiated @ tick %d; no text fallback to degrade to, "
+                "aborting init\n",
+                (void *)widgets[i], required, g_gfx_mode,
+                ctui_tick_advance());
+      return -1;
+    }
   }
+  return 0;
 }
 
 void ctui_app_free(CTUI_APP *app) {
@@ -50,7 +89,13 @@ void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen) {
               "widget-tick %d\n",
               (void *)w, w->x, w->y, w->ticks);
 
-    w->render(w, app->comp);
+    /* routes through the one shared render-vs-gfx_render decision point
+     * (core/widget.c) instead of calling w->render() directly -- a
+     * gfx-mode match gets queued there for ctui_widget_flush_gfx() to
+     * fire after this frame's flush, rather than drawn into the
+     * compositor here (see that function's own docs for why the
+     * ordering matters) */
+    ctui_widget_dispatch_render(w, app->comp);
 
     ctui_widget_tick_advance(w);
     ctui_logf(E_DBG,
@@ -90,6 +135,7 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
             ctui_tick_advance(), tick_ms);
   ctui_app_render(app, screen);
   ctui_screen_flush(screen);
+  ctui_widget_flush_gfx(app->comp);
 
   CTUI_EVENT ev;
   ev.scope = CTUI_EVENT_SCOPE_GLOBAL;
@@ -100,6 +146,7 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
       ctui_app_resize(app, screen, resize_data->rows, resize_data->cols);
       ctui_app_render(app, screen);
       ctui_screen_flush(screen);
+      ctui_widget_flush_gfx(app->comp);
       continue;
     }
 
@@ -120,6 +167,7 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
     if (changed) {
       ctui_app_render(app, screen);
       ctui_screen_flush(screen);
+      ctui_widget_flush_gfx(app->comp);
     }
   }
   ctui_logf(E_INF, "[CTUI:APP] - run loop exited @ tick %d\n",

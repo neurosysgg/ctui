@@ -26,4 +26,20 @@ int ctui_util_center_h(char *center_str, char *line, CTUI_CELL fill);
  * than desired. */
 int ctui_util_truncate_str(char *str, size_t desired, char *trunc);
 
+/* generic byte -> base64 (RFC 4648, '=' padded) encoding -- not
+ * ctui-specific, but the Kitty graphics protocol (core/gfx.c) is the
+ * first consumer, since its transmission payload has to be base64. */
+
+/* encoded length of a `len`-byte input, excluding the NUL terminator
+ * ctui_util_base64_encode() also writes -- size dst as this + 1. */
+size_t ctui_util_base64_len(size_t len);
+
+/* encodes src (len bytes) into dst (must be at least
+ * ctui_util_base64_len(len) + 1 bytes -- the encoded chars plus a NUL
+ * ctui_util_base64_encode() appends for convenience). Returns the
+ * encoded length (excluding the NUL), or 0 if dst_cap is too small
+ * (logged via E_WRN). */
+size_t ctui_util_base64_encode(const unsigned char *src, size_t len,
+                               char *dst, size_t dst_cap);
+
 #endif

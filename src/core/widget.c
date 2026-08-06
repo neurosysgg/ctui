@@ -1,7 +1,10 @@
 #include "widget.h"
 
+#include "ctui_internal.h"
+#include "gfx.h"
 #include "log.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 CTUI_WIDGET ctui_widget_make(int x, int y, int w, int h, void *widget_data,
@@ -13,15 +16,20 @@ CTUI_WIDGET ctui_widget_make(int x, int y, int w, int h, void *widget_data,
             "[CTUI:WIDGET] - creating widget @ tick %d (x=%d, y=%d, w=%d, "
             "h=%d)\n",
             ctui_tick_advance(), x, y, w, h);
-  return (CTUI_WIDGET){.x = x,
-                       .y = y,
-                       .w = w,
-                       .h = h,
-                       .widget_data = widget_data,
-                       .ticks = 0,
-                       .buf = NULL,
-                       .layout = layout,
-                       .render = render};
+  return (CTUI_WIDGET){
+      .x = x,
+      .y = y,
+      .w = w,
+      .h = h,
+      .widget_data = widget_data,
+      .ticks = 0,
+      .buf = NULL,
+      .layout = layout,
+      .render = render,
+      .supported_gfx_modes =
+          CTUI_GFX_ANSI16 | CTUI_GFX_ANSI256 | CTUI_GFX_TRUECOLOR,
+      .gfx_render_mode = 0,
+      .gfx_render = NULL};
 }
 
 void ctui_widget_tick_advance(CTUI_WIDGET *widget) { ++widget->ticks; }
@@ -177,4 +185,53 @@ void ctui_widget_puts_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
     ctui_widget_putc_rgb(widget, comp, row, col + i, str[i], fg_r, fg_g, fg_b,
                          bg_r, bg_g, bg_b);
   }
+}
+
+void ctui_widget_set_gfx_renderer(CTUI_WIDGET *widget, unsigned int mode,
+                                  void (*render)(CTUI_WIDGET *self,
+                                                 CTUI_COMPOSITOR *comp)) {
+  widget->supported_gfx_modes = mode;
+  widget->gfx_render_mode = mode;
+  widget->gfx_render = render;
+  ctui_logf(E_INF,
+            "[CTUI:WIDGET] - widget %p gfx renderer registered @ tick %d "
+            "(mode=0x%x)\n",
+            (void *)widget, ctui_tick_advance(), mode);
+}
+
+/* widgets ctui_widget_dispatch_render() queued this frame, drained by
+ * ctui_widget_flush_gfx() -- file-static rather than living on CTUI_APP,
+ * same reasoning as core/timer.c's own registries: simpler, and there's
+ * only ever one live app per process anyway. Flat realloc-grown array,
+ * same shape as the event handler registry -- plenty fast at this scale,
+ * and it's never more than a handful of gfx-mode widgets in one frame. */
+static CTUI_WIDGET **gfx_pending = NULL;
+static int gfx_pending_count = 0;
+static int gfx_pending_cap = 0;
+
+void ctui_widget_dispatch_render(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp) {
+  if (widget->gfx_render_mode == 0 || widget->gfx_render_mode != g_gfx_mode) {
+    widget->render(widget, comp);
+    return;
+  }
+
+  if (gfx_pending_count == gfx_pending_cap) {
+    gfx_pending_cap = gfx_pending_cap ? gfx_pending_cap * 2 : 4;
+    gfx_pending = realloc(gfx_pending,
+                          sizeof(*gfx_pending) * (size_t)gfx_pending_cap);
+  }
+  gfx_pending[gfx_pending_count++] = widget;
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - widget %p queued for deferred gfx_render @ "
+            "tick %d (mode=0x%x)\n",
+            (void *)widget, ctui_tick_advance(), widget->gfx_render_mode);
+}
+
+void ctui_widget_flush_gfx(CTUI_COMPOSITOR *comp) {
+  for (int i = 0; i < gfx_pending_count; i++) {
+    gfx_pending[i]->gfx_render(gfx_pending[i], comp);
+  }
+  ctui_logf(E_DBG, "[CTUI:WIDGET] - flushed %d pending gfx widget(s) @ tick %d\n",
+            gfx_pending_count, ctui_tick_advance());
+  gfx_pending_count = 0;
 }

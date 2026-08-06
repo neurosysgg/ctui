@@ -45,7 +45,10 @@ void ctui_group_render(CTUI_GROUP *group, CTUI_COMPOSITOR *comp) {
               "widget-tick %d\n",
               (void *)w, w->x, w->y, w->ticks);
 
-    w->render(w, comp);
+    /* routes through the shared render-vs-gfx_render decision point
+     * (core/widget.c) instead of calling w->render() directly -- see
+     * ctui_split_render()'s identical comment for why */
+    ctui_widget_dispatch_render(w, comp);
 
     ctui_widget_tick_advance(w);
     ctui_logf(E_DBG,

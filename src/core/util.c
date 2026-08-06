@@ -56,3 +56,52 @@ int ctui_util_truncate_str(char *str, size_t desired, char *trunc) {
             ctui_tick_advance(), str_len, desired);
   return 0;
 }
+
+static const char base64_alphabet[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+size_t ctui_util_base64_len(size_t len) { return ((len + 2) / 3) * 4; }
+
+size_t ctui_util_base64_encode(const unsigned char *src, size_t len,
+                               char *dst, size_t dst_cap) {
+  size_t need = ctui_util_base64_len(len);
+  if (dst_cap < need + 1) {
+    ctui_logf(E_WRN,
+              "[CTUI:UTIL] - base64_encode rejected @ tick %d, dst_cap %zu "
+              "too small for %zu input bytes (need %zu)\n",
+              ctui_tick_advance(), dst_cap, len, need + 1);
+    return 0;
+  }
+
+  size_t di = 0, i;
+  for (i = 0; i + 3 <= len; i += 3) {
+    unsigned int n = ((unsigned int)src[i] << 16) |
+                     ((unsigned int)src[i + 1] << 8) | src[i + 2];
+    dst[di++] = base64_alphabet[(n >> 18) & 0x3f];
+    dst[di++] = base64_alphabet[(n >> 12) & 0x3f];
+    dst[di++] = base64_alphabet[(n >> 6) & 0x3f];
+    dst[di++] = base64_alphabet[n & 0x3f];
+  }
+  size_t rem = len - i;
+  if (rem == 1) {
+    unsigned int n = (unsigned int)src[i] << 16;
+    dst[di++] = base64_alphabet[(n >> 18) & 0x3f];
+    dst[di++] = base64_alphabet[(n >> 12) & 0x3f];
+    dst[di++] = '=';
+    dst[di++] = '=';
+  } else if (rem == 2) {
+    unsigned int n =
+        ((unsigned int)src[i] << 16) | ((unsigned int)src[i + 1] << 8);
+    dst[di++] = base64_alphabet[(n >> 18) & 0x3f];
+    dst[di++] = base64_alphabet[(n >> 12) & 0x3f];
+    dst[di++] = base64_alphabet[(n >> 6) & 0x3f];
+    dst[di++] = '=';
+  }
+  dst[di] = '\0';
+
+  ctui_logf(E_DBG,
+            "[CTUI:UTIL] - base64_encode @ tick %d (%zu bytes -> %zu "
+            "chars)\n",
+            ctui_tick_advance(), len, di);
+  return di;
+}

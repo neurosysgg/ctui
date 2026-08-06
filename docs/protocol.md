@@ -1,11 +1,12 @@
 # Adding support for a new graphics protocol
 
 A step-by-step recipe for extending ctui's graphics layer, distilled
-from actually shipping `CTUI_GFX_ANSI256` and `CTUI_GFX_TRUECOLOR`
-(`GFX_DESIGN.md` has the original design doc and per-decision reasoning
-for both; `PROGRESS.md` has the concrete changelog entries). Use this
-when adding the next tier -- Sixel, iTerm2 inline images, or filling in
-Kitty (`CTUI_GFX_KITTY`, currently just a reserved bit).
+from actually shipping `CTUI_GFX_ANSI256`, `CTUI_GFX_TRUECOLOR`, and
+`CTUI_GFX_KITTY` (`GFX_DESIGN.md` has the original design doc and
+per-decision reasoning for all three; `PROGRESS.md` has the concrete
+changelog entries). Use this when adding the next protocol -- Sixel or
+iTerm2 inline images are the plausible next candidates, following the
+same "Non-degradable protocols" path Kitty just did.
 
 Two shapes of "new protocol," two different amounts of this recipe
 apply:
@@ -121,30 +122,146 @@ the terminals that support the most.
 
 ## Non-degradable protocols (Kitty, Sixel, inline images)
 
-Not yet built -- this is GFX_DESIGN.md's Phase 4, still a plan. The
-gap it closes: everything above assumes a "protocol" is just a richer
-way to color a text cell, so any widget can ignore it and still render
-as plain text. A pixel-graphics protocol can't degrade that way -- a
-widget built around it has nothing sensible to draw if the protocol
-isn't available.
-
-The planned shape:
+Built -- this is GFX_DESIGN.md's Phase 4, shipped for `CTUI_GFX_KITTY`
+(see `PROGRESS.md`'s changelog entry). The gap it closes: everything
+above assumes a "protocol" is just a richer way to color a text cell,
+so any widget can ignore it and still render as plain text. A
+pixel-graphics protocol can't degrade that way -- a widget built around
+it has nothing sensible to draw if the protocol isn't available. The
+shape, worked out against Kitty and generic enough for the next
+non-degradable protocol (Sixel, iTerm2 inline images) to reuse as-is:
 
 - `ctui_widget_make()` auto-sets a baseline `supported_gfx_modes`
   bitmask covering the three text tiers, so every existing widget
   qualifies with zero code changes.
 - A widget that fundamentally needs the new protocol calls
   `ctui_widget_set_gfx_renderer(widget, CTUI_GFX_KITTY, render_fn)` to
-  register an alternate `render()` and narrow its declared support.
-- `ctui_app_init()` validates every widget's declared
-  `supported_gfx_modes` against the negotiated `g_gfx_mode` at startup
-  -- hard fail on mismatch, since there's no text fallback to degrade
-  to. This is the one hard-fail case below the mandatory floor.
-- `ctui_app_render()`'s dispatch picks the mode-specific renderer if
-  one's registered for the negotiated mode, otherwise the default.
+  register an alternate `render()` and narrow its declared support to
+  exactly that one bit -- there's no text tier left to fall back to.
+- `ctui_app_init()` (now returning `int`, `0`/`-1` same convention as
+  `ctui_init()`) validates every *top-level* widget's declared
+  `supported_gfx_modes` against the negotiated `g_gfx_mode` at startup:
+  the three text-tier bits are masked out of the check first (always
+  satisfiable, since text rendering doesn't depend on `g_gfx_mode` at
+  all -- see Step 4's `g_gfx_mode`-isn't-consulted-by-flush note above),
+  so this only ever actually fires for a top-level widget that opted
+  into a specific non-text protocol and didn't get it. Hard fail (`-1`,
+  logged) on mismatch, since there's no text fallback to degrade to for
+  something central to the app. "Top-level" matters: a widget nested
+  inside a `CTUI_SPLIT`/`CTUI_GROUP` isn't reachable from the
+  `widgets[]` array `ctui_app_init()` walks at all, so it's never
+  validated this way -- see "Integrating a non-degradable protocol"
+  below for why that's actually fine.
+- **The actual render-vs-gfx_render decision is centralized in
+  `ctui_widget_dispatch_render()`/`ctui_widget_flush_gfx()`**
+  (`src/core/widget.c`/`.h`), not duplicated in every caller that walks
+  widgets. `ctui_app_render()`, `ctui_split_render()`, and
+  `ctui_group_render()` all route every widget through
+  `ctui_widget_dispatch_render(widget, comp)` instead of calling
+  `widget->render()` directly: a mismatched `gfx_render_mode` (0, or any
+  tier other than the negotiated one) falls through to the ordinary
+  `render()`; a match gets queued (a small file-static realloc-grown
+  array in `widget.c`, same shape/reasoning as `core/timer.c`'s own
+  registries) rather than drawn into the compositor immediately.
+  `ctui_widget_flush_gfx(comp)` fires every queued widget's `gfx_render`
+  and clears the queue -- `ctui_app_run()` calls it right after every
+  `ctui_screen_flush()`, never before. That ordering is the one place
+  Kitty-specific reasoning leaks into otherwise-generic plumbing, worth
+  restating for the next protocol too: a pixel protocol's transmit
+  function (`ctui_gfx_kitty_display()` for Kitty) writes bytes straight
+  to stdout, bypassing `CTUI_CELL`/the compositor entirely. Firing it
+  *before* that frame's flush would let the flush's shadow-buffer diff
+  paint blank text back over the widget's cell region right afterward --
+  those compositor cells are still their untouched default (the widget
+  never calls any `ctui_widget_putc*()` variant), which reads as
+  "changed" against the previous frame's shadow buffer on at least the
+  first render.
+  Because the decision point is shared, a Phase 4 widget behaves
+  identically whether it's top-level or nested arbitrarily deep in
+  splits/groups -- callers that walk widgets never need their own
+  gfx-aware special case.
 
-`player`'s album art is the currently-plausible first candidate widget
-for this, once it's built.
+`kitty_demo` (`examples_apps/kitty_demo/`) is the minimal proving-ground
+app this shipped with -- a procedurally-generated RGB gradient (no image
+codec dependency) via `CTUI_KITTY_IMAGE`, not real album art; `player`'s
+album art remains a plausible *content* candidate for this same
+mechanism later, once something actually decodes image bytes.
+`CTUI_KITTY_IMAGE` itself has since been promoted to `src/widgets/` (a
+second consumer -- `demo`, see below -- needed it, per `CLAUDE.md`'s
+promotion rule) and is a real toggleable `CTUI_SPLIT` child in `demo`,
+not just a standalone app.
+
+## Integrating a non-degradable protocol into a real, multi-widget app
+
+A standalone single-purpose app like `kitty_demo` (one widget, one
+`CTUI_GFX_MODE` request, nothing else competing for screen space) barely
+exercises Phase 4 -- it never has to coexist with ordinary text widgets,
+never needs to appear/disappear at runtime, and is *itself* the feature,
+so refusing to start without it is the right call. Folding
+`CTUI_KITTY_IMAGE` into `demo` (`examples_apps/demo/main.c`) as a
+toggleable panel alongside `debug_info`/`dump_palette` -- an *optional*
+extra in an app that has to keep working without it -- is a different
+problem, and surfaced a real limitation plus two conventions worth
+carrying into the next non-degradable protocol.
+
+**A Phase 4 widget genuinely nested in a `CTUI_SPLIT`/`CTUI_GROUP`
+needs nothing special at all -- build it exactly like any other
+candidate pane.** This wasn't always true: the first pass at this
+integration found that `ctui_split_render()`/`ctui_group_render()`
+called each child's `render()` directly, so a nested widget's
+`gfx_render` could never fire -- only the top-level `ctui_app_render()`
+loop did the Phase 4 dispatch. Rather than route around that
+per-protocol, it got fixed generically: `ctui_widget_dispatch_render()`
+(see above) is now what `ctui_split_render()`/`ctui_group_render()` call
+too, not just `ctui_app_render()`. The practical result in `demo`:
+`kitty_image` is constructed exactly like `debug_info`/`dump_palette`
+(`ctui_widget_make()`, one more line for
+`ctui_widget_set_gfx_renderer()`), given a real `render()` fallback
+(`ctui_kitty_image_render()`'s plain `"[kitty required]"` text) the same
+way every widget needs a `render()` regardless, and swapped into
+`main_split.children[1]` by the *same* generic toggle handler
+`debug_info`/`dump_palette` already used -- no independent positioning,
+no duplicated split-geometry math, no per-widget "is this terminal
+capable" branching in `main()` at all. Picking "kitty image" on a
+terminal that didn't negotiate `CTUI_GFX_KITTY` just shows the
+placeholder text, `ctui_widget_dispatch_render()`'s ordinary fallback
+path -- not a special case, the *same* path every mismatched widget
+takes.
+
+**Hiding still needs a convention, but nesting inside a split/group
+gets it for free.** `ctui_widget_flush_gfx()` fires every widget queued
+by `ctui_widget_dispatch_render()` that frame -- and a widget is only
+ever queued if something actually called `ctui_widget_dispatch_render()`
+on it. `ctui_split_render()` only visits `children[0..count-1]`; an
+inactive pane (`count` too small to reach it) is never dispatched, never
+queued, never retransmitted -- exactly the same "just don't call
+render() on it" mechanism that already made a normal widget's split-pane
+hide/show work, no extra code needed for the gfx-mode case. A Phase 4
+widget that *isn't* reached through a split/group's own active-set
+bookkeeping (an independent, self-positioned widget that needs to hide
+itself) doesn't get this for free and still needs its own convention:
+collapse to `w=0, h=0` in `layout()` and have `gfx_render` check
+`self->w <= 0 || self->h <= 0` first and return without transmitting
+(`ctui_kitty_image_gfx_render()` in `src/widgets/kitty_image.c` still
+does this, defensively, even though `demo`'s actual usage never
+exercises it now that the widget is a real split child) -- moving it
+off-screen instead would fail `ctui_widget_init()`'s bounds check and
+spam `E_WRN` every frame.
+
+**A *top-level* non-degradable widget is still a harder commitment than
+a nested one, by design.** `ctui_app_init()`'s hard fail is real and
+intentional for a top-level widget (see above) -- it means "this app
+cannot do its job without this protocol," which is exactly right for
+`kitty_demo`'s single widget, and exactly wrong for an optional panel in
+an app that has plenty else to show. The fix if you do want an optional
+*top-level* (non-nested) gfx-mode widget: check `gfx_mode ==
+CTUI_GFX_KITTY` once in `main()` and only construct/append it to
+`widgets[]` inside that branch, same as any conditional feature. `demo`
+doesn't need this trick for `kitty_image` specifically -- it sidesteps
+the question entirely by never putting a non-degradable widget at the
+top level to begin with, preferring nesting-with-a-real-fallback over
+conditional-construction whenever the widget can naturally live inside
+an existing split/group.
 
 ## Testing checklist
 
@@ -153,14 +270,18 @@ for this, once it's built.
 - `make test` still passes -- these don't exercise a real terminal, so
   they mainly guard against a new `color_mode` breaking existing
   widget/event/layout logic.
-- Prove the new protocol's actual bytes, not just that it compiles: a
-  throwaway non-pty C program that builds a widget, calls
-  `ctui_app_render()`, and reads `screen->cells[...]` directly is the
-  fastest way to confirm a cell's `color_mode` and encoding fields are
-  what's expected. Redirect `ctui_screen_flush()`'s `stdout` write to a
-  file and inspect the raw bytes to confirm the actual escape sequence
-  emitted (`tools/pty_harness.py`'s `raw` step is currently broken --
-  see PROGRESS.md's Known issues -- this is the workaround).
+- Prove the new protocol's actual bytes, not just that it compiles. For
+  a *degradable* color encoding: a throwaway non-pty C program that
+  builds a widget, calls `ctui_app_render()`, and reads
+  `screen->cells[...]` directly is the fastest way to confirm a cell's
+  `color_mode` and encoding fields are what's expected, plus
+  `tools/pty_harness.py`'s `raw` step against the real binary to confirm
+  the actual escape sequence emitted. For a *non-degradable* protocol
+  (no `CTUI_CELL` involved at all -- see above): `raw` against the real
+  binary is the only way, since there's no cell to inspect -- this is
+  exactly how `ctui_gfx_kitty_display()`'s chunking/framing got verified
+  (reassembling the captured chunks and checking `m=1`/`m=0` sequencing,
+  header keys, chunk count against the expected base64 length).
 - `tools/pty_harness.py` against the real binary under different
   `TERM`/`COLORTERM` env combinations, to verify: the new tier renders
   when granted, degrades cleanly (correct fallback content, no crash)

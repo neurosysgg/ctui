@@ -125,7 +125,10 @@ int main(void) {
 
   CTUI_WIDGET *widgets[] = {&border, &display_widget, &grid_widget};
   CTUI_APP app;
-  ctui_app_init(&app, widgets, 3, rows, cols);
+  if (ctui_app_init(&app, widgets, 3, rows, cols) != 0) {
+    fprintf(stderr, "failed to init ctui app\n");
+    return 1;
+  }
 
   ctui_event_register("input", CTUI_KEYPRESS_EVENT, &grid_widget,
                       ctui_grid_handle_keypress);

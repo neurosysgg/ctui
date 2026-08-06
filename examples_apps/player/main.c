@@ -330,7 +330,10 @@ int main(void) {
                            &list_widget,        &footer_border,     &track_label_widget,
                            &meter_widget};
   CTUI_APP app;
-  ctui_app_init(&app, widgets, 7, rows, cols);
+  if (ctui_app_init(&app, widgets, 7, rows, cols) != 0) {
+    fprintf(stderr, "failed to init ctui app\n");
+    return 1;
+  }
 
   load_dir(&list_data);
 

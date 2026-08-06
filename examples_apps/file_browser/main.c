@@ -166,7 +166,10 @@ int main(void) {
   CTUI_WIDGET *widgets[] = {&header_border, &path_label_widget, &main_border,
                             &list_widget};
   CTUI_APP app;
-  ctui_app_init(&app, widgets, 4, rows, cols);
+  if (ctui_app_init(&app, widgets, 4, rows, cols) != 0) {
+    fprintf(stderr, "failed to init ctui app\n");
+    return 1;
+  }
 
   load_dir(&list_data);
 

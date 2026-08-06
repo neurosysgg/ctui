@@ -158,19 +158,39 @@ def run(binary, rows, cols, steps, grep, log_path):
 
     set_winsize(master_fd, rows, cols)
     buf = bytearray()
+    # every byte ever read from the child, start to finish -- unlike buf
+    # (drained into per-step, then cleared so feed() only sees each
+    # step's own slice), this never shrinks. A fast target can write its
+    # entire frame (or, for a Kitty image, tens of KB of base64) before
+    # the *first* step's own preamble drain even returns, so a step's
+    # "own" capture is frequently empty by the time its handler runs --
+    # the real bytes already got drained (and buf cleared) by whichever
+    # step happened to run first. `raw` needs the full running record,
+    # not just this step's slice, to reliably show anything at all.
+    history = bytearray()
     grid = Grid(rows, cols)
+
+    def drain_step(timeout=0.05):
+        """drains whatever's newly available into buf, folds it into
+        history, feeds it to grid, then clears buf -- the same
+        catch-up-before-doing-anything-else preamble every step needs."""
+        drain(master_fd, buf, timeout)
+        history.extend(buf)
+        feed(grid, bytes(buf))
+        del buf[:]
 
     try:
         for step in steps:
-            drain(master_fd, buf)
-            feed(grid, bytes(buf))
-            del buf[:]
+            drain_step()
 
             kind, _, arg = step.partition(":")
             if kind == "wait":
                 deadline = time.time() + float(arg)
                 while time.time() < deadline:
                     drain(master_fd, buf, timeout=max(0, deadline - time.time()))
+                history.extend(buf)
+                feed(grid, bytes(buf))
+                del buf[:]
             elif kind == "key":
                 data = KEY_BYTES.get(arg.upper(), arg.encode())
                 os.write(master_fd, data)
@@ -180,14 +200,17 @@ def run(binary, rows, cols, steps, grep, log_path):
                 set_winsize(master_fd, rows, cols)
                 grid.resize(rows, cols)
             elif kind == "dump":
-                drain(master_fd, buf)
-                feed(grid, bytes(buf))
-                del buf[:]
+                drain_step()
                 print(grid.text())
                 print("-" * cols)
             elif kind == "raw":
-                drain(master_fd, buf)
-                sys.stdout.write(buf.decode("ascii", "replace"))
+                # cumulative, not just what trickled in since the last
+                # step -- see history's own comment above for why a
+                # per-step-only capture routinely comes up empty. See
+                # PROGRESS.md's Known issues for the version of this that
+                # used to look broken.
+                drain_step()
+                sys.stdout.write(history.decode("ascii", "replace"))
                 sys.stdout.write("\n" + "-" * 40 + "\n")
             else:
                 print(f"unknown step: {step!r}", file=sys.stderr)

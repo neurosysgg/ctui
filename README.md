@@ -105,16 +105,23 @@ CTUI_WIDGET label = ctui_widget_make(0, 0, 0, 0, &label_data,
                                      ctui_label_render, label_layout);
 ```
 
-**[`ctui_app_init()`](examples_apps/hello/main.c#L45-L47)** — allocates
-the shared compositor and binds every widget to its slice of it.
+**[`ctui_app_init()`](examples_apps/hello/main.c#L45-L50)** — allocates
+the shared compositor and binds every widget to its slice of it. Also
+validates any widget that opted into a non-degradable graphics protocol
+(pixel images, not colored text — see `GFX_DESIGN.md`'s Phase 4) against
+what actually got negotiated, so it returns `0`/`-1` the same way
+`ctui_init()` above does.
 
 ```c
 CTUI_WIDGET *widgets[] = {&border, &label};
 CTUI_APP app;
-ctui_app_init(&app, widgets, 2, rows, cols);
+if (ctui_app_init(&app, widgets, 2, rows, cols) != 0) {
+  fprintf(stderr, "failed to init ctui app\n");
+  return 1;
+}
 ```
 
-**[`ctui_app_run()`](examples_apps/hello/main.c#L51)** — the blocking
+**[`ctui_app_run()`](examples_apps/hello/main.c#L54)** — the blocking
 event loop; renders, flushes to the terminal, and handles input until ESC.
 The final `0` argument means "block on input only" — pass a millisecond
 interval instead to also wake on a timer (see
@@ -125,7 +132,7 @@ interval instead to also wake on a timer (see
 ctui_app_run(&app, screen, 0);
 ```
 
-**[Teardown](examples_apps/hello/main.c#L55-L57)** — free the app, free
+**[Teardown](examples_apps/hello/main.c#L58-L60)** — free the app, free
 the screen, restore the terminal.
 
 ```c
@@ -153,21 +160,30 @@ per-topic docs live under `docs/` as they're written — currently just
   `g_resize_pending`) shared only between core translation units. Has no
   knowledge of any specific widget.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
-  `menu`, `status`, `debug_info`, `grid`, `list`), each a small `.c`/`.h`
-  pair built entirely on the public `ctui.h` API.
+  `menu`, `status`, `debug_info`, `grid`, `list`, `periodic`,
+  `kitty_image`), each a small `.c`/`.h` pair built entirely on the
+  public `ctui.h` API.
 - `examples_apps/` — real, runnable ctui apps, one subfolder each
   (`examples_apps/<name>/main.c` + an optional local `widgets/`):
   `hello` (the minimal border + label app walked through in Usage above),
   `demo` (the original 3-area header/main/footer layout demonstrating
-  resizing and event wiring), `clock` (a ticking clock, driving the
-  `CTUI_TICK_EVENT` timer mechanism), `file_browser` (a scrollable,
-  navigable directory listing), `calculator` (a 4-function calculator —
-  a right-aligned `CTUI_DISPLAY` readout above a navigable `CTUI_GRID` of
-  buttons; the arithmetic itself is a small, ctui-independent state machine
-  in its own `calc.h`/`calc.c`, with `main.c` translating between `CTUI_GRID`
-  presses and its tokens), and `player` (a WAV player with a live VU-meter
+  resizing and event wiring — its "kitty image" menu item is a real,
+  toggleable Kitty-graphics panel alongside `debug_info`/`dump_palette`,
+  a no-op on any terminal that doesn't negotiate `CTUI_GFX_KITTY`),
+  `clock` (a ticking clock, driving the `CTUI_TICK_EVENT` timer
+  mechanism), `file_browser` (a scrollable, navigable directory
+  listing), `calculator` (a 4-function calculator — a right-aligned
+  `CTUI_DISPLAY` readout above a navigable `CTUI_GRID` of buttons; the
+  arithmetic itself is a small, ctui-independent state machine in its
+  own `calc.h`/`calc.c`, with `main.c` translating between `CTUI_GRID`
+  presses and its tokens), `player` (a WAV player with a live VU-meter
   viz, playing through ALSA — see `examples_apps/player/DESIGN.md` for the
-  full design notes on its decoder/output/process pipeline). An app's local
+  full design notes on its decoder/output/process pipeline), and
+  `kitty_demo` (the minimal single-widget proving-ground `CTUI_KITTY_IMAGE`
+  first shipped in — see `docs/protocol.md` for how a non-degradable
+  graphics protocol like Kitty's is added, and for the separate write-up
+  on integrating one into a real, multi-widget app like `demo`). An
+  app's local
   `widgets/` is where new stdlib candidates get proven out before
   graduating to `src/widgets/` once a second app needs them.
 - `tests/` — headless C tests, run via `make test`. Each one wires up
