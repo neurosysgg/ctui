@@ -164,9 +164,9 @@ else.
   `g_resize_pending`) shared only between core translation units. Has no
   knowledge of any specific widget.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
-  `menu`, `status`, `debug_info`, `grid`, `list`, `periodic`,
-  `kitty_image`), each a small `.c`/`.h` pair built entirely on the
-  public `ctui.h` API.
+  `menu`, `status`, `debug_info`, `dump_palette`, `grid`, `list`,
+  `periodic`, `kitty_image`), each a small `.c`/`.h` pair built entirely
+  on the public `ctui.h` API.
 - `examples_apps/` — real, runnable ctui apps, one subfolder each
   (`examples_apps/<name>/main.c` + an optional local `widgets/`):
   `hello` (the minimal border + label app walked through in Usage above),
@@ -174,20 +174,27 @@ else.
   resizing and event wiring — its "kitty image" menu item is a real,
   toggleable Kitty-graphics panel alongside `debug_info`/`dump_palette`,
   a no-op on any terminal that doesn't negotiate `CTUI_GFX_KITTY`),
-  `clock` (a ticking clock, driving the `CTUI_TICK_EVENT` timer
-  mechanism), `file_browser` (a scrollable, navigable directory
-  listing), `calculator` (a 4-function calculator — a right-aligned
-  `CTUI_DISPLAY` readout above a navigable `CTUI_GRID` of buttons; the
-  arithmetic itself is a small, ctui-independent state machine in its
-  own `calc.h`/`calc.c`, with `main.c` translating between `CTUI_GRID`
-  presses and its tokens), `player` (a WAV player with a live VU-meter
-  viz, playing through ALSA — see `examples_apps/player/DESIGN.md` for the
-  full design notes on its decoder/output/process pipeline), and
-  `kitty_demo` (the minimal single-widget proving-ground `CTUI_KITTY_IMAGE`
-  first shipped in — see `docs/protocol.md` for how a non-degradable
-  graphics protocol like Kitty's is added, and for the separate write-up
-  on integrating one into a real, multi-widget app like `demo`). An
-  app's local
+  `demo-advanced` (the same header/main/footer shape, but requests
+  `CTUI_GFX_TRUECOLOR` outright, adds a horizontal `CTUI_NAVBAR` below
+  the header carrying the same toggleable item list `CTUI_MENU` does,
+  and fills the main area with a small procedurally-generated
+  `CTUI_SPLASH` aura that nearest-neighbor resamples to fill whatever
+  space it has via `ctui_util_rescale_i()`, sharing that space with the
+  same debug-info/dump-palette/kitty-image panel grid `demo` uses once a
+  navbar item is toggled on), `clock` (a ticking clock, driving the
+  `CTUI_TICK_EVENT` timer mechanism), `file_browser` (a scrollable,
+  navigable directory listing), `calculator` (a 4-function calculator —
+  a right-aligned `CTUI_DISPLAY` readout above a navigable `CTUI_GRID`
+  of buttons; the arithmetic itself is a small, ctui-independent state
+  machine in its own `calc.h`/`calc.c`, with `main.c` translating
+  between `CTUI_GRID` presses and its tokens), `player` (a WAV player
+  with a live VU-meter viz, playing through ALSA — see
+  `examples_apps/player/DESIGN.md` for the full design notes on its
+  decoder/output/process pipeline), and `kitty_demo` (the minimal
+  single-widget proving-ground `CTUI_KITTY_IMAGE` first shipped in —
+  see `docs/protocol.md` for how a non-degradable graphics protocol
+  like Kitty's is added, and for the separate write-up on integrating
+  one into a real, multi-widget app like `demo`). An app's local
   `widgets/` is where new stdlib candidates get proven out before
   graduating to `src/widgets/` once a second app needs them.
 - `tests/` — headless C tests, run via `make test`. Each one wires up

@@ -862,6 +862,35 @@ terminal resize.
       Verified: `make test` — 126 assertions across 11 binaries, all
       passing; `make`/`make all` still warning-free.
 
+- [x] `examples_apps/demo-advanced/` added: same header/main/footer shape as
+      `demo`, but requests `CTUI_GFX_TRUECOLOR` outright (rather than
+      `CTUI_GFX_KITTY`) so `g_gfx_mode` lands on truecolor on any capable
+      terminal instead of whatever the highest tier happens to be, adds a
+      new app-local `CTUI_NAVBAR` widget (`widgets/navbar.h/.c`) below the
+      header — the same `CTUI_MENU_ITEM` list/toggle contract as `CTUI_MENU`,
+      just walked LEFT/RIGHT instead of UP/DOWN and highlighted with a
+      truecolor accent plus a full-width hue-sweep rule — and a new
+      app-local `CTUI_SPLASH` widget (`widgets/splash.h/.c`) filling the
+      main area: a small (29x12) procedurally-generated radial hue "aura",
+      nearest-neighbor resampled up to whatever cell area its pane
+      currently has via `ctui_util_rescale_i()` walked over both axes, the
+      first consumer of that utility for a 2-D image resize rather than a
+      single ramp/coordinate. Toggling a navbar item (debug info/dump
+      palette/kitty image) splits the main area vertically exactly like the
+      original `demo`'s menu-driven panel grid, just with the splash
+      staying visible in the top pane instead of a menu. Promoted
+      `dump_palette` from `examples_apps/demo/widgets/` to `src/widgets/`
+      in the process — this is the second app to need it, which is exactly
+      this repo's promotion trigger (see `CLAUDE.md`). Verified via
+      `tools/pty_harness.py`: truecolor `48;2;r;g;b` backgrounds confirmed
+      in the raw ANSI stream for the splash's aura, navbar LEFT/RIGHT/ENTER
+      correctly drives the same split-reveal behavior as the original
+      demo's menu (including the `kitty image` panel's existing
+      "[kitty required]" text degrade, since this app never negotiates
+      `CTUI_GFX_KITTY`), and a resize mid-toggle reflows both the splash
+      and the revealed panel grid with zero new `E_WRN` log lines.
+      `make`/`make all`/`make test` all warning-free.
+
 ## Known issues / deliberately deferred
 
 - **`src/core` coverage gaps left by design, not oversight**: `gfx.c`/

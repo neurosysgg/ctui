@@ -12,6 +12,9 @@ TEST_BIN = $(patsubst tests/%.c,test-%,$(TEST_SRC))
 ctui-demo: $(CORE_SRC) $(CORE_HDR) examples_apps/demo/main.c $(wildcard examples_apps/demo/widgets/*)
 	$(CC) $(CFLAGS) -o ctui-demo $(CORE_SRC) examples_apps/demo/main.c $(wildcard examples_apps/demo/widgets/*.c)
 
+ctui-demo-advanced: $(CORE_SRC) $(CORE_HDR) examples_apps/demo-advanced/main.c $(wildcard examples_apps/demo-advanced/widgets/*)
+	$(CC) $(CFLAGS) -o ctui-demo-advanced $(CORE_SRC) examples_apps/demo-advanced/main.c $(wildcard examples_apps/demo-advanced/widgets/*.c) -lm
+
 ctui-hello: $(CORE_SRC) $(CORE_HDR) examples_apps/hello/main.c $(wildcard examples_apps/hello/widgets/*)
 	$(CC) $(CFLAGS) -o ctui-hello $(CORE_SRC) examples_apps/hello/main.c $(wildcard examples_apps/hello/widgets/*.c)
 
@@ -36,7 +39,7 @@ ctui-player: $(CORE_SRC) $(CORE_HDR) examples_apps/player/main.c $(wildcard exam
 ctui-kitty_demo: $(CORE_SRC) $(CORE_HDR) examples_apps/kitty_demo/main.c $(wildcard examples_apps/kitty_demo/widgets/*)
 	$(CC) $(CFLAGS) -o ctui-kitty_demo $(CORE_SRC) examples_apps/kitty_demo/main.c $(wildcard examples_apps/kitty_demo/widgets/*.c)
 
-examples: ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo
+examples: ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo ctui-demo-advanced
 
 all: ctui-demo examples
 
@@ -50,7 +53,7 @@ coverage: $(CORE_SRC) $(CORE_HDR) $(TEST_SRC) tools/ctui_test.h tools/coverage.s
 	@bash tools/coverage.sh
 
 clean:
-	rm -f ctui-demo ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN)
+	rm -f ctui-demo ctui-demo-advanced ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN)
 	rm -rf coverage
 
 .PHONY: clean examples all test coverage
