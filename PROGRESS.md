@@ -795,6 +795,23 @@ terminal resize.
   warnings by diffing `ctui.log` against an unmodified-`main` run of
   the same steps — the 22 that do show up are a pre-existing,
   unrelated demo-layout warning present on `main` too.
+- [x] Follow-up consistency fix from the same review: `ctui_widget_dispatch_render()`'s
+      `gfx_pending` registry (`src/core/widget.c`, a realloc-grown
+      file-static array, same shape as `core/timer.c`'s own timer
+      registries) had no reset counterpart, unlike `timer.c`'s
+      `ctui_timer_reset()` right next to it in `ctui_app_init()`/
+      `ctui_app_free()`. Not a real leak (`gfx_pending_count` already
+      resets to `0` every frame in `ctui_widget_flush_gfx()`, so
+      nothing stale is ever read) — just an inconsistency in the
+      pattern. Added `ctui_widget_gfx_reset()` (`widget.c`/`.h`),
+      doc-commented identically to `ctui_timer_reset()`, called from
+      the same two spots in `ctui_app_init()`/`ctui_app_free()` right
+      alongside it. Verified: `make`/`make all`/`make test`
+      warning-free, all 40 assertions pass; `tools/pty_harness.py`
+      against `ctui-kitty_demo` under `TERM=xterm-kitty
+      KITTY_WINDOW_ID=1` confirms the reset fires once at init and the
+      real Kitty APC transmission still goes out correctly afterward,
+      no new "not bound" warnings in the log.
 
 ## Known issues / deliberately deferred
 

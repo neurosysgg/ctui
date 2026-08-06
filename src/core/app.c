@@ -32,6 +32,7 @@ int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
   app->handler_cap = 0;
   g_app = app;
   ctui_timer_reset();
+  ctui_widget_gfx_reset();
   ctui_logf(E_INF,
             "[CTUI:APP] - app initialised @ tick %d (%d widgets, %dx%d "
             "compositor)\n",
@@ -73,6 +74,7 @@ void ctui_app_free(CTUI_APP *app) {
             ctui_tick_advance());
   free(app->handlers);
   ctui_timer_reset();
+  ctui_widget_gfx_reset();
   ctui_compositor_free(app->comp);
 }
 

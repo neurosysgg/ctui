@@ -235,3 +235,12 @@ void ctui_widget_flush_gfx(CTUI_COMPOSITOR *comp) {
             gfx_pending_count, ctui_tick_advance());
   gfx_pending_count = 0;
 }
+
+void ctui_widget_gfx_reset(void) {
+  free(gfx_pending);
+  gfx_pending = NULL;
+  gfx_pending_count = 0;
+  gfx_pending_cap = 0;
+  ctui_logf(E_INF, "[CTUI:WIDGET] - gfx dispatch queue reset @ tick %d\n",
+            ctui_tick_advance());
+}

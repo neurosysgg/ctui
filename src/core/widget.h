@@ -178,4 +178,10 @@ void ctui_widget_dispatch_render(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp);
  * immediately afterward. */
 void ctui_widget_flush_gfx(CTUI_COMPOSITOR *comp);
 
+/* frees the gfx dispatch queue ctui_widget_dispatch_render() grows and
+ * empties the registry (mirrors ctui_timer_reset() in core/timer.h).
+ * Called by ctui_app_init()/ctui_app_free() -- apps never need to call
+ * this themselves. */
+void ctui_widget_gfx_reset(void);
+
 #endif
