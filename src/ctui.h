@@ -20,5 +20,6 @@
 #include "core/term.h"
 #include "core/input.h"
 #include "core/log.h"
+#include "core/profile.h"
 
 #endif

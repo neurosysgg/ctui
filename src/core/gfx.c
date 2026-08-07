@@ -2,6 +2,7 @@
 
 #include "cell.h"
 #include "log.h"
+#include "profile.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -95,12 +96,21 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
               ctui_tick_advance(), b64_cap);
     return;
   }
+  /* split so a profile run can tell CPU-bound base64 encoding (scales with
+   * raw_len, i.e. width*height, i.e. quadratically with a widget's cell
+   * size) apart from the write() loop below (scales with b64_len but also
+   * depends on how fast the far end -- terminal emulator or, under
+   * pty_harness, the test's own read loop -- drains the pty/pipe, which a
+   * pure CPU count can't see at all). */
+  CTUI_PROFILE_SPAN encode_span = ctui_profile_begin();
   size_t b64_len = ctui_util_base64_encode(rgba, raw_len, b64, b64_cap);
+  ctui_profile_end(encode_span, "gfx.kitty_encode");
 
   char out[128];
   int n = snprintf(out, sizeof out, "\x1b[%d;%dH", row, col);
   write(STDOUT_FILENO, out, (size_t)n);
 
+  CTUI_PROFILE_SPAN write_span = ctui_profile_begin();
   size_t sent = 0;
   while (sent < b64_len) {
     size_t chunk = b64_len - sent;
@@ -139,6 +149,7 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
     write(STDOUT_FILENO, "\x1b\\", 2);
     sent += chunk;
   }
+  ctui_profile_end(write_span, "gfx.kitty_write");
 
   free(b64);
   ctui_logf(E_INF,
