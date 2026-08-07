@@ -34,7 +34,16 @@ void ctui_kitty_image_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
  * ctui_gfx_kitty_display(), scaled to cover self's w x h cells at self's
  * (x,y) compositor origin. Registered via ctui_widget_set_gfx_renderer(),
  * called directly by ctui_app_run() after each frame's screen flush --
- * see core/app.c's render_gfx_widgets(). */
+ * see core/app.c's render_gfx_widgets(). Skips the transmission entirely
+ * (no-op, not even a resend) when this exact widget's rgba pointer, pixel
+ * dimensions, image_id, and cell geometry all match the last call -- same
+ * "don't retransmit an identical frame every periodic tick" fix as
+ * border.c's own cache (PROCESS.md's "Addendum 2"), just keyed on content
+ * identity instead of geometry alone, since this widget's pixels (unlike
+ * CTUI_BORDER's) aren't derived from geometry at all. A caller that wants
+ * a genuinely animated image (changing pixels behind the same pointer)
+ * must allocate a fresh rgba buffer per frame rather than mutating one in
+ * place, or this cache will wrongly treat it as unchanged. */
 void ctui_kitty_image_gfx_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
 
 #endif
