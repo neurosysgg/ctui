@@ -164,6 +164,13 @@ static int ctui_border_kitty_geometry_changed(const CTUI_WIDGET *widget) {
   return 1;
 }
 
+/* same derivation ctui_border_kitty_gfx_render() uses below -- pulled out so
+ * ctui_border_kitty_cleanup() can compute the exact same id to delete
+ * without duplicating the bit-packing by hand. */
+static unsigned int ctui_border_kitty_image_id(const CTUI_WIDGET *widget) {
+  return 0x80000000u | (unsigned int)(((uintptr_t)widget >> 4) & 0x7fffffffu);
+}
+
 void ctui_border_kitty_gfx_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   (void)comp;
   /* w/h collapsed to 0 is the established "not currently visible"
@@ -241,8 +248,7 @@ void ctui_border_kitty_gfx_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
    * commonly shared by several border widgets at once). High bit set to
    * stay clear of the small fixed ids other Kitty widgets use (e.g.
    * meter's/kitty_image's id=1). */
-  unsigned int image_id =
-      0x80000000u | (unsigned int)(((uintptr_t)self >> 4) & 0x7fffffffu);
+  unsigned int image_id = ctui_border_kitty_image_id(self);
 
   ctui_logf(E_DBG,
            "[CTUI:BORDER] - kitty gfx_render @ tick %d (row=%d, col=%d, "
@@ -250,6 +256,34 @@ void ctui_border_kitty_gfx_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
            ctui_tick_advance(), self->y + 1, self->x + 1, self->w, self->h,
            border->rounded, border->dither, image_id);
   ctui_gfx_kitty_display(self->y + 1, self->x + 1, self->w, self->h, rgba,
-                        px_w, px_h, image_id);
+                        px_w, px_h, image_id, 0);
   free(rgba);
+}
+
+/* deletes the Kitty placement ctui_border_kitty_gfx_render() last
+ * transmitted for this exact widget, same reasoning/convention as every
+ * other Kitty-tier widget's own *_kitty_cleanup() (e.g.
+ * ctui_oscilloscope_kitty_cleanup()): unlike a colored character cell, the
+ * border's outline is a raster overlay independent of the text grid, so it
+ * stays on screen even after this widget stops being reached by
+ * ctui_widget_dispatch_render() (a tile whose pane got toggled off, a
+ * closed panel, ...) -- a caller whose border can become not-currently-
+ * visible must call this explicitly when that happens. Also evicts this
+ * widget's geometry-cache entry (swap-with-last): leaving a stale entry
+ * behind would make ctui_border_kitty_geometry_changed() report "unchanged"
+ * the next time this same widget is shown again at the same w/h, skipping
+ * retransmission entirely and leaving nothing displayed at an id the
+ * terminal was just told to delete. No-op if this widget was never
+ * rendered through the Kitty tier (not found in the cache) -- cheap enough
+ * to call unconditionally rather than making every caller track whether
+ * ctui_border_kitty_gfx_render() ever actually ran for it. */
+void ctui_border_kitty_cleanup(CTUI_WIDGET *border_widget) {
+  ctui_gfx_kitty_delete(ctui_border_kitty_image_id(border_widget));
+  for (int i = 0; i < ctui_border_kitty_cache_count; i++) {
+    if (ctui_border_kitty_cache[i].widget == border_widget) {
+      ctui_border_kitty_cache[i] =
+          ctui_border_kitty_cache[--ctui_border_kitty_cache_count];
+      break;
+    }
+  }
 }

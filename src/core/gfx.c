@@ -116,7 +116,7 @@ void ctui_gfx_kitty_set_compression(int enabled) {
 
 void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
                             const unsigned char *rgba, int width, int height,
-                            unsigned int image_id) {
+                            unsigned int image_id, int z) {
   if (!isatty(STDOUT_FILENO)) {
     ctui_logf(E_WRN,
               "[CTUI:GFX] - kitty_display rejected @ tick %d, stdout isn't "
@@ -211,12 +211,13 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
       if (use_compression) {
         n = snprintf(
             out, sizeof out,
-            "\x1b_Ga=T,f=32,o=z,s=%d,v=%d,c=%d,r=%d,i=%u,q=2,C=1,m=%d;",
-            width, height, cell_cols, cell_rows, image_id, more);
+            "\x1b_Ga=T,f=32,o=z,s=%d,v=%d,c=%d,r=%d,i=%u,z=%d,q=2,C=1,m=%d;",
+            width, height, cell_cols, cell_rows, image_id, z, more);
       } else {
-        n = snprintf(out, sizeof out,
-                     "\x1b_Ga=T,f=32,s=%d,v=%d,c=%d,r=%d,i=%u,q=2,C=1,m=%d;",
-                     width, height, cell_cols, cell_rows, image_id, more);
+        n = snprintf(
+            out, sizeof out,
+            "\x1b_Ga=T,f=32,s=%d,v=%d,c=%d,r=%d,i=%u,z=%d,q=2,C=1,m=%d;",
+            width, height, cell_cols, cell_rows, image_id, z, more);
       }
     } else {
       /* continuation chunks repeat only m -- every other key was already
@@ -234,10 +235,10 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
   free(compressed);
   ctui_logf(E_INF,
             "[CTUI:GFX] - kitty_display @ tick %d (%dx%d px @ row=%d, "
-            "col=%d, id=%u, %zu b64 bytes, raw=%zu, payload=%zu, "
+            "col=%d, id=%u, z=%d, %zu b64 bytes, raw=%zu, payload=%zu, "
             "compressed=%s)\n",
-            ctui_tick_advance(), width, height, row, col, image_id, b64_len,
-            raw_len, payload_len, use_compression ? "yes" : "no");
+            ctui_tick_advance(), width, height, row, col, image_id, z,
+            b64_len, raw_len, payload_len, use_compression ? "yes" : "no");
 }
 
 void ctui_gfx_kitty_delete(unsigned int image_id) {

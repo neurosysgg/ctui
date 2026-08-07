@@ -135,5 +135,5 @@ void ctui_kitty_image_gfx_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
             "cells=%dx%d)\n",
             ctui_tick_advance(), self->y + 1, self->x + 1, self->w, self->h);
   ctui_gfx_kitty_display(self->y + 1, self->x + 1, self->w, self->h,
-                         img->rgba, img->px_w, img->px_h, img->image_id);
+                         img->rgba, img->px_w, img->px_h, img->image_id, 0);
 }

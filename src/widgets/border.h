@@ -78,4 +78,16 @@ void ctui_border_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
  * for that today. */
 void ctui_border_kitty_gfx_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
 
+/* removes the Kitty placement ctui_border_kitty_gfx_render() transmitted for
+ * border_widget, and forgets its cached geometry so a later re-show
+ * retransmits instead of assuming nothing changed -- same "must call
+ * explicitly, no implicit cleanup" contract as ctui_gfx_kitty_delete()
+ * itself (see gfx.h), just scoped to one border widget's own image id
+ * instead of a caller-supplied fixed one. Call this whenever a border
+ * widget stops being reached by ctui_widget_dispatch_render() while it
+ * might still have a live Kitty placement on screen (a toggled-off pane, a
+ * closed panel, ...). No-op if this widget never actually rendered through
+ * the Kitty tier. */
+void ctui_border_kitty_cleanup(CTUI_WIDGET *border_widget);
+
 #endif

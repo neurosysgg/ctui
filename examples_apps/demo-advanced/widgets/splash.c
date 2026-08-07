@@ -195,5 +195,5 @@ void ctui_splash_gfx_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
             ctui_tick_advance(), self->y + 1, self->x + 1, self->w, self->h);
   ctui_gfx_kitty_display(self->y + 1, self->x + 1, self->w, self->h,
                          splash->px_rgba, splash->px_w, splash->px_h,
-                         splash->image_id);
+                         splash->image_id, 0);
 }

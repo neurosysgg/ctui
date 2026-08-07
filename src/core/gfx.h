@@ -52,6 +52,19 @@ void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
  * with q=2 (quiet): ctui never reads the terminal's APC replies, success
  * or error, so there's nothing to parse them into.
  *
+ * z is the Kitty protocol's own placement z-index (spec: "Z-stacking of
+ * images"): z>=0 draws above all text (the protocol's default, and what
+ * every ctui-mus Kitty widget before this parameter existed always got,
+ * hence z=0 being the right value for any caller that isn't specifically
+ * trying to out-stack another Kitty image); z<0 draws below text but above
+ * cell background colors. Ties between two images at the same z-index
+ * break by image_id (lower id = lower stacking), so a caller that needs to
+ * guarantee it wins against every other Kitty-rendered widget in the app --
+ * e.g. an overlay that has to occlude other widgets' images it has no
+ * knowledge of, not just its own previous frame -- should pick a z clearly
+ * above 0 (see widgets/modal.c's own doc comment for the concrete case
+ * this was added for) rather than relying on id ordering.
+ *
  * Caller (ctui_app_render()'s Phase 4 dispatch, see widget.h's
  * ctui_widget_set_gfx_renderer()) is responsible for only calling this
  * once CTUI_GFX_KITTY is actually the negotiated g_gfx_mode -- this
@@ -72,7 +85,7 @@ void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
  * "one call transmits one frame" contract. */
 void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
                             const unsigned char *rgba, int width, int height,
-                            unsigned int image_id);
+                            unsigned int image_id, int z);
 
 /* removes an image previously placed by ctui_gfx_kitty_display() under
  * image_id -- unlike a colored character cell, a Kitty-placed image is a
