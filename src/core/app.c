@@ -4,6 +4,7 @@
 #include "gfx.h"
 #include "input.h"
 #include "log.h"
+#include "profile.h"
 #include "timer.h"
 
 #include <stdlib.h>
@@ -132,12 +133,32 @@ void ctui_app_resize(CTUI_APP *app, CTUI_SCREEN *screen, int rows, int cols) {
   ctui_handle_event(&ev);
 }
 
-void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
-  ctui_logf(E_INF, "[CTUI:APP] - run loop starting @ tick %d (tick_ms=%d)\n",
-            ctui_tick_advance(), tick_ms);
+/* the one full "a frame happened" unit -- render (diff into the
+ * compositor), flush (compositor -> real ANSI/Kitty output), flush_gfx
+ * (the deferred Phase 4 gfx_render() pass). ctui_app_run() needed this
+ * exact trio at all three of its call sites (initial draw, post-resize,
+ * post-event-change) already; factoring it out here also gives it one
+ * shared measurement point instead of three separate ones to keep in
+ * sync. The "app.frame" profile span is a rough, best-case
+ * frames-per-second number once dumped (ctui_profile_dump(), core/
+ * profile.h) -- resize the terminal, wait for the next dump, compare
+ * across sizes. Best-case because it only covers actual render work, not
+ * however long ctui_input_loop() spent idle waiting for the next event
+ * in between -- an app that only redraws on change reads far below this
+ * in practice, same as any "how fast COULD this run" benchmark number
+ * differs from "how fast does this actually run." */
+static void run_frame(CTUI_APP *app, CTUI_SCREEN *screen) {
+  CTUI_PROFILE_SPAN frame_span = ctui_profile_begin();
   ctui_app_render(app, screen);
   ctui_screen_flush(screen);
   ctui_widget_flush_gfx(app->comp);
+  ctui_profile_end(frame_span, "app.frame");
+}
+
+void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
+  ctui_logf(E_INF, "[CTUI:APP] - run loop starting @ tick %d (tick_ms=%d)\n",
+            ctui_tick_advance(), tick_ms);
+  run_frame(app, screen);
 
   CTUI_EVENT ev;
   ev.scope = CTUI_EVENT_SCOPE_GLOBAL;
@@ -146,9 +167,7 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
     if (ev.type == CTUI_RESIZE_EVENT) {
       CTUI_RESIZE_EVENT_DATA *resize_data = ev.event_data;
       ctui_app_resize(app, screen, resize_data->rows, resize_data->cols);
-      ctui_app_render(app, screen);
-      ctui_screen_flush(screen);
-      ctui_widget_flush_gfx(app->comp);
+      run_frame(app, screen);
       continue;
     }
 
@@ -167,9 +186,7 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
       changed = 1;
     }
     if (changed) {
-      ctui_app_render(app, screen);
-      ctui_screen_flush(screen);
-      ctui_widget_flush_gfx(app->comp);
+      run_frame(app, screen);
     }
   }
   ctui_logf(E_INF, "[CTUI:APP] - run loop exited @ tick %d\n",

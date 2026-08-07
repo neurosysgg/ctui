@@ -1,6 +1,6 @@
 # Graphics protocol support — design plan
 
-Status: **Phases 1-4 implemented.** Phases 1-3 (RGB cell fields,
+Status: **Phases 1-5 implemented.** Phases 1-3 (RGB cell fields,
 flush-side emission, `ctui_widget_putc_rgb()`/`puts_rgb()`, and
 `debug_info`'s truecolor hue-sweep proving-ground widget) landed for
 `CTUI_GFX_ANSI256`/`CTUI_GFX_TRUECOLOR` first. Phase 4 (per-widget
@@ -342,6 +342,236 @@ need *anything* — stayed a no-op for all of them:
   "Resolved open questions" bullet on this below for why the ordering
   matters.
 
+## Phase 5 — Kitty write batching + payload compression (implemented)
+
+Prompted by ctui-mus's own profiling pass (`.todo.md`'s "profile fft
+kitty performance" entry, real numbers from `pty_harness.py` runs, not
+guesses): at 80x24, `gfx.kitty_write` (the chunked `write()` loop in
+`ctui_gfx_kitty_display()`) averages 85-111us with a 2.3ms max; at
+180x50, same mechanism, 880-2350us avg with a **112ms max**. `gfx.
+kitty_encode` (base64) only grows ~8-9x over the same resolution jump;
+the write side blows up ~49x — worse than raw byte-count scaling alone
+explains. Root cause isn't bytes, it's syscall count: every widget's
+`ctui_gfx_kitty_display()` call does its own `write()` per escape
+prefix, per 4096-byte base64 chunk, per chunk terminator (`\x1b\\`) —
+for one modestly-sized image that's dozens of `write()`s, and
+`ctui_widget_flush_gfx()` fires every Kitty widget on screen back-to-back,
+synchronously, on the one thread also responsible for input handling and
+the rest of that frame's render. A slow-draining pty turns that into a
+visible freeze. Two sub-phases, decided together as one design pass
+(see the two open questions each resolved below) but landing as
+separate, independently-testable diffs.
+
+### Phase 5a — batch every frame's Kitty writes into one `write()`
+
+Same pattern `ctui_screen_flush()` (`core/screen.c`) already uses for
+text: accumulate into a reused buffer, one `write()` at the very end,
+instead of a `write()` per fragment. Today `ctui_gfx_kitty_display()`
+writes straight to `STDOUT_FILENO` for the CUP escape, every chunk's
+key-list prefix, every chunk's base64 body, and every chunk's `\x1b\\`
+terminator — Phase 5a makes all of those append to a growable
+file-static buffer instead (`core/gfx.c`, same realloc-doubling shape
+`gfx_pending` already uses in `core/widget.c` — capacity grows to a
+high-water mark and stays there across frames, never shrinks, len
+resets to 0 each flush):
+
+```c
+/* core/gfx.c */
+static char *g_kitty_batch = NULL;
+static size_t g_kitty_batch_len = 0, g_kitty_batch_cap = 0;
+
+static void kitty_batch_append(const void *data, size_t len) {
+  if (g_kitty_batch_len + len > g_kitty_batch_cap) {
+    g_kitty_batch_cap = g_kitty_batch_cap ? g_kitty_batch_cap * 2 : 8192;
+    while (g_kitty_batch_len + len > g_kitty_batch_cap) g_kitty_batch_cap *= 2;
+    g_kitty_batch = realloc(g_kitty_batch, g_kitty_batch_cap);
+  }
+  memcpy(g_kitty_batch + g_kitty_batch_len, data, len);
+  g_kitty_batch_len += len;
+}
+
+void ctui_gfx_kitty_flush(void) {
+  CTUI_PROFILE_SPAN sp = ctui_profile_begin();
+  if (g_kitty_batch_len > 0) write(STDOUT_FILENO, g_kitty_batch, g_kitty_batch_len);
+  ctui_profile_end(sp, "gfx.kitty_batch_flush");
+  g_kitty_batch_len = 0;
+}
+```
+
+`ctui_gfx_kitty_display()`/`ctui_gfx_kitty_delete()` change their
+`write()` calls to `kitty_batch_append()`; every other line (chunking
+logic, escape construction, `q=2`/`C=1` semantics) is untouched. Every
+widget's `gfx_render()` — `loudness_meter.c`, `oscilloscope.c`,
+`spectrum_bars.c`, `spectrogram.c`, `playlist_gfx.c`, `status_bar.c`,
+`border.c`'s Kitty path, `kitty_image.c` — needs zero changes, same
+"widget never sees the transport layer" property Phase 4 already
+established.
+
+**Hook point: `ctui_widget_flush_gfx()`** (`core/widget.c`), right
+after its existing loop over `gfx_pending[]`. This is deliberate, not
+incidental — it's the one place that already runs once per frame after
+`ctui_screen_flush()`, for exactly the ordering reason "Resolved open
+questions" documents above (gfx pixels must land after the text flush,
+never before). Every one of `ctui_app_run()`'s three call sites
+(initial draw, post-resize, post-event-change) gets the batching for
+free without any new call site — same "centralize in the shared
+dispatch function, not per-caller" precedent Phase 4's own fix used.
+
+**What this fixes vs. doesn't** (the concurrency question resolved
+this session): collapses N widgets × M chunks × 3 `write()`s into one
+`write()` per frame, which is the multiplicative syscall overhead the
+profiling numbers point at. It does **not** change the worst-case
+stall duration if the terminal genuinely can't drain the bytes fast
+enough — the same total byte count still blocks on that one call,
+just consolidated into a single blocking write instead of many. Moving
+transmission off the GUI thread entirely (a writer thread + pending
+queue) would fix that residual case too, but ctui's GUI side has no
+threading model to extend today and player-core/audiovis-core's
+existing threads aren't reachable from here (`CLAUDE.md`'s "one hard
+boundary" in ctui-mus's own `CLAUDE.md` — `src/gui/` is the only thing
+allowed to touch `ctui.h` in the first place). Deferred, not ruled
+out — revisit only if Phase 5a's real-terminal numbers still show
+freezes once it's landed and re-profiled.
+
+**Profiling continuity**: `gfx.kitty_write`'s meaning changes once
+appends are cheap `memcpy()`s instead of syscalls — rename that span
+to `gfx.kitty_batch_append` and add the new `gfx.kitty_batch_flush`
+span above as the one that actually maps to the old `gfx.kitty_write`
+syscall-cost numbers, so a before/after profile dump compares like
+with like instead of silently comparing two different things under
+the same name.
+
+### Phase 5b — payload compression (`o=z`, zlib-wrapped DEFLATE)
+
+Kitty's graphics protocol supports transmitting a zlib-compressed
+payload (`o=z`) instead of raw bytes — orthogonal to `f=` (still `f=32`
+raw RGBA, just deflate-compressed-then-base64'd instead of
+base64'd-directly), and part of the core protocol spec rather than an
+optional tier the way Sixel/iTerm2 images are. **Hand-rolled DEFLATE, no
+external dependency** (`-lz` was the alternative — rejected to keep
+ctui's zero-external-deps stance rather than take the smaller, safer
+implementation). This was real new work, not a "simplest format first"
+scale task like `src/image/decoders/bmp.c`:
+
+- New `core/deflate.{h,c}`, same allocation-once-per-call,
+  `CLAUDE.md`-conventions module as everything else in `core/` —
+  compress-only (ctui never reads a Kitty APC reply at all, `q=2`
+  everywhere already), so no inflate path needed.
+- **v1 scope, deliberately narrow**: fixed Huffman codes only (RFC
+  1951 §3.2.6) — skip dynamic Huffman tables (real zlib's biggest ratio
+  win over fixed, and meaningfully more implementation complexity: a
+  frequency pass + code-length optimization, not just a fixed lookup
+  table). A plain greedy LZ77 hash-chain match finder (min-match 3,
+  max-match 258, 32KB window per spec, capped chain-search depth) — not
+  lazy matching or any of real zlib's optimal-parse tricks. zlib framing
+  (RFC 1950: 2-byte header + Adler-32 trailer, `o=z`'s actual wire
+  format) needs a small Adler-32 implementation alongside it.
+- **Always compress, compare, keep the smaller — below a measured size
+  ceiling (see the new "Resolved open questions" entry below).** No
+  size-*ratio* heuristic — `ctui_gfx_kitty_display()` runs the raw RGBA
+  through `ctui_deflate_compress()`, and only uses the compressed bytes
+  (+ `o=z` in the escape key-list) if the result is actually smaller
+  than the raw buffer; otherwise transmits raw exactly as today. This is
+  a real invariant (never worse than today on the bytes actually sent),
+  not a tuned-and-therefore-fragile threshold — matters because several
+  existing Kitty widgets are tiny (`loudness_meter.c`'s baked-in text
+  row, `self->h == 1`), where DEFLATE's own block overhead could
+  plausibly lose against raw on a small enough image. `CTUI_DEFLATE_MAX_INPUT`
+  (`core/deflate.c`) is a *different* kind of ceiling, added after
+  landing this — a hard cap on even *attempting* compression above a
+  measured size, independent of whether it would have won the ratio
+  comparison. See below for why that turned out to be necessary.
+- **Runtime opt-out, not a negotiated `CTUI_GFX_MODE` bit.** This
+  isn't a terminal-capability question the way ANSI256/truecolor/Kitty
+  itself are (no env var signals "this terminal's `o=z` support is
+  unusually broken," and `o=z` is spec-mandated for any real Kitty-
+  protocol terminal) — the actual risk is *our own new encoder* having
+  a bug, not terminal incompatibility. So this gets a narrower knob
+  than the `CTUI_GFX_MODE` bitmask machinery: a single
+  `ctui_gfx_kitty_set_compression(int enabled)` (default on), independent
+  of `ctui_init()`'s existing signature — adding a new required arg
+  there for something that isn't a real per-terminal negotiation would
+  touch all 7 `examples_apps/*/main.c` call sites for no real benefit.
+  Same layering distinction "Resolved open questions" already draws
+  between `CTUI_COLOR_MODE_*` (per-cell encoding choice) and
+  `CTUI_GFX_MODE` (terminal-level protocol) — compression is an encoding
+  choice *within* the already-negotiated Kitty tier, not a new tier of
+  its own.
+- New profile span, `gfx.kitty_compress`, wrapping just the deflate
+  attempt — kept distinct from `gfx.kitty_encode` (base64) so a later
+  profile dump can see whether compression's own CPU cost is actually
+  worth what it saves on the write side, instead of the two blurring
+  together. See "Resolved open questions" for what a real dump against
+  ctui-mus actually showed.
+
+### Phase 5 — resolved open questions
+
+- **Verifying `ctui_deflate_compress()`'s output without an inflate
+  path**: resolved in favor of shelling out to python3's stdlib `zlib`
+  module at test time (`tests/deflate_test.c`), not vendoring a
+  reference decompressor into the tree. Not a new class of dependency —
+  `tools/pty_harness.py` already requires a `python3` on `PATH` to run
+  any of this project's real-terminal tests, so this doesn't lower the
+  bar for what a dev/CI environment needs. Each test case round-trips
+  through a real subprocess (`mkstemp()` a compressed-bytes file,
+  `system("python3 -c '...zlib.decompress...'")`, compare the recovered
+  bytes against the original) rather than trusting the encoder's own
+  logic to check itself. Covers: degenerate input, a small repeated
+  phrase (confirms it actually shrinks), a 100000-byte input that spans
+  past the 32KB window more than three times over (confirms the
+  "chain only gets older" window-boundary logic doesn't produce a
+  too-far back-reference), and incompressible random bytes (confirms
+  the encoder still emits *valid* DEFLATE even when it can't win the
+  size comparison — that case is exactly why `ctui_gfx_kitty_display()`
+  never trusts compression to always help, see the "always compress,
+  compare, keep the smaller" bullet above).
+- **A hard cap on input size (`CTUI_DEFLATE_MAX_INPUT`, `core/
+  deflate.c`) had to be added after the encoder was otherwise working**,
+  found only by actually profiling it against real `ctui-mus` widgets
+  under `pty_harness.py` (not reasoned out in advance — see `CLAUDE.md`'s
+  "always verify" testing philosophy). `border.c`'s full-terminal
+  background is a real, common case (every top-level Kitty border in
+  `ctui-mus`, not a synthetic stress test): at a 140x40-ish terminal it's
+  a ~2.4MB raw RGBA buffer, and compressing it cost ~14ms of GUI-thread
+  CPU — the exact kind of stall Phase 5 exists to eliminate, just moved
+  from the write side to the compress side. The surprising part:
+  **lowering `CTUI_DEFLATE_MAX_CHAIN` from 64 down to 2 barely changed
+  this number** (13.4-14.6ms across the whole range, measured with a
+  synthetic border-shaped gradient buffer). Real image content resolves
+  most hash-chain lookups in one or two probes regardless of the depth
+  cap, so the cap was never the actual cost driver — the O(n) per-byte
+  constant (hash computation, match-length extension, and especially
+  `bw_put_huffman()`'s bit-at-a-time emission) is, and it scales
+  linearly regardless: ~5.9us/KB held steady from a 238KB widget
+  (~1.4ms) up to the 2.4MB border image (~14ms). Since a chain-depth cap
+  can't bound this, `ctui_deflate_compress()` now declines outright
+  above 512KB (comfortably above every *individual viz widget* size
+  actually observed in a real run, up to ~493KB, while excluding the
+  border and a couple of oversized ~1.1MB background widgets) — falling
+  back to the existing raw-transmission path, which every caller already
+  has to handle for the ratio-comparison case anyway. This is a
+  different kind of decision than "no size-threshold heuristic" above:
+  that one is about the *ratio outcome* being uncertain on small images;
+  this one is a hard ceiling on *attempting the work at all*, justified
+  by CPU cost alone, independent of what the outcome would have been.
+  **Caveat, not fully resolved**: declining compression for the
+  border-sized case doesn't make the underlying stall disappear, it
+  relocates it — the same live profile run showed `gfx.kitty_batch_flush`
+  (the one write() Phase 5a introduced) spike to a 14ms max once that
+  widget's full, uncompressed ~3.2MB base64 payload had to go out in a
+  single write() instead of a compressed ~24KB one. Both numbers were
+  captured under `pty_harness.py`'s own Python-side reader, which (per
+  the original Phase 5 profiling note) may itself drain slower than a
+  real compiled terminal emulator, so neither 14ms figure should be read
+  as what a real terminal would show. The cap is kept anyway because it
+  trades an *unbounded-by-terminal-speed, always-paid* CPU cost for a
+  *bounded, terminal-dependent* write cost that Phase 5a's batching
+  already minimizes for every other widget — but the border-sized case
+  specifically remains an open, unresolved tradeoff between the two, not
+  a solved problem. A writer thread (already noted as deferred in Phase
+  5a's own "what this fixes vs. doesn't") is what would actually resolve
+  it, by taking either cost off the GUI thread entirely.
+
 ## Deferred (not this pass)
 
 - Sixel, iTerm2 inline images — same Phase 4 mechanism, new wire-format
@@ -354,6 +584,14 @@ need *anything* — stayed a no-op for all of them:
   avoiding an image-codec dependency; `player`'s album art is still the
   plausible next consumer once something actually decodes image bytes.
 - Escape-sequence-based capability *querying* (vs. env-sniffing).
+- Phase 5's writer-thread / non-blocking-transmission alternative (see
+  Phase 5a) — revisit only if batching alone doesn't hold up under a
+  real terminal, not preemptively. The border-sized-image caveat in
+  Phase 5's own "resolved open questions" is the concrete case that
+  would motivate revisiting this first, if a real terminal (not just
+  `pty_harness.py`) ever shows it stalling.
+- Dynamic Huffman coding for Phase 5b's DEFLATE encoder — fixed-only
+  for v1, see that section.
 
 ## Blast radius summary
 
@@ -376,3 +614,14 @@ need *anything* — stayed a no-op for all of them:
   whether its requested tier actually got granted.
 - Zero changes required in `src/widgets/*` or any existing widget's
   color/render call sites.
+- Phase 5 (implemented): `core/gfx.c`/`gfx.h` gained the batch buffer +
+  `ctui_gfx_kitty_flush()` + `ctui_gfx_kitty_set_compression()` (5a/5b);
+  new `core/deflate.{h,c}`; `core/widget.c`'s `ctui_widget_flush_gfx()`
+  gained one call to `ctui_gfx_kitty_flush()`; new `tests/deflate_test.c`.
+  `src/ctui.h` gained one include (`core/deflate.h`). Zero changes
+  required in `src/widgets/*`, any existing widget's Kitty call sites,
+  or ctui-mus's `src/gui/widgets/*` — same "transport is invisible to
+  widgets" property as Phase 4 (verified directly: `ctui-mus` rebuilt
+  and ran correctly against this Phase 5 vendor/ctui with no source
+  changes of its own beyond one stale profile-span-name comment in
+  `src/gui/main.c`).

@@ -198,7 +198,11 @@ void ctui_widget_dispatch_render(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp);
  * any ctui_widget_putc*() variant, so flush's shadow-buffer diff treats
  * them as stale on at least the first render). ctui_app_run() is the
  * only caller; every ctui_screen_flush() call site calls this
- * immediately afterward. */
+ * immediately afterward. Also fires ctui_gfx_kitty_flush() (core/gfx.h)
+ * right after the gfx_pending loop above -- the single real write() for
+ * every Kitty escape batched this frame (Phase 5a), issued from the same
+ * guaranteed-once-per-frame, after-screen-flush spot for the same
+ * ordering reason. */
 void ctui_widget_flush_gfx(CTUI_COMPOSITOR *comp);
 
 /* frees the gfx dispatch queue ctui_widget_dispatch_render() grows and

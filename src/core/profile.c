@@ -82,9 +82,21 @@ void ctui_profile_dump(void) {
     double avg_us = g_counters[i].count
                         ? (double)g_counters[i].total_ns / g_counters[i].count / 1000.0
                         : 0.0;
+    /* implied rate from the average duration alone (1s / avg) -- not a
+     * separate measurement, just avg_us reframed as "how many of these
+     * could happen per second back-to-back." Generic for any named span,
+     * not special-cased to app.frame: that's just the one call site
+     * where "operations/sec" happens to read as an actual frame rate
+     * (see ctui_app_run()'s "app.frame" span, core/app.c) -- a rough,
+     * best-case number (assumes nothing else on the thread competes for
+     * time between spans), which is exactly the "rough number" a
+     * resolution-to-fps comparison needs. */
+    double rate_per_s = avg_us > 0.0 ? 1000000.0 / avg_us : 0.0;
     ctui_logf(E_INF,
-              "[CTUI:PROFILE] - %s: n=%llu avg=%.1fus min=%.1fus max=%.1fus\n",
+              "[CTUI:PROFILE] - %s: n=%llu avg=%.1fus min=%.1fus max=%.1fus "
+              "(~%.1f/s)\n",
               g_counters[i].name, g_counters[i].count, avg_us,
-              g_counters[i].min_ns / 1000.0, g_counters[i].max_ns / 1000.0);
+              g_counters[i].min_ns / 1000.0, g_counters[i].max_ns / 1000.0,
+              rate_per_s);
   }
 }

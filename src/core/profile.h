@@ -42,9 +42,17 @@ CTUI_PROFILE_SPAN ctui_profile_begin(void);
 void ctui_profile_end(CTUI_PROFILE_SPAN span, const char *name);
 
 /* logs every counter recorded so far via ctui_logf(E_INF, ...), one line
- * each: sample count, min/avg/max microseconds. Counters persist across
- * calls (this doesn't reset anything) -- call it periodically (a tick
- * counter modulo, a debug hotkey) to watch trends over a run. */
+ * each: sample count, min/avg/max microseconds, plus an implied rate
+ * (~N/s, 1s / avg) -- for ctui_app_run()'s "app.frame" span (core/app.c,
+ * wrapping one full render+flush+flush_gfx pass), that rate reads
+ * directly as a rough max frames-per-second for whatever terminal size
+ * the app is currently running at -- resize, wait for the next dump,
+ * compare. It's a best-case number (assumes nothing else competes for
+ * the thread between spans, and only counts frames actually rendered --
+ * an idle app redrawing only on change/timer will read far below this),
+ * not a substitute for a real frame-pacing benchmark. Counters persist
+ * across calls (this doesn't reset anything) -- call it periodically (a
+ * tick counter modulo, a debug hotkey) to watch trends over a run. */
 void ctui_profile_dump(void);
 
 #endif

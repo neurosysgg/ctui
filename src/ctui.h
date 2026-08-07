@@ -7,6 +7,7 @@
  * Architecture patterns section for what belongs in core/ vs. src/widgets/. */
 
 #include "core/cell.h"
+#include "core/deflate.h"
 #include "core/gfx.h"
 #include "core/screen.h"
 #include "core/compositor.h"

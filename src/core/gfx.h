@@ -57,7 +57,19 @@ void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
  * once CTUI_GFX_KITTY is actually the negotiated g_gfx_mode -- this
  * function itself doesn't check. No-ops (logs E_WRN) if stdout isn't a
  * real terminal or the image is degenerate (non-positive dimensions or a
- * NULL buffer). */
+ * NULL buffer).
+ *
+ * Phase 5: the wire bytes this builds (CUP escape, every chunk's key-list
+ * prefix, base64 body, terminator) are appended to an internal batch
+ * buffer rather than written to stdout directly -- see
+ * ctui_gfx_kitty_flush(), the only thing that actually issues a write().
+ * Before base64-encoding, the raw RGBA payload is run through
+ * ctui_deflate_compress() (unless ctui_gfx_kitty_set_compression(0)
+ * turned that off) and the compressed bytes are used instead -- with
+ * `o=z` added to the escape's key list -- whenever that's actually
+ * smaller than the raw buffer; otherwise this transmits raw exactly as it
+ * always did. Both are invisible to the caller: same signature, same
+ * "one call transmits one frame" contract. */
 void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
                             const unsigned char *rgba, int width, int height,
                             unsigned int image_id);
@@ -73,7 +85,35 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
  * ctui_gfx_kitty_display() always retransmits the full pixel buffer on
  * every redisplay rather than relying on previously cached data. No-op
  * (logs E_WRN) if stdout isn't a real terminal, same convention as
- * ctui_gfx_kitty_display(). */
+ * ctui_gfx_kitty_display(). Like ctui_gfx_kitty_display(), its escape
+ * bytes go through the Phase 5 batch buffer, not a direct write(). */
 void ctui_gfx_kitty_delete(unsigned int image_id);
+
+/* issues the one real write() for every Kitty escape batched this frame
+ * by ctui_gfx_kitty_display()/ctui_gfx_kitty_delete() (kitty_batch_append(),
+ * core/gfx.c), then resets the batch for the next frame. Collapses what
+ * used to be N widgets x M chunks x 3 write()s into a single write() per
+ * frame -- the syscall-count overhead GFX_DESIGN.md's Phase 5 profiling
+ * numbers point at. Does not shrink the worst-case stall if the terminal
+ * genuinely can't drain the bytes fast enough -- the same total byte
+ * count still blocks on this one call, just consolidated instead of
+ * scattered (see GFX_DESIGN.md's Phase 5a "what this fixes vs. doesn't").
+ * No-op if nothing was batched this frame. Called by
+ * ctui_widget_flush_gfx() (core/widget.c), right after its own loop over
+ * gfx_pending[] -- the one place already guaranteed to run once per frame
+ * after ctui_screen_flush(), for the same pixels-after-text-flush
+ * ordering reason documented on ctui_widget_flush_gfx() itself. Not
+ * expected to be called directly by app/widget code. */
+void ctui_gfx_kitty_flush(void);
+
+/* opts the Kitty transport in (default) or out of Phase 5b's `o=z`
+ * payload compression (ctui_deflate_compress(), core/deflate.h). This is
+ * a runtime toggle, not a negotiated CTUI_GFX_MODE bit: the risk it
+ * guards against is a bug in ctui's own new DEFLATE encoder, not a
+ * terminal that can't handle o=z (that's spec-mandated for any real
+ * Kitty-protocol terminal, so there's no capability to detect). Affects
+ * every subsequent ctui_gfx_kitty_display() call process-wide; there's no
+ * per-widget override. */
+void ctui_gfx_kitty_set_compression(int enabled);
 
 #endif

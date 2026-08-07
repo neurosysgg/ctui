@@ -236,6 +236,13 @@ void ctui_widget_flush_gfx(CTUI_COMPOSITOR *comp) {
   ctui_logf(E_DBG, "[CTUI:WIDGET] - flushed %d pending gfx widget(s) @ tick %d\n",
             gfx_pending_count, ctui_tick_advance());
   gfx_pending_count = 0;
+  /* Phase 5a: every gfx_render() call above only appended to gfx.c's
+   * internal Kitty batch buffer (ctui_gfx_kitty_display()/_delete()) --
+   * this is the one write() that actually puts those bytes on the wire,
+   * for this frame's queued widgets and any direct kitty_delete() calls
+   * an earlier event handler issued this same iteration (see
+   * GFX_DESIGN.md's Phase 5a hook-point rationale). */
+  ctui_gfx_kitty_flush();
 }
 
 void ctui_widget_gfx_reset(void) {

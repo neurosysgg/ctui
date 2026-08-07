@@ -1072,8 +1072,105 @@ terminal resize.
         normal shutdown. `make`/`make all`/`make test` all warning-free
         in both this repo and `ctui-mus`.
 
+- [x] **GFX_DESIGN.md's Phase 5 (Kitty write batching + payload
+      compression) implemented.** Full narrative, real numbers, and the
+      residual tradeoff it surfaced live in `GFX_DESIGN.md`'s Phase 5
+      section and its "resolved open questions" — summary here:
+      - **5a**: every `ctui_gfx_kitty_display()`/`ctui_gfx_kitty_delete()`
+        escape fragment now appends to a growable batch buffer
+        (`core/gfx.c`) instead of `write()`ing directly; one real
+        `write()` per frame now happens in the new `ctui_gfx_kitty_flush()`,
+        called from `ctui_widget_flush_gfx()` right after its existing
+        `gfx_pending[]` loop. `gfx.kitty_write`'s old profile span split
+        into `gfx.kitty_batch_append` (the memcpy-cost appends) and
+        `gfx.kitty_batch_flush` (the actual syscall). Verified against a
+        real `ctui-mus` run: `gfx.kitty_batch_flush` averaged
+        70-140us across every ordinary viz widget, down from the
+        pre-batching profiling pass's 880-2350us avg / 112ms max at a
+        comparable terminal size.
+      - **5b**: new `core/deflate.{h,c}` — a compress-only, hand-rolled
+        zlib/DEFLATE encoder (fixed Huffman only, greedy LZ77 hash-chain
+        matching, RFC 1950 framing), wired into
+        `ctui_gfx_kitty_display()` behind an always-compress-and-compare
+        policy (`o=z` only when it actually wins) plus a new runtime
+        toggle, `ctui_gfx_kitty_set_compression()` (default on). Verified
+        end-to-end against a real Kitty terminal protocol exchange (not
+        just headless tests): captured a real `ctui-kitty_demo` APC
+        transmission under `pty_harness.py`, reassembled the chunks,
+        confirmed `o=z` was present, and round-tripped the payload
+        through python3's `zlib.decompress()` back to the exact expected
+        RGBA byte count. Typical viz-widget-sized images compressed
+        95-98% smaller (e.g. 489984 -> 5399 bytes).
+      - **Found only by profiling the real thing, not reasoned out in
+        advance**: compressing `border.c`'s full-terminal background
+        (~2.4MB raw RGBA at a real terminal size) cost ~14ms of
+        GUI-thread CPU — and lowering the hash-chain search depth from
+        64 down to 2 barely moved that number, because real image
+        content resolves most chain lookups in one or two probes
+        regardless of the cap; the actual cost is an O(n) per-byte
+        constant that scales linearly with input size (~5.9us/KB) no
+        matter how the chain search is tuned. Added
+        `CTUI_DEFLATE_MAX_INPUT` (512KB) so `ctui_deflate_compress()`
+        declines outright above that size rather than paying a CPU cost
+        chain-depth tuning can't bound — falls back to the same raw-
+        transmission path every caller already handles for the ratio-
+        comparison case. Left genuinely unresolved: skipping compression
+        for that same border-sized image pushed a comparable ~14ms cost
+        onto `gfx.kitty_batch_flush` instead (the full uncompressed
+        payload's one big `write()`), so this specific case is a
+        real tradeoff between two GUI-thread costs, not a clean fix —
+        see `GFX_DESIGN.md` for why the cap was kept anyway and what
+        would actually resolve it (a writer thread, already deferred).
+      - Test-strategy question `GFX_DESIGN.md` had explicitly flagged as
+        unresolved (verifying DEFLATE output validity with no inflate
+        path in `core/`) resolved in favor of shelling out to python3's
+        `zlib` module at test time (`tests/deflate_test.c`) — not a new
+        class of dependency, since `tools/pty_harness.py` already
+        requires `python3` on `PATH`.
+      - `make`/`make all`/`make test` all warning-free; `ctui-mus`
+        rebuilt and ran correctly against this vendor/ctui with zero
+        source changes of its own beyond one stale profile-span-name
+        comment (`src/gui/main.c`) — same "transport is invisible to
+        widgets" property Phase 4 established.
+
+- [x] **Rough frames-per-second reading, on request following the Phase
+      5 profiling work above.** `ctui_app_run()`'s three duplicated
+      `ctui_app_render()`/`ctui_screen_flush()`/`ctui_widget_flush_gfx()`
+      call sites (`core/app.c`) were folded into one `run_frame()` static
+      helper (removes the triplication *and* gives them one shared
+      measurement point instead of three to keep in sync), wrapped in a
+      `CTUI_PROFILE_SPAN` named `"app.frame"`. `ctui_profile_dump()`
+      (`core/profile.c`) now also prints an implied rate (`~N/s`, `1s /
+      avg`) alongside every counter's existing avg/min/max — generic for
+      any named span, not special-cased to frames, but `"app.frame"`'s
+      rate is exactly a rough max-fps-for-this-terminal-size number: run
+      an app with a periodic `ctui_profile_dump()` call (`ctui-mus`
+      already has one, every ~2s), resize, wait for the next dump,
+      compare. Verified against a real `ctui-mus` run under
+      `pty_harness.py`: `~6377.9/s` at 100x30 vs. `~2301.3/s` at 200x50,
+      scaling in the expected direction. Explicitly a best-case number,
+      not a real observed frame rate — it only measures actual render
+      work, not however long `ctui_input_loop()` sits idle between
+      redraws, so an app that only redraws on change/timer (every ctui
+      app so far) reads far below this during normal, non-continuously-
+      changing use.
+
 ## Known issues / deliberately deferred
 
+- **A full-terminal-sized Kitty image (e.g. `border.c`'s background) has
+  no cheap path left in Phase 5.** Compressing it costs ~14ms of
+  GUI-thread CPU (`CTUI_DEFLATE_MAX_INPUT` now declines it instead);
+  skipping compression for it instead pushes a comparable ~14ms onto the
+  one batched `write()` (`gfx.kitty_batch_flush`) when the terminal (or,
+  in the measurement so far, `pty_harness.py`'s own reader) doesn't drain
+  it instantly. Neither side of that tradeoff is a real fix — both still
+  block the one thread also handling input and the rest of that frame's
+  render. Only actually matters on startup/resize today (`border.c`'s
+  own geometry cache already skips retransmitting this image every
+  frame), so it hasn't been observed as a live-playback stutter, but it's
+  the concrete case that would justify a writer thread if one ever gets
+  built. See `GFX_DESIGN.md`'s Phase 5 "resolved open questions" for the
+  full numbers.
 - **`src/core` coverage gaps left by design, not oversight**: `gfx.c`/
   `term.c`/`input.c` (0%) and most of `ctui_app_run()` in `app.c`
   require a real terminal (`ctui_input_loop()`'s byte-level decoding,
