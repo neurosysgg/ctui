@@ -7,10 +7,78 @@
 #include "term.h"
 
 #include <errno.h>
+#include <string.h>
 #include <sys/select.h>
 #include <unistd.h>
 
+/* --- pushback: bytes read off STDIN by something other than this file,
+ * handed back so the input loop still sees them ---
+ *
+ * ctui_gfx_kitty_probe_shm() (core/gfx.c) has to read STDIN directly to
+ * catch the terminal's one-shot APC reply, and anything else that lands
+ * in that ~250ms window -- a keystroke typed during startup, a response
+ * to some other query -- comes along with it. Before this existed, the
+ * probe simply discarded whatever it had read, so those bytes were gone.
+ *
+ * Deliberately a plain fixed buffer rather than a growable one: the only
+ * producer is a single bounded probe read (256 bytes), and there is no
+ * sensible recovery from "the pushback buffer is full" anyway -- an
+ * overflow would mean dropping input either way, so it's better to drop
+ * it at a documented cap and log, than to allocate on a path that runs
+ * during ctui_init(). */
+#define CTUI_INPUT_PUSHBACK_MAX 256
+static char g_pushback[CTUI_INPUT_PUSHBACK_MAX];
+static size_t g_pushback_len = 0;
+static size_t g_pushback_pos = 0;
+
+static int pushback_pending(void) { return g_pushback_pos < g_pushback_len; }
+
+void ctui_input_pushback(const char *bytes, size_t len) {
+  if (bytes == NULL || len == 0) {
+    return;
+  }
+  /* compact whatever is left before appending, so repeated pushbacks
+   * don't crawl up the buffer */
+  if (g_pushback_pos > 0) {
+    size_t left = g_pushback_len - g_pushback_pos;
+    memmove(g_pushback, g_pushback + g_pushback_pos, left);
+    g_pushback_len = left;
+    g_pushback_pos = 0;
+  }
+  size_t room = sizeof g_pushback - g_pushback_len;
+  if (len > room) {
+    ctui_logf(E_WRN,
+              "[CTUI:INPUT] - pushback overflow @ tick %d, dropping %zu of "
+              "%zu byte(s)\n",
+              ctui_tick_advance(), len - room, len);
+    len = room;
+  }
+  memcpy(g_pushback + g_pushback_len, bytes, len);
+  g_pushback_len += len;
+  ctui_logf(E_INF, "[CTUI:INPUT] - pushed back %zu byte(s) @ tick %d\n", len,
+            ctui_tick_advance());
+}
+
+/* every read in this file goes through here, so pushed-back bytes are
+ * indistinguishable from freshly-typed ones to everything downstream */
+static ssize_t input_read(char *c) {
+  if (pushback_pending()) {
+    *c = g_pushback[g_pushback_pos++];
+    return 1;
+  }
+  return read(STDIN_FILENO, c, 1);
+}
+
 static int read_byte_timeout(char *c, int timeout_ms) {
+  if (pushback_pending()) {
+    *c = g_pushback[g_pushback_pos++];
+    ctui_logf(E_DBG,
+              "[CTUI:INPUT] - read_byte_timeout got pushback byte 0x%02x @ "
+              "tick %d\n",
+              (unsigned char)*c, ctui_tick_advance());
+    return 1;
+  }
+
   fd_set fds;
   FD_ZERO(&fds);
   FD_SET(STDIN_FILENO, &fds);
@@ -22,7 +90,7 @@ static int read_byte_timeout(char *c, int timeout_ms) {
               timeout_ms, ctui_tick_advance());
     return 0;
   }
-  int ok = read(STDIN_FILENO, c, 1) == 1;
+  int ok = input_read(c) == 1;
   if (ok) {
     ctui_logf(E_DBG,
               "[CTUI:INPUT] - read_byte_timeout got byte 0x%02x @ tick %d\n",
@@ -55,7 +123,9 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
       return 1;
     }
 
-    if (tick_ms > 0) {
+    /* pushed-back bytes are already "readable"; select() would not see
+     * them and would sit out the whole tick_ms before we ever looked. */
+    if (tick_ms > 0 && !pushback_pending()) {
       fd_set fds;
       FD_ZERO(&fds);
       FD_SET(STDIN_FILENO, &fds);
@@ -88,7 +158,7 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
                 ctui_tick_advance());
     }
 
-    if (read(STDIN_FILENO, &c, 1) == 1) {
+    if (input_read(&c) == 1) {
       break;
     }
     if (errno == EINTR) {

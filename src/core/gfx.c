@@ -7,6 +7,7 @@
 #include "gfx.h"
 
 #include "cell.h"
+#include "ctui_internal.h"
 #include "deflate.h"
 #include "log.h"
 #include "profile.h"
@@ -239,6 +240,49 @@ int ctui_gfx_kitty_reply_is_ok(const char *buf, size_t len,
   return 0;
 }
 
+/* Locates the Kitty APC reply inside a raw probe read, so everything
+ * that *isn't* the reply can be handed back to core/input.c rather than
+ * discarded. A Kitty reply is "ESC _ G <payload> ESC \" -- anything
+ * before or after that span is not ours: it is real terminal input that
+ * happened to arrive during the probe's window, most often a keystroke
+ * typed while the app was still starting up.
+ *
+ * On success writes the span to *start and *end (end is one past the
+ * final byte of the terminator) and returns 1. Returns 0 when there is
+ * no APC
+ * introducer at all -- the common non-Kitty case, where the entire
+ * buffer is foreign input.
+ *
+ * An introducer with no terminator is reported as a span running to the
+ * end of the buffer: a truncated reply is still ours, and replaying half
+ * an escape sequence as keystrokes would be worse than dropping it.
+ *
+ * Non-static and absent from gfx.h for the same reason
+ * ctui_gfx_kitty_reply_is_ok() above is: not an app-facing call, just
+ * factored out so the parsing is unit-testable without a live terminal
+ * (tests/kitty_protocol_test.c forward-declares it). */
+int ctui_gfx_kitty_apc_span(const char *buf, size_t len, size_t *start,
+                            size_t *end) {
+  if (buf == NULL || len < 3 || start == NULL || end == NULL) {
+    return 0;
+  }
+  for (size_t i = 0; i + 2 < len; i++) {
+    if (buf[i] != '\x1b' || buf[i + 1] != '_' || buf[i + 2] != 'G') {
+      continue;
+    }
+    *start = i;
+    for (size_t j = i + 3; j + 1 < len; j++) {
+      if (buf[j] == '\x1b' && buf[j + 1] == '\\') {
+        *end = j + 2;
+        return 1;
+      }
+    }
+    *end = len; /* introducer but no terminator -- see above */
+    return 1;
+  }
+  return 0;
+}
+
 /* how long ctui_gfx_kitty_probe_shm() waits for a reply before assuming
  * the terminal either doesn't support t=s or isn't a real Kitty terminal
  * at all -- generous enough for a real terminal's near-instant APC reply
@@ -352,6 +396,26 @@ void ctui_gfx_kitty_probe_shm(void) {
    * nothing else ever will if the terminal doesn't understand t=s/a=q at
    * all. */
   shm_unlink(name);
+
+  /* Whatever in this read wasn't the terminal's APC reply is real input
+   * -- a keystroke typed during startup, or another query's response --
+   * and used to be dropped on the floor here, eating up to
+   * CTUI_KITTY_PROBE_TIMEOUT_MS of the user's typing. Hand it back to
+   * core/input.c in arrival order instead: the bytes before the reply
+   * first, then the bytes after it. On a terminal that never replies
+   * (anything that isn't Kitty) there is no span at all and the whole
+   * buffer is foreign input. */
+  if (reply_len > 0) {
+    size_t apc_start = 0, apc_end = 0;
+    if (ctui_gfx_kitty_apc_span(reply, reply_len, &apc_start, &apc_end)) {
+      ctui_input_pushback(reply, apc_start);
+      if (apc_end < reply_len) {
+        ctui_input_pushback(reply + apc_end, reply_len - apc_end);
+      }
+    } else {
+      ctui_input_pushback(reply, reply_len);
+    }
+  }
 
   g_kitty_shm_supported =
       ctui_gfx_kitty_reply_is_ok(reply, reply_len, 1) ? 1 : 0;

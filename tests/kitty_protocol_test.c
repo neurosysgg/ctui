@@ -29,6 +29,14 @@ extern unsigned int g_gfx_mode;
  * exercise -- see docs/protocol.md's testing checklist for why that's a
  * pty_harness.py/real-terminal concern instead). Same forward-declare-an-
  * intentionally-private-symbol trick as g_gfx_mode above. */
+/* Phase 6 follow-up: same gray-box arrangement as reply_is_ok() below --
+ * ctui_gfx_kitty_apc_span() is a non-static core/gfx.c helper kept out
+ * of gfx.h, factored out of the probe so "which part of this read was
+ * the terminal's reply, and which part was the user typing?" can be
+ * tested without a live pty. */
+extern int ctui_gfx_kitty_apc_span(const char *buf, size_t len,
+                                   size_t *start, size_t *end);
+
 extern int ctui_gfx_kitty_reply_is_ok(const char *buf, size_t len,
                                       unsigned int image_id);
 
@@ -186,6 +194,62 @@ static void test_kitty_shm_reply_parsing(void) {
                    "arrived within the probe timeout)");
 }
 
+/* The probe reads STDIN raw, so whatever else landed in its ~250ms
+ * window arrives glued to the reply. Everything outside the APC span is
+ * real input that must survive (it used to be silently discarded, eating
+ * any keystroke typed during startup), so these cases are really about
+ * where the boundaries fall. */
+static void test_kitty_apc_span(void) {
+  size_t start = 99, end = 99;
+
+  const char reply_only[] = "\x1b_Gi=1;OK\x1b\\";
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_apc_span(reply_only, sizeof reply_only - 1,
+                                           &start, &end) == 1 &&
+                       start == 0 && end == sizeof reply_only - 1,
+                   "apc_span() spans exactly a lone reply, leaving nothing "
+                   "to push back");
+
+  const char trailing[] = "\x1b_Gi=1;OK\x1b\\q";
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_apc_span(trailing, sizeof trailing - 1,
+                                           &start, &end) == 1 &&
+                       start == 0 && end == sizeof trailing - 2,
+                   "apc_span() leaves a keystroke typed *after* the reply "
+                   "outside the span");
+
+  const char leading[] = "q\x1b_Gi=1;OK\x1b\\";
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_apc_span(leading, sizeof leading - 1,
+                                           &start, &end) == 1 &&
+                       start == 1 && end == sizeof leading - 1,
+                   "apc_span() leaves a keystroke typed *before* the reply "
+                   "outside the span");
+
+  const char both[] = "ab\x1b_Gi=1;OK\x1b\\cd";
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_apc_span(both, sizeof both - 1, &start,
+                                           &end) == 1 &&
+                       start == 2 && end == sizeof both - 3,
+                   "apc_span() isolates the reply with input on both sides");
+
+  /* the ordinary non-Kitty case: the terminal never answers, so every
+   * byte read in that window belongs to the user. */
+  const char no_apc[] = "hello";
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_apc_span(no_apc, sizeof no_apc - 1, &start,
+                                           &end) == 0,
+                   "apc_span() reports no span when there is no APC "
+                   "introducer, so the whole buffer is foreign input");
+
+  /* a half-arrived reply is still ours -- replaying part of an escape
+   * sequence as keystrokes would be worse than dropping it. */
+  const char truncated[] = "x\x1b_Gi=1;O";
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_apc_span(truncated, sizeof truncated - 1,
+                                           &start, &end) == 1 &&
+                       start == 1 && end == sizeof truncated - 1,
+                   "apc_span() runs a terminator-less reply to end of "
+                   "buffer rather than replaying a partial escape");
+
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_apc_span(NULL, 0, &start, &end) == 0,
+                   "apc_span() rejects a NULL/empty buffer");
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -193,6 +257,7 @@ int main(void) {
   test_widget_defaults();
   test_app_init_validation();
   test_kitty_shm_reply_parsing();
+  test_kitty_apc_span();
 
   return ctui_test_summary();
 }

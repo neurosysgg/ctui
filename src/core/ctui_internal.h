@@ -7,6 +7,7 @@
 #include "app.h"
 
 #include <signal.h>
+#include <stddef.h>
 
 /* set (async-signal-safe: just a flag) by handle_sigwinch() in term.c;
  * polled by ctui_input_loop() in input.c */
@@ -22,5 +23,14 @@ extern CTUI_APP *g_app;
  * color_mode drives emission there, see GFX_DESIGN.md); reserved for
  * Phase 4's future per-widget support validation. */
 extern unsigned int g_gfx_mode;
+
+/* hand bytes back to ctui_input_loop() (input.c) after some other core
+ * TU has already read them off STDIN. Today's only caller is
+ * ctui_gfx_kitty_probe_shm() (gfx.c), which must read STDIN directly to
+ * catch the terminal's APC reply and would otherwise swallow anything
+ * else that arrived in the same window -- notably a keystroke typed
+ * during ctui_init(). Bytes are replayed in order, ahead of anything
+ * still unread on the fd. */
+void ctui_input_pushback(const char *bytes, size_t len);
 
 #endif
