@@ -127,6 +127,11 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
 void ctui_shutdown(void) {
   ctui_logf(E_INF, "[CTUI:INIT] - shutting down @ tick %d\n",
             ctui_tick_advance());
+  /* before the log closes, so a failure here is still loggable: unlink
+   * any Phase 6 t=s segment the terminal never got around to reading.
+   * A no-op on every non-Kitty tier (nothing was ever tracked) -- see
+   * ctui_gfx_kitty_shm_reap()'s own doc comment. */
+  ctui_gfx_kitty_shm_reap();
   ctui_log_shutdown();
   printf("\x1b[?25h\x1b[?1049l");
   fflush(stdout);

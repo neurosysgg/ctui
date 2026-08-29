@@ -135,6 +135,17 @@ void ctui_gfx_kitty_flush(void);
  * ctui_gfx_kitty_flush(). */
 void ctui_gfx_kitty_probe_shm(void);
 
+/* Phase 6: unlinks any t=s shared-memory segment still outstanding --
+ * i.e. one the terminal accepted the name of but never read (and
+ * therefore never unlinked itself, as the spec makes it responsible for
+ * doing). Called by ctui_shutdown() (core/term.c); a no-op on every
+ * non-Kitty tier and whenever the terminal has been keeping up, which is
+ * the overwhelmingly common case. See the doc comment on this function's
+ * definition (core/gfx.c) for why the leak is worth bounding at all. Not
+ * expected to be called directly by app/widget code, same convention as
+ * ctui_gfx_kitty_flush(). */
+void ctui_gfx_kitty_shm_reap(void);
+
 /* opts the Kitty transport in (default) or out of Phase 5b's `o=z`
  * payload compression (ctui_deflate_compress(), core/deflate.h). This is
  * a runtime toggle, not a negotiated CTUI_GFX_MODE bit: the risk it

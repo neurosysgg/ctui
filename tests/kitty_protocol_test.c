@@ -153,6 +153,18 @@ static void test_kitty_shm_reply_parsing(void) {
       ctui_gfx_kitty_reply_is_ok(wrong_id, sizeof wrong_id - 1, 1) == 0,
       "reply_is_ok() rejects an OK reply keyed to a different image id");
 
+  /* the id has to end where the needle does -- a plain prefix match
+   * would read "i=10" as a hit for id 1 and accept another image's reply
+   * as evidence about this one. */
+  const char longer_id[] = "\x1b_Gi=10;OK\x1b\\";
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_reply_is_ok(longer_id, sizeof longer_id - 1, 1) == 0,
+      "reply_is_ok() rejects id 10's reply when asked about id 1 (no "
+      "prefix match)");
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_reply_is_ok(longer_id, sizeof longer_id - 1, 10) == 1,
+      "reply_is_ok() still accepts that same reply when asked about id 10");
+
   const char error[] = "\x1b_Gi=1;EINVAL:bad t=s request\x1b\\";
   CTUI_TEST_ASSERT(
       ctui_gfx_kitty_reply_is_ok(error, sizeof error - 1, 1) == 0,

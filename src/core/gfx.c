@@ -149,6 +149,58 @@ static void kitty_shm_name(char *buf, size_t cap, unsigned long seq) {
   snprintf(buf, cap, "/ctui-k-%d-%lu", (int)getpid(), seq);
 }
 
+/* snprintf() returns the length it *would* have written, which is >= cap
+ * on truncation -- handing that straight to write()/kitty_batch_append()
+ * as a length reads past the buffer. Every control string built below is
+ * comfortably inside its buffer today; this is what keeps that true if a
+ * future key or a longer shm name ever changes the arithmetic. */
+static size_t clamp_snprintf_len(int n, size_t cap) {
+  if (n < 0) {
+    return 0;
+  }
+  return (size_t)n >= cap ? cap - 1 : (size_t)n;
+}
+
+/* Phase 6 shm reaping. Per the Kitty spec the *terminal* unlinks a t=s
+ * segment once it has read it, which is why kitty_display_shm() doesn't
+ * -- unlinking from this side would race a terminal that hasn't opened
+ * the name yet. But that leaves nothing responsible for a segment the
+ * terminal never reads: an image rejected under q=2 (errors suppressed,
+ * so we never hear about it), a terminal that crashes or detaches, or
+ * this process exiting between the write and the terminal's read. Each
+ * orphan is a whole frame's payload sitting in /dev/shm, i.e. in RAM, and
+ * at 50fps across several widgets that accumulates fast.
+ *
+ * So: remember the last CTUI_KITTY_SHM_TRACKED names and unlink each one
+ * as its slot gets reused, plus everything still outstanding at
+ * ctui_shutdown(). By the time a slot comes back around the terminal has
+ * long since read and unlinked that segment, so the unlink almost always
+ * fails with ENOENT -- which is exactly the intended outcome, and why the
+ * return value is ignored. The one case it succeeds is the case this
+ * exists for. Bounds the worst case at CTUI_KITTY_SHM_TRACKED orphans
+ * rather than one per frame forever. */
+#define CTUI_KITTY_SHM_TRACKED 64
+static char g_kitty_shm_live[CTUI_KITTY_SHM_TRACKED][64];
+static int g_kitty_shm_live_next = 0;
+
+static void kitty_shm_track(const char *name) {
+  char *slot = g_kitty_shm_live[g_kitty_shm_live_next];
+  if (slot[0] != '\0') {
+    shm_unlink(slot); /* ENOENT expected -- see the doc comment above */
+  }
+  snprintf(slot, sizeof(g_kitty_shm_live[0]), "%s", name);
+  g_kitty_shm_live_next = (g_kitty_shm_live_next + 1) % CTUI_KITTY_SHM_TRACKED;
+}
+
+void ctui_gfx_kitty_shm_reap(void) {
+  for (int i = 0; i < CTUI_KITTY_SHM_TRACKED; i++) {
+    if (g_kitty_shm_live[i][0] != '\0') {
+      shm_unlink(g_kitty_shm_live[i]);
+      g_kitty_shm_live[i][0] = '\0';
+    }
+  }
+}
+
 /* true if buf (len bytes, a raw APC reply captured off stdin) contains a
  * success reply keyed to image_id, e.g. "\x1b_Gi=1;OK\x1b\\" -- factored
  * out of ctui_gfx_kitty_probe_shm() purely so the parsing itself is
@@ -169,7 +221,15 @@ int ctui_gfx_kitty_reply_is_ok(const char *buf, size_t len,
     if (memcmp(buf + i, needle, (size_t)needle_len) != 0) {
       continue;
     }
-    for (size_t j = i + (size_t)needle_len; j < len; j++) {
+    /* "i=1" must not match the "i=1" prefix of "i=10" -- the id has to
+     * end where the needle does. Only reachable today via the probe,
+     * which always uses image_id 1, but a reply keyed to a different
+     * image is not evidence about this one. */
+    size_t after_id = i + (size_t)needle_len;
+    if (after_id < len && buf[after_id] >= '0' && buf[after_id] <= '9') {
+      continue;
+    }
+    for (size_t j = after_id; j < len; j++) {
       if (buf[j] != ';') {
         continue;
       }
@@ -249,7 +309,8 @@ void ctui_gfx_kitty_probe_shm(void) {
   int n = snprintf(out, sizeof out,
                    "\x1b_Ga=q,i=1,s=1,v=1,f=32,t=s,q=0;%.*s\x1b\\",
                    (int)b64_len, b64);
-  ssize_t written = write(STDOUT_FILENO, out, (size_t)n);
+  ssize_t written =
+      write(STDOUT_FILENO, out, clamp_snprintf_len(n, sizeof out));
   (void)written; /* best-effort: a failed write here just means the probe
                    * times out below and falls back to t=d, same as any
                    * other silent-terminal outcome */
@@ -442,7 +503,9 @@ static void kitty_display_shm(int row, int col, int cell_cols, int cell_rows,
   /* no shm_unlink() here -- per spec, the terminal itself unlinks a t=s
    * segment once it's read it (see GFX_DESIGN.md's Phase 6); unlinking
    * from this side too would race whenever the terminal hasn't opened it
-   * by name yet. */
+   * by name yet. kitty_shm_track() is the backstop for the case where the
+   * terminal never reads it at all -- see its own doc comment. */
+  kitty_shm_track(name);
 
   char b64[96];
   size_t b64_len = ctui_util_base64_encode((const unsigned char *)name,
@@ -463,7 +526,7 @@ static void kitty_display_shm(int row, int col, int cell_cols, int cell_rows,
                  row, col, width, height, cell_cols, cell_rows, image_id, z,
                  (int)b64_len, b64);
   }
-  kitty_batch_append(out, (size_t)n);
+  kitty_batch_append(out, clamp_snprintf_len(n, sizeof out));
 
   ctui_logf(E_INF,
             "[CTUI:GFX] - kitty_display (t=s) @ tick %d (%dx%d px @ row=%d, "
