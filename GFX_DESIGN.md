@@ -1,6 +1,8 @@
 # Graphics protocol support — design plan
 
-Status: **Phases 1-5 implemented.** Phases 1-3 (RGB cell fields,
+Status: **Phases 1-6 implemented and verified**, including Phase 6's
+`t=s` success path against a real Kitty terminal -- see its "Resolved
+open questions" entry below. Phases 1-3 (RGB cell fields,
 flush-side emission, `ctui_widget_putc_rgb()`/`puts_rgb()`, and
 `debug_info`'s truecolor hue-sweep proving-ground widget) landed for
 `CTUI_GFX_ANSI256`/`CTUI_GFX_TRUECOLOR` first. Phase 4 (per-widget
@@ -571,6 +573,184 @@ scale task like `src/image/decoders/bmp.c`:
   a solved problem. A writer thread (already noted as deferred in Phase
   5a's own "what this fixes vs. doesn't") is what would actually resolve
   it, by taking either cost off the GUI thread entirely.
+- **Update, later pass**: `bw_put_huffman()`'s bit-at-a-time emission
+  (nbits individual 1-bit `bw_put_bits()` calls per Huffman code, each
+  with its own byte-flush check) was replaced with a single reversal
+  loop (plain shift/or, no function-call or flush overhead per bit)
+  feeding one `bw_put_bits()` call per code — same output, since a
+  fixed Huffman code packed as one LSB-first `nbits`-wide write is
+  bit-for-bit identical to the old bit-by-bit MSB-first emission
+  (verified: `tests/deflate_test.c`'s python3-zlib round-trip still
+  passes, and a direct before/after benchmark produced byte-identical
+  compressed output). Measured ~27% faster compression at both the
+  238KB widget size and the largest real in-scope size just under the
+  512KB cap (~493KB): 9.12ms → 6.70ms and 19.28ms → 14.00ms
+  respectively. Doesn't change the ~5.9us/KB-scales-linearly shape or
+  the border-image-exceeds-the-cap tradeoff above — Huffman emission
+  was one contributor to that per-byte constant, not the whole of it —
+  but it's no longer the easy, un-fixed part of it.
+
+## Phase 6 — shared-memory Kitty transmission (implemented)
+
+Prompted by a direct question: can the whole
+`rgba → deflate → base64 → chunked-escape-writes → terminal decodes back
+to rgba` round trip be skipped for a local terminal? Checked against the
+actual Kitty graphics protocol spec (not assumed): yes.
+`t=s` is a third transmission medium alongside today's `t=d` (direct,
+what `ctui_gfx_kitty_display()` uses now) — the client writes raw RGBA
+into a POSIX shared-memory object and sends a control string with only
+the *object name* base64-encoded, not the pixel payload:
+
+```
+\x1b_Gs=<w>,v=<h>,t=s,i=<id>;<base64-encoded-shm-name>\x1b\\
+```
+
+The terminal `shm_open()`s that name, reads the pixels directly out of
+the mapped region, and — per spec — **is itself responsible for
+`shm_unlink()`/closing it**, not the client. That removes the
+synchronization worry a naive reading of "shared memory" raises (client
+doesn't need to know when it's safe to tear down the segment).
+`o=z` compression is still a legal combination with `t=s` per the
+spec's own example, but the point of this phase is that skipping it
+becomes cheap to consider on its own merits: with no per-byte base64 or
+chunking cost left to amortize against, compression's only remaining
+job is shrinking the `write()` itself, not the CPU-bound encode — worth
+re-measuring once this lands rather than assuming either way.
+
+**What this eliminates from the current `t=d` path**: `ctui_deflate_compress()`'s
+call (optional either way, see above), `ctui_util_base64_encode()` over
+the full pixel payload (currently the second-largest cost after
+compression per Phase 5b's profiling), and the `CTUI_KITTY_CHUNK`
+chunking loop with its per-chunk escape framing — replaced by one
+`shm_open()` + `ftruncate()` + `mmap()` + a pixel write (ideally the
+widget renders straight into the mapped region instead of a separate
+malloc'd `rgba` buffer that then gets `memcpy`'d in, though that's an
+optimization to confirm is worth the API change once the basic path
+works, not a v1 requirement) + one short control-string `write()`.
+
+### Why this needs a capability probe first — the actual prerequisite
+
+Nothing in the protocol tells a client in advance whether `t=s` will
+work, and `ctui`'s Kitty path runs with `q=2` (all responses
+suppressed) today — silence either way, no signal to fall back on. Real
+Kitty client tools handle this by sending one *quiet-mode-off* probe
+image early (a trivial 1x1) with `t=s` and reading back whether the
+terminal actually acknowledged it, then remembering that result for
+the rest of the session. This is exactly the "escape-sequence-based
+capability querying" item `GFX_DESIGN.md` has carried in "Deferred"
+since Phase 2 (env-sniffing only, v1) — Phase 6 is what finally forces
+that to get built, rather than a speculative nice-to-have. Scope for
+Phase 6 is therefore two pieces landing together, not one:
+
+1. A one-shot startup probe (temporarily un-suppress responses, send a
+   minimal `t=s` test image, parse the terminal's APC reply, cache the
+   result in a new `g_kitty_shm_supported` alongside the existing
+   `g_gfx_mode`) — falls back to today's `t=d` path permanently for the
+   session on any failure (unsupported terminal, `shm_open()` failing
+   locally, no reply within some bound).
+2. `ctui_gfx_kitty_display()` branches on that cached result: `t=s` path
+   when supported, today's `t=d` path unchanged otherwise. Every
+   existing widget (`loudness_meter.c`, `oscilloscope.c`,
+   `spectrum_bars.c`, `spectrogram.c`, `playlist_gfx.c`, `status_bar.c`,
+   `border.c`, `kitty_image.c`) needs zero changes either way — same
+   "transport is invisible to widgets" property every prior gfx phase
+   has held.
+
+### Remote/SSH — noted, deliberately not the design driver
+
+The spec is explicit that shared-memory transmission is a local-only
+mechanism (remote clients "must send the pixel data directly using
+escape codes") — running over SSH, the client and terminal don't share
+a filesystem or memory space, so `t=s` has to degrade to today's `t=d`
+path automatically. The capability probe above already produces that
+fallback for free (a probe sent over an SSH-forwarded pty simply never
+succeeds, same code path as any other unsupported terminal — no
+separate SSH-detection branch needed as a v1 requirement). Not
+over-engineering around this case: ctui-mus is a local terminal music
+player, not a remote-multi-user service — the realistic user is running
+a real terminal on their own machine, and the SSH case degrading to
+"exactly what already ships today" is an acceptable, low-priority
+outcome rather than something worth a `$SSH_CONNECTION` special case
+up front.
+
+### Resolved open questions
+
+- **Where the probe lives**: inside `ctui_init()` (`term.c`), right
+  after raw-mode `tcsetattr()` (unbuffered byte-level stdin reads are a
+  prerequisite for reading a bounded reply) and before the
+  alternate-screen switch, gated on `g_gfx_mode == CTUI_GFX_KITTY` —
+  every other negotiated tier never calls
+  `ctui_gfx_kitty_probe_shm()` at all, verified directly
+  (`TERM=xterm-256color` under `pty_harness.py` shows no probe log line;
+  `TERM=xterm-kitty` shows one). This keeps the probe a true one-shot
+  cost paid only by apps that actually asked for Kitty, not a tax on
+  every `ctui_init()` call.
+- **`a=q` (query) chosen over a real `a=T` transmission for the probe
+  itself** — `a=q` per spec never displays or persists anything, so
+  there's no visible flash and, on success, nothing left for the
+  terminal to eventually `shm_unlink()` (unlike a real `t=s`
+  transmission, where the terminal owns cleanup by design — see
+  "Problem" above). The probe unlinks its own shm object unconditionally
+  after the bounded wait either way, since `a=q` means it's the only
+  side that could ever clean it up if the terminal doesn't understand
+  `t=s`/`a=q` at all.
+- **`q=0` (not `q=1`) for the probe specifically** — this is the one
+  call in the entire Kitty path that isn't `q=2`. `q=1` only suppresses
+  the *success* reply, and the probe needs exactly that positive signal
+  (silence is ambiguous: "supported and quietly OK" is indistinguishable
+  from "not a Kitty terminal, no reply ever coming" without it).
+  Confirmed the ambiguity is real and not just a hypothetical: every
+  `pty_harness.py` run in this environment produces exactly that
+  silence, since it isn't a Kitty-protocol terminal at all.
+- **Every shm segment gets a unique name** (`/ctui-k-<pid>-<seq>`, a
+  per-process monotonic counter), not a name reused per `image_id`
+  across frames — sidesteps the "is the previous frame's segment done
+  being read yet" question entirely rather than trying to answer it,
+  since the terminal (not the client) decides when to `shm_unlink()` a
+  real transmission and nothing on the client side observes that event.
+- **Local shm failures don't disable `t=s` process-wide.** `shm_open()`/
+  `ftruncate()`/`mmap()` failing for one frame (e.g. a momentarily full
+  `/dev/shm`) falls back to `t=d` for *that call only*, leaving
+  `g_kitty_shm_supported` at 1 — a transient local resource problem
+  isn't evidence the terminal itself lacks `t=s` support, so it
+  shouldn't have that lasting an effect.
+- **Compression's interaction with `t=s` stayed exactly what "worth
+  re-measuring once this lands rather than assuming either way" said above:
+  unresolved by design, not by omission.** The implementation makes no
+  special case — whatever `ctui_gfx_kitty_display()`'s existing
+  compress-and-compare step already decided (raw or `o=z`) just becomes
+  the bytes written into the shm segment, same as it becomes the bytes
+  base64'd for `t=d`. Nothing here re-measures whether compression is
+  still worth its CPU cost once the write-side savings `t=s` provides
+  are already in play; that measurement needs a real Kitty terminal, not
+  this environment.
+- **What's verified.** The probe→timeout→fallback mechanics were first
+  verified in a real-terminal-less environment via `pty_harness.py` +
+  `TERM=xterm-kitty` (adds no observable delay/behavior change for any
+  non-Kitty terminal, leaves nothing behind in `/dev/shm` on failure).
+  The actual `t=s` *success* path was then confirmed against a real
+  Kitty terminal running `ctui-mus` fullscreen on a 4K display: the
+  probe's `a=q` query got a genuine 11-byte `i=1;OK` reply
+  (`ctui.log`'s `"kitty shm probe result: supported (t=s)"`),
+  `g_kitty_shm_supported` latched to 1 for the session, and every
+  subsequent `kitty_display (t=s)` call transmitted real payloads —
+  including several individual images over 2MB (`payload=2140160` at
+  608x880px, uncompressed since raw beat `o=z` at that size) — with
+  zero `shm_open()`/`ftruncate()`/`mmap()` failures logged across the
+  entire run. Visuals reported as flawless at 60+FPS perceived, well
+  within `app.frame`'s measured ~220/s raw render throughput at that
+  session's terminal size. This closes the one item this section
+  originally flagged as needing "a real Kitty terminal, not just the
+  spec prose" — the `a=q`/`t=s` reply format assumed above turned out
+  to match what a real terminal actually sends.
+- **Not resolved, deliberately left open**: `shm_open()`
+  naming/permissions portability beyond this Linux/glibc environment
+  (macOS's POSIX-shm quirks, a sandboxed `ctui-mus` not sharing
+  `/dev/shm` with the terminal's mount namespace) and whether rendering
+  widgets directly into the mapped shm region (vs. `memcpy`-ing an
+  existing `malloc`'d `rgba` buffer into it, which is what shipped) is
+  worth a widget-facing API change — both stay exactly as originally
+  scoped below, unresolved until something actually needs them.
 
 ## Deferred (not this pass)
 
@@ -583,7 +763,11 @@ scale task like `src/image/decoders/bmp.c`:
   the mechanism with a procedurally-generated gradient instead, deliberately
   avoiding an image-codec dependency; `player`'s album art is still the
   plausible next consumer once something actually decodes image bytes.
-- Escape-sequence-based capability *querying* (vs. env-sniffing).
+- Escape-sequence-based capability *querying* (vs. env-sniffing) for
+  anything **other than** the Phase 6 `t=s` probe — e.g. querying
+  ANSI256/truecolor support directly instead of env-sniffing stays
+  deferred; Phase 6 only needs its own narrow one-shot probe, not a
+  general querying mechanism.
 - Phase 5's writer-thread / non-blocking-transmission alternative (see
   Phase 5a) — revisit only if batching alone doesn't hold up under a
   real terminal, not preemptively. The border-sized-image caveat in
@@ -625,3 +809,16 @@ scale task like `src/image/decoders/bmp.c`:
   and ran correctly against this Phase 5 vendor/ctui with no source
   changes of its own beyond one stale profile-span-name comment in
   `src/gui/main.c`).
+- Phase 6 (implemented): `core/gfx.c` gained
+  `ctui_gfx_kitty_probe_shm()` + `g_kitty_shm_supported` +
+  `kitty_shm_name()`/`ctui_gfx_kitty_reply_is_ok()`, and
+  `ctui_gfx_kitty_display()`'s body split into `kitty_display_td()`
+  (the pre-Phase-6 base64/chunking path, unchanged) and the new
+  `kitty_display_shm()`; `gfx.h` gained `ctui_gfx_kitty_probe_shm()`'s
+  declaration. `core/term.c`'s `ctui_init()` gained one conditional call
+  to it. New `tests/kitty_protocol_test.c` cases for the reply parser.
+  Zero changes required in `src/widgets/*`, any existing widget's Kitty
+  call sites, `ctui_init()`'s call signature (all 7
+  `examples_apps/*/main.c` sites untouched), or ctui-mus's
+  `src/gui/widgets/*` — same "transport is invisible to the caller"
+  property as Phases 4 and 5.

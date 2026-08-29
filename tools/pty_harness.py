@@ -11,6 +11,8 @@ CLAUDE.md's Testing approach with a single reusable tool. Usage:
   tools/pty_harness.py ./ctui-demo --rows 40 --cols 100 \
       --steps "wait:0.3,resize:24x80,wait:0.3,dump"
   tools/pty_harness.py ./ctui-demo --steps "wait:0.5,dump" --grep '\\[CTUI:EVENT\\]'
+  tools/pty_harness.py ./ctui-mus --emulate-kitty-shm \
+      --steps "wait:1,dump" --grep '\\[CTUI:GFX\\]'
 
 Step vocabulary (comma-separated, run in order):
   wait:SECONDS      sleep, draining output as it arrives
@@ -22,6 +24,17 @@ Step vocabulary (comma-separated, run in order):
 
 Default steps (no --steps given): "wait:1,dump" -- a one-frame smoke test.
 The child is always killed at the end; ctui apps loop forever otherwise.
+
+--emulate-kitty-shm: this harness already *is* the terminal side of the
+pty (it can os.write() back to the child, same as key: already does) --
+with this flag set, it also answers ctui_gfx_kitty_probe_shm()'s one-shot
+`a=q,...,t=s,...` APC startup query with a synthetic `i=<id>;OK` reply,
+the same shape a real Kitty terminal sends. Lets g_kitty_shm_supported
+latch to 1 (and therefore the faster t=s transport actually get exercised
+and show up in --grep'd log output) when driving a Kitty-protocol app
+under this harness from a non-Kitty terminal/CI. Best-effort:
+handshake/code-path verification only, not real shm pixel-content
+checking (the harness never actually attaches to the posted shm segment).
 """
 import argparse
 import fcntl
@@ -127,7 +140,42 @@ def set_winsize(fd, rows, cols):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 
-def drain(fd, buf, timeout=0.05):
+# ctui_gfx_kitty_probe_shm() (vendor/ctui/src/core/gfx.c) sends exactly
+# "\x1b_Ga=q,i=1,s=1,v=1,f=32,t=s,q=0;<base64 shm name>\x1b\\" -- matched
+# loosely (require a=q and t=s, capture the image id) rather than the
+# exact literal key order/set, so this keeps working across minor changes
+# to that call site instead of needing to track it byte-for-byte.
+KITTY_SHM_PROBE_RE = re.compile(
+    rb"\x1b_Ga=q,(?=[^;]*\bi=(\d+))(?=[^;]*\bt=s\b)[^;]*;[^\x1b]*\x1b\\"
+)
+
+
+def make_kitty_shm_responder(master_fd):
+    """Returns a drain() on_chunk callback that watches accumulated output
+    for the shm probe APC and immediately writes back a synthetic
+    "i=<id>;OK" reply -- see this module's own docstring
+    (--emulate-kitty-shm) for why this has to happen from inside drain()'s
+    read loop, not after some wait: step's full duration elapses: the
+    real probe only waits CTUI_KITTY_PROBE_TIMEOUT_MS (250ms, gfx.c) for a
+    reply, and a step like "wait:1" would otherwise only hand control back
+    to Python (and thus a chance to reply) after the full second."""
+    state = {"done": False, "pending": bytearray()}
+
+    def on_chunk(chunk):
+        if state["done"]:
+            return
+        state["pending"].extend(chunk)
+        m = KITTY_SHM_PROBE_RE.search(bytes(state["pending"]))
+        if not m:
+            return
+        image_id = m.group(1).decode("ascii")
+        os.write(master_fd, f"\x1b_Gi={image_id};OK\x1b\\".encode("ascii"))
+        state["done"] = True
+
+    return on_chunk
+
+
+def drain(fd, buf, timeout=0.05, on_chunk=None):
     """Read whatever is available right now, looping until quiet -- bounded
     to timeout total, not timeout per read. A target that keeps emitting
     output on a cadence shorter than timeout (e.g. several staggered
@@ -135,7 +183,12 @@ def drain(fd, buf, timeout=0.05):
     would otherwise keep this loop's select() finding fresh data forever,
     since re-passing the same fixed timeout to every iteration never
     accounts for time already spent -- this hung indefinitely against the
-    flicker example app before being bounded here."""
+    flicker example app before being bounded here.
+
+    on_chunk, if given, fires synchronously right after each individual
+    read -- not after this whole call returns -- so a caller that needs to
+    react to output mid-drain (make_kitty_shm_responder() above) actually
+    can before a real terminal's own reply deadline would expire."""
     deadline = time.time() + timeout
     while True:
         remaining = deadline - time.time()
@@ -151,15 +204,18 @@ def drain(fd, buf, timeout=0.05):
         if not chunk:
             return
         buf.extend(chunk)
+        if on_chunk:
+            on_chunk(chunk)
 
 
-def run(binary, rows, cols, steps, grep, log_path):
+def run(binary, rows, cols, steps, grep, log_path, emulate_kitty_shm=False):
     pid, master_fd = pty.fork()
     if pid == 0:
         os.execvp(binary, [binary])
         os._exit(127)
 
     set_winsize(master_fd, rows, cols)
+    on_chunk = make_kitty_shm_responder(master_fd) if emulate_kitty_shm else None
     buf = bytearray()
     # every byte ever read from the child, start to finish -- unlike buf
     # (drained into per-step, then cleared so feed() only sees each
@@ -177,7 +233,7 @@ def run(binary, rows, cols, steps, grep, log_path):
         """drains whatever's newly available into buf, folds it into
         history, feeds it to grid, then clears buf -- the same
         catch-up-before-doing-anything-else preamble every step needs."""
-        drain(master_fd, buf, timeout)
+        drain(master_fd, buf, timeout, on_chunk)
         history.extend(buf)
         feed(grid, bytes(buf))
         del buf[:]
@@ -190,7 +246,8 @@ def run(binary, rows, cols, steps, grep, log_path):
             if kind == "wait":
                 deadline = time.time() + float(arg)
                 while time.time() < deadline:
-                    drain(master_fd, buf, timeout=max(0, deadline - time.time()))
+                    drain(master_fd, buf, timeout=max(0, deadline - time.time()),
+                         on_chunk=on_chunk)
                 history.extend(buf)
                 feed(grid, bytes(buf))
                 del buf[:]
@@ -218,7 +275,7 @@ def run(binary, rows, cols, steps, grep, log_path):
             else:
                 print(f"unknown step: {step!r}", file=sys.stderr)
     finally:
-        drain(master_fd, buf, timeout=0.2)
+        drain(master_fd, buf, timeout=0.2, on_chunk=on_chunk)
         feed(grid, bytes(buf))
         try:
             os.kill(pid, signal.SIGTERM)
@@ -244,10 +301,18 @@ def main():
     p.add_argument("--steps", default="wait:1,dump")
     p.add_argument("--grep", default=None, help="regex to grep from --log after the run")
     p.add_argument("--log", default="ctui.log")
+    p.add_argument(
+        "--emulate-kitty-shm",
+        action="store_true",
+        help="answer ctui_gfx_kitty_probe_shm()'s startup handshake so "
+        "g_kitty_shm_supported latches to 1 without a real Kitty terminal "
+        "(see this module's docstring)",
+    )
     args = p.parse_args()
 
     steps = [s.strip() for s in args.steps.split(",") if s.strip()]
-    run(args.binary, args.rows, args.cols, steps, args.grep, args.log)
+    run(args.binary, args.rows, args.cols, steps, args.grep, args.log,
+       emulate_kitty_shm=args.emulate_kitty_shm)
 
 
 if __name__ == "__main__":

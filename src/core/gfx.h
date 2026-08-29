@@ -81,7 +81,12 @@ void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
  * turned that off) and the compressed bytes are used instead -- with
  * `o=z` added to the escape's key list -- whenever that's actually
  * smaller than the raw buffer; otherwise this transmits raw exactly as it
- * always did. Both are invisible to the caller: same signature, same
+ * always did. Phase 6: if ctui_gfx_kitty_probe_shm() determined this
+ * terminal supports Kitty's t=s (shared-memory) transmission medium, the
+ * payload goes through a POSIX shm object instead of base64+chunking
+ * (still through the same batch buffer, just a much shorter control
+ * string); otherwise this falls back to the original t=d path
+ * unchanged. All of this is invisible to the caller: same signature, same
  * "one call transmits one frame" contract. */
 void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
                             const unsigned char *rgba, int width, int height,
@@ -118,6 +123,17 @@ void ctui_gfx_kitty_delete(unsigned int image_id);
  * ordering reason documented on ctui_widget_flush_gfx() itself. Not
  * expected to be called directly by app/widget code. */
 void ctui_gfx_kitty_flush(void);
+
+/* Phase 6: one-shot startup probe for Kitty's t=s (shared-memory)
+ * transmission medium -- see GFX_DESIGN.md's Phase 6 and the doc comment
+ * on this function's definition (core/gfx.c) for the full mechanism and
+ * fallback behavior. Called by ctui_init() (core/term.c) once
+ * CTUI_GFX_KITTY has been negotiated; every subsequent
+ * ctui_gfx_kitty_display() call in the process transparently uses
+ * whichever transport this determined is supported. Not expected to be
+ * called directly by app/widget code, same convention as
+ * ctui_gfx_kitty_flush(). */
+void ctui_gfx_kitty_probe_shm(void);
 
 /* opts the Kitty transport in (default) or out of Phase 5b's `o=z`
  * payload compression (ctui_deflate_compress(), core/deflate.h). This is

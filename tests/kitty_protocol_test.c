@@ -20,6 +20,18 @@
  * "CTUI_GFX_KITTY was negotiated" for ctui_app_init()'s validation path. */
 extern unsigned int g_gfx_mode;
 
+/* Phase 6: ctui_gfx_kitty_reply_is_ok() is a non-static helper in
+ * core/gfx.c, deliberately not declared in gfx.h -- it's not something
+ * an app/widget author should ever call, only factored out of
+ * ctui_gfx_kitty_probe_shm() so its APC-reply parsing is unit-testable
+ * without a real terminal (the probe itself needs a live pty replying
+ * to a real escape sequence, well outside what this headless suite can
+ * exercise -- see docs/protocol.md's testing checklist for why that's a
+ * pty_harness.py/real-terminal concern instead). Same forward-declare-an-
+ * intentionally-private-symbol trick as g_gfx_mode above. */
+extern int ctui_gfx_kitty_reply_is_ok(const char *buf, size_t len,
+                                      unsigned int image_id);
+
 static void noop_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   (void)self;
   (void)comp;
@@ -124,12 +136,51 @@ static void test_app_init_validation(void) {
   g_gfx_mode = 0;
 }
 
+static void test_kitty_shm_reply_parsing(void) {
+  const char ok[] = "\x1b_Gi=1;OK\x1b\\";
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_reply_is_ok(ok, sizeof ok - 1, 1) == 1,
+      "reply_is_ok() accepts a plain \"i=1;OK\" reply keyed to id 1");
+
+  const char ok_extra_keys[] = "\x1b_Gi=1,More=stuff;OK\x1b\\";
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_reply_is_ok(ok_extra_keys, sizeof ok_extra_keys - 1,
+                                 1) == 1,
+      "reply_is_ok() still finds \";OK\" past extra keys before it");
+
+  const char wrong_id[] = "\x1b_Gi=2;OK\x1b\\";
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_reply_is_ok(wrong_id, sizeof wrong_id - 1, 1) == 0,
+      "reply_is_ok() rejects an OK reply keyed to a different image id");
+
+  const char error[] = "\x1b_Gi=1;EINVAL:bad t=s request\x1b\\";
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_reply_is_ok(error, sizeof error - 1, 1) == 0,
+      "reply_is_ok() rejects a real error reply for the right id");
+
+  const char no_semicolon[] = "\x1b_Gi=1OK\x1b\\";
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_reply_is_ok(no_semicolon, sizeof no_semicolon - 1,
+                                 1) == 0,
+      "reply_is_ok() rejects a reply with no ';' separator at all");
+
+  const char truncated[] = "\x1b_Gi=1;O";
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_reply_is_ok(truncated, sizeof truncated - 1, 1) == 0,
+      "reply_is_ok() rejects a reply truncated mid-\"OK\"");
+
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_reply_is_ok(NULL, 0, 1) == 0,
+                   "reply_is_ok() rejects a NULL/empty buffer (no reply "
+                   "arrived within the probe timeout)");
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
   test_base64();
   test_widget_defaults();
   test_app_init_validation();
+  test_kitty_shm_reply_parsing();
 
   return ctui_test_summary();
 }

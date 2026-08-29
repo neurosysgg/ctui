@@ -80,14 +80,20 @@ static void bw_put_bits(BIT_WRITER *bw, unsigned int value, int nbits) {
 }
 
 /* a Huffman code is packed most-significant-bit first (RFC 1951 S3.1.1's
- * one explicit exception to "packed LSB first") -- expressed here as
- * nbits individual 1-bit bw_put_bits() calls, walking code from its top
- * bit down, so the underlying byte-level packing logic doesn't need a
- * second implementation. */
+ * one explicit exception to "packed LSB first") -- reversed into an
+ * LSB-first value and packed with one bw_put_bits() call instead of
+ * nbits individual 1-bit ones (GFX_DESIGN.md's Phase 5 profiling
+ * root-caused this bit-at-a-time emission as the dominant per-byte cost
+ * of compression, ~5.9us/KB, since it's called once per literal/length/
+ * distance symbol emitted -- the reversal loop itself is still O(nbits)
+ * but plain shift/or with no function-call or byte-flush overhead per
+ * bit, unlike the old nbits-calls-to-bw_put_bits form). */
 static void bw_put_huffman(BIT_WRITER *bw, unsigned int code, int nbits) {
-  for (int i = nbits - 1; i >= 0; i--) {
-    bw_put_bits(bw, (code >> i) & 1u, 1);
+  unsigned int rev = 0;
+  for (int i = 0; i < nbits; i++) {
+    rev = (rev << 1) | ((code >> i) & 1u);
   }
+  bw_put_bits(bw, rev, nbits);
 }
 
 static void bw_flush_byte(BIT_WRITER *bw) {

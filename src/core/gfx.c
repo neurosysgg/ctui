@@ -1,3 +1,9 @@
+/* must precede every #include, same reasoning as term.c's own copy of
+ * this comment: shm_open()/poll()/clock_gettime() are POSIX, not C11,
+ * and -std=c11 sets __STRICT_ANSI__ which suppresses glibc's exposure of
+ * them without this. */
+#define _POSIX_C_SOURCE 200809L
+
 #include "gfx.h"
 
 #include "cell.h"
@@ -6,9 +12,15 @@
 #include "profile.h"
 #include "util.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 unsigned int ctui_gfx_detect_caps(void) {
@@ -114,47 +126,191 @@ void ctui_gfx_kitty_set_compression(int enabled) {
             ctui_tick_advance());
 }
 
-void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
-                            const unsigned char *rgba, int width, int height,
-                            unsigned int image_id, int z) {
-  if (!isatty(STDOUT_FILENO)) {
-    ctui_logf(E_WRN,
-              "[CTUI:GFX] - kitty_display rejected @ tick %d, stdout isn't "
-              "a real terminal\n",
-              ctui_tick_advance());
-    return;
-  }
-  if (width <= 0 || height <= 0 || rgba == NULL) {
-    ctui_logf(E_WRN,
-              "[CTUI:GFX] - kitty_display rejected @ tick %d, degenerate "
-              "image (%dx%d, rgba=%p)\n",
-              ctui_tick_advance(), width, height, (const void *)rgba);
-    return;
-  }
+/* Phase 6: -1 = not yet probed, 0 = probed and unsupported, 1 = probed
+ * and supported. Cached once per process by ctui_gfx_kitty_probe_shm()
+ * (called from ctui_init(), term.c) so every later
+ * ctui_gfx_kitty_display() call just branches on this instead of
+ * re-probing per frame. A value of -1 reaching ctui_gfx_kitty_display()
+ * (e.g. a headless caller that never went through ctui_init()) is
+ * treated the same as 0 -- fall back to t=d -- by the plain `== 1` check
+ * at the call site below, not a separate branch. */
+static int g_kitty_shm_supported = -1;
 
-  size_t raw_len = (size_t)width * (size_t)height * 4;
+/* monotonic per-process counter: every shm segment this file ever opens
+ * (probe or real frame) gets a unique name, never reused across calls.
+ * Reusing a name across frames would race a slow-to-shm_unlink() prior
+ * transmission (the terminal is responsible for unlinking, on its own
+ * schedule -- see GFX_DESIGN.md's Phase 6) against this frame's
+ * shm_open(O_EXCL); a fresh name every time sidesteps that entirely
+ * instead of trying to detect/recover from the collision. */
+static unsigned long g_kitty_shm_seq = 0;
 
-  /* Phase 5b: always attempt compression and compare -- never worse than
-   * today, since a losing attempt (compressed_len >= raw_len, plausible
-   * for small images like loudness_meter.c's baked-in text row given
-   * DEFLATE's own block overhead) just falls through to the raw path
-   * below unchanged. */
-  unsigned char *compressed = NULL;
-  const unsigned char *payload = rgba;
-  size_t payload_len = raw_len;
-  int use_compression = 0;
-  if (g_kitty_compression_enabled) {
-    CTUI_PROFILE_SPAN compress_span = ctui_profile_begin();
-    size_t compressed_len = 0;
-    compressed = ctui_deflate_compress(rgba, raw_len, &compressed_len);
-    ctui_profile_end(compress_span, "gfx.kitty_compress");
-    if (compressed != NULL && compressed_len < raw_len) {
-      payload = compressed;
-      payload_len = compressed_len;
-      use_compression = 1;
+static void kitty_shm_name(char *buf, size_t cap, unsigned long seq) {
+  snprintf(buf, cap, "/ctui-k-%d-%lu", (int)getpid(), seq);
+}
+
+/* true if buf (len bytes, a raw APC reply captured off stdin) contains a
+ * success reply keyed to image_id, e.g. "\x1b_Gi=1;OK\x1b\\" -- factored
+ * out of ctui_gfx_kitty_probe_shm() purely so the parsing itself is
+ * unit-testable without a real terminal (tests/kitty_protocol_test.c
+ * forward-declares this the same way it already gray-box-declares
+ * g_gfx_mode; not part of the public gfx.h surface, same reasoning).
+ * Deliberately loose -- scans for "i=<id>" then requires "OK" right
+ * after the next ';', rather than a strict grammar parse, since a real
+ * terminal's reply is one short trusted line, not adversarial input. */
+int ctui_gfx_kitty_reply_is_ok(const char *buf, size_t len,
+                               unsigned int image_id) {
+  if (buf == NULL || len == 0) {
+    return 0;
+  }
+  char needle[32];
+  int needle_len = snprintf(needle, sizeof needle, "i=%u", image_id);
+  for (size_t i = 0; i + (size_t)needle_len <= len; i++) {
+    if (memcmp(buf + i, needle, (size_t)needle_len) != 0) {
+      continue;
+    }
+    for (size_t j = i + (size_t)needle_len; j < len; j++) {
+      if (buf[j] != ';') {
+        continue;
+      }
+      return j + 2 < len && buf[j + 1] == 'O' && buf[j + 2] == 'K';
     }
   }
+  return 0;
+}
 
+/* how long ctui_gfx_kitty_probe_shm() waits for a reply before assuming
+ * the terminal either doesn't support t=s or isn't a real Kitty terminal
+ * at all -- generous enough for a real terminal's near-instant APC reply
+ * to arrive over a local pty, short enough that a terminal which will
+ * never reply (the common case: anything that isn't Kitty) doesn't stall
+ * ctui_init() noticeably. */
+#define CTUI_KITTY_PROBE_TIMEOUT_MS 250
+
+/* Phase 6: one-shot startup probe for Kitty's t=s (shared-memory)
+ * transmission medium, called by ctui_init() (term.c) only once
+ * CTUI_GFX_KITTY has actually been negotiated. ctui's Kitty path
+ * otherwise runs entirely with q=2 (all APC replies suppressed) --
+ * there's no other signal available for whether t=s specifically works
+ * on this terminal, so this temporarily asks for replies (q=0) on one
+ * disposable a=q (query -- doesn't display or persist anything) probe
+ * image, parses whatever comes back within CTUI_KITTY_PROBE_TIMEOUT_MS,
+ * and caches the result in g_kitty_shm_supported for the rest of the
+ * session. No-op if already probed (idempotent) or if stdout isn't a
+ * real terminal (nothing to probe). Every failure mode -- shm_open()
+ * failing locally, no reply at all, a reply that isn't OK -- falls back
+ * to g_kitty_shm_supported = 0 (today's t=d path), never blocks
+ * ctui_init() from completing. */
+void ctui_gfx_kitty_probe_shm(void) {
+  if (g_kitty_shm_supported != -1) {
+    return;
+  }
+  if (!isatty(STDOUT_FILENO)) {
+    g_kitty_shm_supported = 0;
+    return;
+  }
+
+  char name[64];
+  kitty_shm_name(name, sizeof name, g_kitty_shm_seq++);
+
+  int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, 0600);
+  if (fd < 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty shm probe: shm_open(%s) failed (%s) @ "
+              "tick %d, falling back to t=d\n",
+              name, strerror(errno), ctui_tick_advance());
+    g_kitty_shm_supported = 0;
+    return;
+  }
+  unsigned char pixel[4] = {0, 0, 0, 0};
+  void *map = NULL;
+  if (ftruncate(fd, (off_t)sizeof pixel) == -1 ||
+      (map = mmap(NULL, sizeof pixel, PROT_WRITE, MAP_SHARED, fd, 0)) ==
+          MAP_FAILED) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty shm probe: ftruncate/mmap(%s) failed (%s) "
+              "@ tick %d, falling back to t=d\n",
+              name, strerror(errno), ctui_tick_advance());
+    close(fd);
+    shm_unlink(name);
+    g_kitty_shm_supported = 0;
+    return;
+  }
+  memcpy(map, pixel, sizeof pixel);
+  munmap(map, sizeof pixel);
+  close(fd);
+
+  char b64[64];
+  size_t b64_len =
+      ctui_util_base64_encode((const unsigned char *)name, strlen(name), b64,
+                              sizeof b64);
+
+  char out[160];
+  int n = snprintf(out, sizeof out,
+                   "\x1b_Ga=q,i=1,s=1,v=1,f=32,t=s,q=0;%.*s\x1b\\",
+                   (int)b64_len, b64);
+  ssize_t written = write(STDOUT_FILENO, out, (size_t)n);
+  (void)written; /* best-effort: a failed write here just means the probe
+                   * times out below and falls back to t=d, same as any
+                   * other silent-terminal outcome */
+
+  char reply[256];
+  size_t reply_len = 0;
+  struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
+  struct timespec deadline;
+  clock_gettime(CLOCK_MONOTONIC, &deadline);
+  deadline.tv_nsec += (long)CTUI_KITTY_PROBE_TIMEOUT_MS * 1000000L;
+  if (deadline.tv_nsec >= 1000000000L) {
+    deadline.tv_sec += 1;
+    deadline.tv_nsec -= 1000000000L;
+  }
+  for (;;) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long remaining_ms = (deadline.tv_sec - now.tv_sec) * 1000 +
+                        (deadline.tv_nsec - now.tv_nsec) / 1000000;
+    if (remaining_ms <= 0 || reply_len >= sizeof reply - 1) {
+      break;
+    }
+    int pr = poll(&pfd, 1, (int)remaining_ms);
+    if (pr <= 0) {
+      break; /* timeout, or poll() error -- no reply either way */
+    }
+    ssize_t r = read(STDIN_FILENO, reply + reply_len,
+                     sizeof reply - 1 - reply_len);
+    if (r <= 0) {
+      break;
+    }
+    reply_len += (size_t)r;
+  }
+
+  /* a=q means the terminal was never asked to keep this segment open
+   * past replying (unlike a real a=T transmission, which today's
+   * kitty_display_shm() leaves for the terminal itself to shm_unlink())
+   * -- clean up our own probe segment regardless of outcome, since
+   * nothing else ever will if the terminal doesn't understand t=s/a=q at
+   * all. */
+  shm_unlink(name);
+
+  g_kitty_shm_supported =
+      ctui_gfx_kitty_reply_is_ok(reply, reply_len, 1) ? 1 : 0;
+  ctui_logf(E_INF,
+            "[CTUI:GFX] - kitty shm probe result: %s (%zu reply bytes) @ "
+            "tick %d\n",
+            g_kitty_shm_supported ? "supported (t=s)"
+                                   : "unsupported, using t=d",
+            reply_len, ctui_tick_advance());
+}
+
+/* t=d (direct): base64-encode payload and write it in CTUI_KITTY_CHUNK
+ * pieces -- the only transport that existed before Phase 6, unchanged in
+ * behavior from before this split, just factored out so
+ * kitty_display_shm() below has somewhere to fall back to on any local
+ * shm failure without duplicating the chunking loop. */
+static void kitty_display_td(int row, int col, int cell_cols, int cell_rows,
+                             const unsigned char *payload, size_t payload_len,
+                             int width, int height, unsigned int image_id,
+                             int z, int use_compression) {
   size_t b64_cap = ctui_util_base64_len(payload_len) + 1;
   char *b64 = malloc(b64_cap);
   if (b64 == NULL) {
@@ -162,7 +318,6 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
               "[CTUI:GFX] - kitty_display rejected @ tick %d, malloc(%zu) "
               "failed\n",
               ctui_tick_advance(), b64_cap);
-    free(compressed);
     return;
   }
   /* split so a profile run can tell CPU-bound base64 encoding (scales with
@@ -232,13 +387,143 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
   ctui_profile_end(append_span, "gfx.kitty_batch_append");
 
   free(b64);
-  free(compressed);
   ctui_logf(E_INF,
-            "[CTUI:GFX] - kitty_display @ tick %d (%dx%d px @ row=%d, "
-            "col=%d, id=%u, z=%d, %zu b64 bytes, raw=%zu, payload=%zu, "
+            "[CTUI:GFX] - kitty_display (t=d) @ tick %d (%dx%d px @ row=%d, "
+            "col=%d, id=%u, z=%d, %zu b64 bytes, payload=%zu, "
             "compressed=%s)\n",
             ctui_tick_advance(), width, height, row, col, image_id, z,
-            b64_len, raw_len, payload_len, use_compression ? "yes" : "no");
+            b64_len, payload_len, use_compression ? "yes" : "no");
+}
+
+/* t=s (shared memory): writes payload into a POSIX shm object and sends
+ * only its base64-encoded *name* -- no base64 of the pixel payload
+ * itself, no CTUI_KITTY_CHUNK chunking loop, since the control string is
+ * always small regardless of image size (see GFX_DESIGN.md's Phase 6).
+ * Falls back to kitty_display_td() for this one call on any local
+ * failure (shm_open/ftruncate/mmap) rather than flipping
+ * g_kitty_shm_supported off process-wide -- a transient local resource
+ * failure (e.g. /dev/shm momentarily full) isn't evidence the terminal
+ * doesn't support t=s, so it shouldn't permanently disable the fast
+ * path over one bad frame. */
+static void kitty_display_shm(int row, int col, int cell_cols, int cell_rows,
+                              const unsigned char *payload, size_t payload_len,
+                              int width, int height, unsigned int image_id,
+                              int z, int use_compression) {
+  char name[64];
+  kitty_shm_name(name, sizeof name, g_kitty_shm_seq++);
+
+  int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, 0600);
+  if (fd < 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty shm_open(%s) failed (%s) @ tick %d, "
+              "falling back to t=d for this frame\n",
+              name, strerror(errno), ctui_tick_advance());
+    kitty_display_td(row, col, cell_cols, cell_rows, payload, payload_len,
+                     width, height, image_id, z, use_compression);
+    return;
+  }
+  void *map = NULL;
+  if (ftruncate(fd, (off_t)payload_len) == -1 ||
+      (map = mmap(NULL, payload_len, PROT_WRITE, MAP_SHARED, fd, 0)) ==
+          MAP_FAILED) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty shm ftruncate/mmap(%s, %zu) failed (%s) @ "
+              "tick %d, falling back to t=d for this frame\n",
+              name, payload_len, strerror(errno), ctui_tick_advance());
+    close(fd);
+    shm_unlink(name);
+    kitty_display_td(row, col, cell_cols, cell_rows, payload, payload_len,
+                     width, height, image_id, z, use_compression);
+    return;
+  }
+  memcpy(map, payload, payload_len);
+  munmap(map, payload_len);
+  close(fd);
+  /* no shm_unlink() here -- per spec, the terminal itself unlinks a t=s
+   * segment once it's read it (see GFX_DESIGN.md's Phase 6); unlinking
+   * from this side too would race whenever the terminal hasn't opened it
+   * by name yet. */
+
+  char b64[96];
+  size_t b64_len = ctui_util_base64_encode((const unsigned char *)name,
+                                           strlen(name), b64, sizeof b64);
+
+  char out[256];
+  int n;
+  if (use_compression) {
+    n = snprintf(out, sizeof out,
+                 "\x1b[%d;%dH\x1b_Ga=T,f=32,o=z,t=s,s=%d,v=%d,c=%d,r=%d,i=%u,"
+                 "z=%d,q=2,C=1;%.*s\x1b\\",
+                 row, col, width, height, cell_cols, cell_rows, image_id, z,
+                 (int)b64_len, b64);
+  } else {
+    n = snprintf(out, sizeof out,
+                 "\x1b[%d;%dH\x1b_Ga=T,f=32,t=s,s=%d,v=%d,c=%d,r=%d,i=%u,z=%d,"
+                 "q=2,C=1;%.*s\x1b\\",
+                 row, col, width, height, cell_cols, cell_rows, image_id, z,
+                 (int)b64_len, b64);
+  }
+  kitty_batch_append(out, (size_t)n);
+
+  ctui_logf(E_INF,
+            "[CTUI:GFX] - kitty_display (t=s) @ tick %d (%dx%d px @ row=%d, "
+            "col=%d, id=%u, z=%d, shm=%s, payload=%zu, compressed=%s)\n",
+            ctui_tick_advance(), width, height, row, col, image_id, z, name,
+            payload_len, use_compression ? "yes" : "no");
+}
+
+void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
+                            const unsigned char *rgba, int width, int height,
+                            unsigned int image_id, int z) {
+  if (!isatty(STDOUT_FILENO)) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty_display rejected @ tick %d, stdout isn't "
+              "a real terminal\n",
+              ctui_tick_advance());
+    return;
+  }
+  if (width <= 0 || height <= 0 || rgba == NULL) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty_display rejected @ tick %d, degenerate "
+              "image (%dx%d, rgba=%p)\n",
+              ctui_tick_advance(), width, height, (const void *)rgba);
+    return;
+  }
+
+  size_t raw_len = (size_t)width * (size_t)height * 4;
+
+  /* Phase 5b: always attempt compression and compare -- never worse than
+   * today, since a losing attempt (compressed_len >= raw_len, plausible
+   * for small images like loudness_meter.c's baked-in text row given
+   * DEFLATE's own block overhead) just falls through to the raw path
+   * below unchanged. Phase 6: this same payload/use_compression choice
+   * feeds either transport below -- o=z is a legal, orthogonal key on a
+   * t=s control string too (see GFX_DESIGN.md's Phase 6), so there's no
+   * separate compression decision to make per transport. */
+  unsigned char *compressed = NULL;
+  const unsigned char *payload = rgba;
+  size_t payload_len = raw_len;
+  int use_compression = 0;
+  if (g_kitty_compression_enabled) {
+    CTUI_PROFILE_SPAN compress_span = ctui_profile_begin();
+    size_t compressed_len = 0;
+    compressed = ctui_deflate_compress(rgba, raw_len, &compressed_len);
+    ctui_profile_end(compress_span, "gfx.kitty_compress");
+    if (compressed != NULL && compressed_len < raw_len) {
+      payload = compressed;
+      payload_len = compressed_len;
+      use_compression = 1;
+    }
+  }
+
+  if (g_kitty_shm_supported == 1) {
+    kitty_display_shm(row, col, cell_cols, cell_rows, payload, payload_len,
+                      width, height, image_id, z, use_compression);
+  } else {
+    kitty_display_td(row, col, cell_cols, cell_rows, payload, payload_len,
+                     width, height, image_id, z, use_compression);
+  }
+  free(compressed);
 }
 
 void ctui_gfx_kitty_delete(unsigned int image_id) {

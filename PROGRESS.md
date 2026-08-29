@@ -1155,6 +1155,75 @@ terminal resize.
       app so far) reads far below this during normal, non-continuously-
       changing use.
 
+- [x] **GFX_DESIGN.md's Phase 6 (shared-memory Kitty transmission,
+      `t=s`) implemented.** `core/gfx.c`'s `ctui_gfx_kitty_display()`
+      still builds the same compressed-or-raw payload it always has
+      (Phase 5b's compare-and-keep-smaller policy, untouched); what
+      changed is how that payload reaches the terminal:
+      - **One-shot probe** (`ctui_gfx_kitty_probe_shm()`, called from
+        `ctui_init()`/`term.c`, only when `CTUI_GFX_KITTY` was actually
+        negotiated): writes a throwaway 1x1 pixel into a POSIX shm
+        object, sends a single `a=q` (query -- never displays or
+        persists anything), `t=s`, `q=0` (un-suppressed, since this is
+        the one call in the whole Kitty path that actually needs a
+        reply) escape, and waits up to 250ms
+        (`CTUI_KITTY_PROBE_TIMEOUT_MS`) via `poll()`/`clock_gettime()`
+        for an `i=1;OK` reply. Result cached in a tri-state
+        `g_kitty_shm_supported` (-1 not yet probed / 0 / 1) for the rest
+        of the process; every failure mode (`shm_open()` failing
+        locally, no reply, a non-OK reply) lands on 0, same as "not a
+        real Kitty terminal" -- there's no separate error path to get
+        stuck in.
+      - **`t=s` transport** (`kitty_display_shm()`, new sibling to the
+        renamed `kitty_display_td()`): `shm_open()` + `ftruncate()` +
+        `mmap()` the payload directly (no base64, no
+        `CTUI_KITTY_CHUNK` chunking loop -- both were purely artifacts
+        of `t=d` needing to smuggle bytes through an escape sequence),
+        then sends one short control string with only the shm object's
+        base64-encoded *name*. Every shm segment gets a unique name
+        (pid + a monotonic counter,
+        `/ctui-k-<pid>-<seq>`) rather than reusing one across frames, so
+        a still-open prior segment (the terminal, not the client, is
+        responsible for `shm_unlink()`) can never collide with the next
+        frame's `shm_open(O_EXCL)`. Falls back to `kitty_display_td()`
+        for that one call (not a permanent `g_kitty_shm_supported`
+        flip) on any local shm failure, since a transient local resource
+        issue isn't evidence the terminal itself lacks `t=s` support.
+      - Zero changes required in any widget (`loudness_meter.c`,
+        `oscilloscope.c`, `spectrum_bars.c`, `spectrogram.c`,
+        `playlist_gfx.c`, `status_bar.c`, `border.c`, `kitty_image.c`) or
+        their Kitty call sites -- same "transport is invisible to the
+        caller" property every prior gfx phase held.
+      - New headless tests (`tests/kitty_protocol_test.c`): the APC
+        reply parser (`ctui_gfx_kitty_reply_is_ok()`, factored out
+        specifically so it's testable without a live terminal) against
+        synthetic OK/error/wrong-id/truncated/empty replies. `make
+        test` and `make all` both stay warning-free.
+      - **Verified, under `pty_harness.py` + `TERM=xterm-kitty`**: the
+        probe actually runs only when `CTUI_GFX_KITTY` negotiates (a
+        plain `TERM=xterm-256color` run never touches this code at all,
+        confirmed via the log), times out cleanly in ~250ms against a
+        pty that never replies (`pty_harness.py` is not a real Kitty
+        terminal and can't answer the probe), correctly falls back to
+        `t=d` (confirmed via `ctui.log`: `"kitty shm probe result:
+        unsupported, using t=d"` followed by a normal `kitty_display
+        (t=d)` transmission, rendering exactly as before this phase),
+        and leaves no leftover object under `/dev/shm` afterward.
+      - **Verified against a real Kitty terminal**: `ctui-mus` run
+        fullscreen on a real Kitty terminal (4K display). `ctui.log`
+        shows the `a=q` probe getting a genuine 11-byte `i=1;OK` reply
+        (`"kitty shm probe result: supported (t=s)"`),
+        `g_kitty_shm_supported` latching to 1 for the session, and every
+        subsequent `kitty_display (t=s)` call transmitting real payloads
+        -- including several individual images over 2MB
+        (`payload=2140160` at 608x880px) -- with zero
+        `shm_open()`/`ftruncate()`/`mmap()` failures logged across the
+        whole run. Visuals reported flawless at 60+FPS perceived, well
+        inside `app.frame`'s ~220/s measured raw render throughput at
+        that session's terminal size. This was the one item
+        `GFX_DESIGN.md`'s Phase 6 explicitly flagged as unresolvable
+        without a real Kitty terminal -- it's now closed.
+
 ## Known issues / deliberately deferred
 
 - **A full-terminal-sized Kitty image (e.g. `border.c`'s background) has

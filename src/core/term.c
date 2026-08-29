@@ -101,6 +101,19 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
   ctui_logf(E_INF, "[CTUI:TERM] - SIGWINCH handler installed @ tick %d\n",
             ctui_tick_advance());
 
+  /* Phase 6: only worth probing t=s support once the negotiated tier is
+   * actually CTUI_GFX_KITTY -- for every other tier there's no Kitty
+   * transport question to answer at all. Raw mode is already active at
+   * this point (byte-level, unbuffered stdin reads, required for the
+   * probe's own bounded read of the terminal's APC reply); doing this
+   * before the alternate-screen switch just below means a probe that
+   * somehow printed anything visible (it shouldn't -- a=q never
+   * displays) would land on the normal screen, not linger into the
+   * app's own alt-screen frame. */
+  if (g_gfx_mode == CTUI_GFX_KITTY) {
+    ctui_gfx_kitty_probe_shm();
+  }
+
   /* alternate screen buffer + hide cursor */
   printf("\x1b[?1049h\x1b[?25l");
   fflush(stdout);
