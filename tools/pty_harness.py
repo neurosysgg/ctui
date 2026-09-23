@@ -47,6 +47,7 @@ import struct
 import sys
 import termios
 import time
+import unicodedata
 
 KEY_BYTES = {
     "UP": b"\x1b[A",
@@ -73,10 +74,18 @@ class Grid:
         self.cells = [[" "] * cols for _ in range(rows)]
         self.r = self.c = 0
 
-    def put(self, ch):
+    def put(self, ch, width=1):
+        if width == 0:
+            return  # combining mark: a real terminal attaches it, we drop it
+        if width == 2 and self.c == self.cols - 1:
+            self.put(" ")  # a wide glyph never straddles the right edge
         if 0 <= self.r < self.rows and 0 <= self.c < self.cols:
             self.cells[self.r][self.c] = ch
-        self.c += 1
+            if width == 2 and self.c + 1 < self.cols:
+                # right half of a wide glyph: empty, so text() still joins
+                # to exactly what the terminal shows
+                self.cells[self.r][self.c + 1] = ""
+        self.c += width
         if self.c >= self.cols:
             self.c = 0
             self.r = min(self.r + 1, self.rows - 1)
@@ -88,10 +97,31 @@ class Grid:
         return "\n".join("".join(row).rstrip() for row in self.cells)
 
 
+def glyph_width(ch):
+    """Terminal column width, close enough to wcwidth() for checking
+    layout: East Asian Wide/Fullwidth (CJK, most emoji) take 2 columns,
+    combining marks 0, everything else 1."""
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def utf8_len(lead):
+    if lead >= 0xF0:
+        return 4
+    if lead >= 0xE0:
+        return 3
+    if lead >= 0xC0:
+        return 2
+    return 1
+
+
 def feed(grid, buf):
     """Replay a captured byte stream into grid, tracking cursor moves,
-    clears, and printable chars; every other escape is consumed and
-    ignored (colors, cursor visibility, alt-screen, ...)."""
+    clears, and printable chars (decoded as UTF-8, placed by column
+    width like a real terminal); every other escape is consumed and
+    ignored (colors, cursor visibility, alt-screen, Kitty graphics
+    APCs, OSC titles, ...)."""
     i, n = 0, len(buf)
     while i < n:
         b = buf[i]
@@ -116,6 +146,18 @@ def feed(grid, buf):
                     grid.clear()
                 i = m.end()
                 continue
+            elif i + 1 < n and buf[i + 1] in b"_]P^":
+                # APC (Kitty graphics), OSC, DCS, PM: a string running to
+                # ST (ESC \) -- or BEL, for OSC -- never on-screen text
+                j = i + 2
+                while j < n and not (
+                    buf[j] == 0x07 or (buf[j] == 0x1B and buf[j + 1 : j + 2] == b"\\")
+                ):
+                    j += 1
+                if j >= n:
+                    break  # incomplete string at end of buffer
+                i = j + (1 if buf[j] == 0x07 else 2)
+                continue
             else:
                 i += 2  # ESC + one byte (e.g. alt-screen sequences w/o '[')
                 continue
@@ -131,6 +173,17 @@ def feed(grid, buf):
             i += 1
         elif b < 0x20:
             i += 1  # other control byte, ignore
+        elif b >= 0x80:
+            k = utf8_len(b)
+            if i + k > n:
+                break  # incomplete sequence at end of buffer
+            ch = buf[i : i + k].decode("utf-8", "replace")
+            # a malformed sequence decodes to U+FFFD plus whatever followed;
+            # consume only the lead byte then, like a real terminal
+            if len(ch) != 1:
+                ch, k = "\ufffd", 1
+            grid.put(ch, glyph_width(ch))
+            i += k
         else:
             grid.put(chr(b))
             i += 1
@@ -270,7 +323,7 @@ def run(binary, rows, cols, steps, grep, log_path, emulate_kitty_shm=False):
                 # PROGRESS.md's Known issues for the version of this that
                 # used to look broken.
                 drain_step()
-                sys.stdout.write(history.decode("ascii", "replace"))
+                sys.stdout.write(history.decode("utf-8", "backslashreplace"))
                 sys.stdout.write("\n" + "-" * 40 + "\n")
             else:
                 print(f"unknown step: {step!r}", file=sys.stderr)
