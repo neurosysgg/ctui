@@ -41,6 +41,7 @@ void ctui_compositor_clear(CTUI_COMPOSITOR *comp) {
      * keep that color_mode if this frame's widget draws it via plain
      * putc() instead -- see GFX_DESIGN.md's "Resolved open questions" */
     comp->cells[i].color_mode = CTUI_COLOR_MODE_BASIC;
+    comp->cells[i].kitty_row = 0;
   }
 }
 

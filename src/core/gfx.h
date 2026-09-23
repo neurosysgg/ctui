@@ -1,6 +1,8 @@
 #ifndef CTUI_GFX_H
 #define CTUI_GFX_H
 
+#include <stdint.h>
+
 /* terminal-level graphics capability, negotiated once at ctui_init() time
  * (see term.h). Distinct from CTUI_COLOR_MODE_* (cell.h), which is a
  * per-cell encoding choice, not a terminal capability -- see
@@ -111,6 +113,14 @@ void ctui_gfx_kitty_delete(unsigned int image_id);
  * image id) shows that cell's slice of the image's virtual placement --
  * see ctui_widget_put_kitty_placeholder() (widget.h) */
 #define CTUI_GFX_KITTY_PLACEHOLDER 0x10EEEEu
+
+/* how many image rows placeholders can address (kitty_row in cell.h) */
+#define CTUI_GFX_KITTY_MAX_ROWS 255
+
+/* the combining mark kitty reads as number n (0-based) in a placeholder's
+ * row/column diacritic (its rowcolumn-diacritics.txt), n below
+ * CTUI_GFX_KITTY_MAX_ROWS */
+uint32_t ctui_gfx_kitty_diacritic(int n);
 
 /* has the terminal load the PNG at path (an absolute path the terminal
  * process can read; it decodes the file itself) as image_id, with a

@@ -23,6 +23,11 @@ typedef struct {
   unsigned char color_mode;
   unsigned char fg_r, fg_g, fg_b; /* used only when color_mode == RGB(_FG) */
   unsigned char bg_r, bg_g, bg_b;
+
+  /* a CTUI_GFX_KITTY_PLACEHOLDER cell's image row + 1, sent as kitty's row
+   * diacritic (the column follows from the placeholder to its left); 0 =
+   * no diacritic, i.e. row 0 */
+  unsigned char kitty_row;
 } CTUI_CELL;
 
 /* basic ANSI colors */

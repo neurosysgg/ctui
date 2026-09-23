@@ -115,7 +115,7 @@ static void test_puts_and_color_modes(void) {
                    "putc_rgb_fg() tags the cell CTUI_COLOR_MODE_RGB_FG: "
                    "24-bit fg, basic bg");
 
-  ctui_widget_put_kitty_placeholder(&w, comp, 1, 10, 0x123456, 2,
+  ctui_widget_put_kitty_placeholder(&w, comp, 1, 10, 0x123456, 2, 1,
                                     CTUI_COLOR_DEFAULT);
   CTUI_CELL *p0 = &comp->cells[1 * 20 + 10], *p1 = p0 + 1;
   CTUI_TEST_ASSERT(p0->ch == CTUI_GFX_KITTY_PLACEHOLDER &&
@@ -126,6 +126,24 @@ static void test_puts_and_color_modes(void) {
                        p0[2].ch != CTUI_GFX_KITTY_PLACEHOLDER,
                    "put_kitty_placeholder() writes cols U+10EEEE cells, the "
                    "image id as their fg");
+  CTUI_TEST_ASSERT(p0->kitty_row == 0 && p1->kitty_row == 0,
+                   "... a one-row image carries no row diacritic");
+
+  ctui_widget_put_kitty_placeholder(&w, comp, 2, 0, 9, 3, 2,
+                                    CTUI_COLOR_DEFAULT);
+  CTUI_CELL *r0 = &comp->cells[2 * 20], *r1 = &comp->cells[3 * 20];
+  CTUI_TEST_ASSERT(r0[0].ch == CTUI_GFX_KITTY_PLACEHOLDER &&
+                       r0[2].ch == CTUI_GFX_KITTY_PLACEHOLDER &&
+                       r1[2].ch == CTUI_GFX_KITTY_PLACEHOLDER &&
+                       r1[3].ch != CTUI_GFX_KITTY_PLACEHOLDER &&
+                       r0[0].kitty_row == 1 && r0[2].kitty_row == 1 &&
+                       r1[0].kitty_row == 2 && r1[2].kitty_row == 2 &&
+                       r1[1].fg_b == 9,
+                   "a cols x rows block tags each cell with its image row + 1");
+
+  ctui_compositor_clear(comp);
+  CTUI_TEST_ASSERT(r1[0].kitty_row == 0 && r1[0].ch == ' ',
+                   "compositor_clear() drops kitty_row with the placeholder");
 
   ctui_compositor_free(comp);
 }

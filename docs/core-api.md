@@ -76,7 +76,8 @@ its own cell plus a `CTUI_CELL_CONT` cell to its right, which
 `ctui_screen_flush()` skips since the terminal already advanced past
 it.
 `CTUI_COLOR_MODE_BASIC/256/RGB/RGB_FG` says how `fg`/`bg` should be
-read (`RGB_FG`: a 24-bit fg over a basic `bg`) —
+read (`RGB_FG`: a 24-bit fg over a basic `bg`); `kitty_row` is the
+image row of a Kitty placeholder cell (see `widget.h`) —
 independent of `CTUI_GFX_MODE` (`gfx.h`), which is what the *terminal
 session* negotiated, not how one cell is encoded. No functions here,
 just the type and the `CTUI_COLOR_*` basic-color enum.
@@ -186,9 +187,11 @@ ever set; every other widget leaves both `NULL`.
   `CTUI_COLOR_MODE_*`) — opt-in per call site, not per widget.
   `ctui_widget_putc_rgb_fg()` is a truecolor fg over a basic bg.
 - `ctui_widget_put_kitty_placeholder(widget, comp, row, col, image_id,
-  cols, bg)` — `cols` placeholder cells showing an image placed with
-  `ctui_gfx_kitty_place_file()`, one row high (taller needs per-cell
-  diacritics a one-codepoint `CTUI_CELL` can't hold).
+  cols, rows, bg)` — a `cols` x `rows` block of placeholder cells showing
+  an image placed with `ctui_gfx_kitty_place_file()` (placed at the same
+  size). Taller than one row, each cell carries its image row in
+  `kitty_row` (`cell.h`), which the flush sends as kitty's row diacritic;
+  columns are counted from the left edge, so keep it visible.
 - `ctui_widget_contains(widget, row, col)` — hit test of an absolute
   cell against `x/y/w/h`, for `CTUI_MOUSE_EVENT_DATA`.
 - `ctui_widget_tick_advance(widget)` — per-widget frame counter, for

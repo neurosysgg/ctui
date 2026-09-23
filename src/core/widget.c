@@ -226,15 +226,23 @@ void ctui_widget_putc_rgb_fg(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
 void ctui_widget_put_kitty_placeholder(CTUI_WIDGET *widget,
                                        CTUI_COMPOSITOR *comp, int row, int col,
                                        unsigned int image_id, int cols,
-                                       unsigned char bg) {
-  /* the id rides in the fg color; without row/column diacritics kitty
-   * takes row 0 and counts columns up from 0 along the run */
-  for (int i = 0; i < cols; i++) {
-    ctui_widget_putc_rgb_fg(widget, comp, row, col + i,
-                            CTUI_GFX_KITTY_PLACEHOLDER,
-                            (unsigned char)(image_id >> 16),
-                            (unsigned char)(image_id >> 8),
-                            (unsigned char)image_id, bg);
+                                       int rows, unsigned char bg) {
+  if (rows > CTUI_GFX_KITTY_MAX_ROWS) {
+    rows = CTUI_GFX_KITTY_MAX_ROWS;
+  }
+  /* the id rides in the fg color; a single row goes without diacritics
+   * (kitty takes row 0 and counts columns up along the run) */
+  CTUI_CELL style = {.fg_r = (unsigned char)(image_id >> 16),
+                     .fg_g = (unsigned char)(image_id >> 8),
+                     .fg_b = (unsigned char)image_id,
+                     .bg = bg,
+                     .color_mode = CTUI_COLOR_MODE_RGB_FG};
+  for (int r = 0; r < rows; r++) {
+    style.kitty_row = rows > 1 ? (unsigned char)(r + 1) : 0;
+    for (int i = 0; i < cols; i++) {
+      widget_put(widget, comp, row + r, col + i, CTUI_GFX_KITTY_PLACEHOLDER,
+                 &style);
+    }
   }
 }
 

@@ -173,6 +173,25 @@ static void test_flush_256_and_rgb(void) {
   CTUI_TEST_ASSERT(strcmp(out, "\x1b[1;1H\x1b[38;2;1;2;3;49mF\x1b[0m") == 0,
                    "... a changed bg alone repaints it");
 
+  s->cells[0] = (CTUI_CELL){.ch = CTUI_GFX_KITTY_PLACEHOLDER,
+                            .color_mode = CTUI_COLOR_MODE_RGB_FG,
+                            .fg_b = 5,
+                            .kitty_row = 2};
+  capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(strcmp(out, "\x1b[1;1H\x1b[38;2;0;0;5;49m\xf4\x8e\xbb\xae"
+                               "\xcc\x8d\x1b[0m") == 0,
+                   "a placeholder with kitty_row 2 is followed by kitty's "
+                   "diacritic for row 1 (U+030D)");
+  s->cells[0].kitty_row = 3;
+  n = capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(n > strlen("\x1b[0m") && strstr(out, "\xcc\x8e"),
+                   "... a changed kitty_row alone repaints the cell");
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_diacritic(0) == 0x0305 &&
+                       ctui_gfx_kitty_diacritic(CTUI_GFX_KITTY_MAX_ROWS - 1) ==
+                           0xA8E4,
+                   "the diacritic table runs from U+0305 to kitty's 255th "
+                   "entry, U+A8E4");
+
   ctui_screen_free(s);
 }
 

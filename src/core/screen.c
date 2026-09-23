@@ -1,5 +1,6 @@
 #include "screen.h"
 
+#include "gfx.h"
 #include "log.h"
 #include "utf8.h"
 
@@ -71,6 +72,7 @@ void ctui_screen_clear(CTUI_SCREEN *s) {
     s->cells[i].fg = CTUI_COLOR_DEFAULT;
     s->cells[i].bg = CTUI_COLOR_DEFAULT;
     s->cells[i].color_mode = CTUI_COLOR_MODE_BASIC;
+    s->cells[i].kitty_row = 0;
   }
 }
 
@@ -125,7 +127,8 @@ static int ansi_bg_code(unsigned char c) {
  * key off plain fg/bg (just different index spaces), RGB off fg_r../bg_r..,
  * RGB_FG off fg_r.. and plain bg */
 static int ctui_compare_ctuicell(CTUI_CELL *lhs, CTUI_CELL *rhs) {
-  if (lhs->ch != rhs->ch || lhs->color_mode != rhs->color_mode) {
+  if (lhs->ch != rhs->ch || lhs->color_mode != rhs->color_mode ||
+      lhs->kitty_row != rhs->kitty_row) {
     return 0;
   }
   if (lhs->color_mode == CTUI_COLOR_MODE_RGB_FG) {
@@ -232,6 +235,10 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
         ch = 0xFFFD;
       }
       len += (size_t)ctui_utf8_encode(ch, out + len);
+      if (ch == CTUI_GFX_KITTY_PLACEHOLDER && cur->kitty_row) {
+        len += (size_t)ctui_utf8_encode(
+            ctui_gfx_kitty_diacritic(cur->kitty_row - 1), out + len);
+      }
       last_row = r;
       last_col = c + ctui_utf8_cpwidth(ch);
     }

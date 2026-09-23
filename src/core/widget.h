@@ -179,17 +179,19 @@ void ctui_widget_putc_rgb_fg(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
                              unsigned char bg);
 
 /* shows a Kitty image already placed with ctui_gfx_kitty_place_file()
- * (gfx.h) as cols cells at (row, col): each is CTUI_GFX_KITTY_PLACEHOLDER
- * with image_id (1..0xFFFFFF) as its 24-bit fg, over bg. Being ordinary
+ * (gfx.h) as a cols x rows block of cells from (row, col): each is
+ * CTUI_GFX_KITTY_PLACEHOLDER with image_id (1..0xFFFFFF) as its 24-bit fg,
+ * over bg, and (for rows > 1) its image row in kitty_row. Being ordinary
  * cells, the image moves, clips and clears with the widget's text -- no
- * gfx_render/ctui_gfx_kitty_delete() bookkeeping. One row only: taller
- * images need per-cell row diacritics, which a one-codepoint CTUI_CELL
- * can't hold. Only meaningful once CTUI_GFX_KITTY was negotiated; any
- * other terminal shows its fallback glyph for U+10EEEE. */
+ * gfx_render/ctui_gfx_kitty_delete() bookkeeping. rows is capped at
+ * CTUI_GFX_KITTY_MAX_ROWS. Kitty takes a cell's column from the placeholder
+ * to its left, so the block's left edge must be visible. Only meaningful
+ * once CTUI_GFX_KITTY was negotiated; any other terminal shows its
+ * fallback glyph for U+10EEEE. */
 void ctui_widget_put_kitty_placeholder(CTUI_WIDGET *widget,
                                        CTUI_COMPOSITOR *comp, int row, int col,
                                        unsigned int image_id, int cols,
-                                       unsigned char bg);
+                                       int rows, unsigned char bg);
 
 /* opts widget into a non-degradable graphics protocol (currently just
  * CTUI_GFX_KITTY, core/gfx.h) instead of the three text tiers every

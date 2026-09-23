@@ -232,6 +232,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Multi-row Kitty placeholder images** (2026-09-23, for ctui-wm's
+      `art` widget, a picture filling a whole zone):
+      `ctui_widget_put_kitty_placeholder()` takes a `rows` argument and
+      draws a cols x rows block. `CTUI_CELL` got a `kitty_row` byte
+      (image row + 1, fits in the struct's existing padding), and
+      `ctui_screen_flush()` writes kitty's row diacritic after such a
+      placeholder (`ctui_gfx_kitty_diacritic()`, the first 255 entries of
+      kitty's `rowcolumn-diacritics.txt`). No column diacritic: kitty
+      counts columns up from the placeholder to the left, so the block's
+      left edge has to be visible. One-row calls are byte-identical to
+      before. Tests in `widget_test.c` and `screen_test.c`.
+
 - [x] **Kitty images as text cells** (2026-09-23, for ctui-wm's tray,
       window list and dock icons, where icons and labels share a row):
       `ctui_gfx_kitty_place_file()` has kitty load a PNG by path
