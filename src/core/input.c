@@ -185,6 +185,42 @@ static int resolve_mouse(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   return 1;
 }
 
+/* a kitty keyboard protocol report (ctui_kitty_keys_enable()): "CSI code;
+ * mods u", code a Unicode codepoint. Decoded to the event the legacy bytes
+ * for the same key would give, so a handler can't tell the difference
+ * unless it looks at mods -- which now also say shift/ctrl on Enter, Tab
+ * and Backspace, the point of turning the protocol on. */
+static int resolve_csi_u(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
+                         long code, unsigned int mods) {
+  switch (code) {
+  case 13:
+    return resolve_key(ev, kp, CTUI_KEY_ENTER, 0, mods);
+  case 9:
+    return mods & CTUI_MOD_SHIFT
+               ? resolve_key(ev, kp, CTUI_KEY_BACKTAB, 0,
+                             mods & ~(unsigned int)CTUI_MOD_SHIFT)
+               : resolve_key(ev, kp, CTUI_KEY_TAB, 0, mods);
+  case 27:
+    return resolve_key(ev, kp, CTUI_KEY_ESC, 0, mods);
+  default:
+    break;
+  }
+  /* 57344-63743 are kitty's own codes for keys without a codepoint
+   * (keypad, media keys, lone modifiers) */
+  if ((code < 0x20 && code != 8) || code > 0x10FFFF ||
+      (code >= 57344 && code <= 63743)) {
+    return resolve_key(ev, kp, CTUI_KEY_NONE, 0, 0);
+  }
+  uint32_t ch = (uint32_t)code;
+  /* ctrl+letter as its control byte, without the CTRL bit, like legacy */
+  if ((mods & CTUI_MOD_CTRL) && ((ch >= 'a' && ch <= 'z') ||
+                                 (ch >= '@' && ch <= '_'))) {
+    ch &= 0x1f;
+    mods &= ~(unsigned int)CTUI_MOD_CTRL;
+  }
+  return resolve_key(ev, kp, CTUI_KEY_CHAR, ch, mods);
+}
+
 /* everything after "\x1b[": parameter/intermediate bytes, then one final
  * byte in 0x40-0x7e. Unrecognised sequences resolve to CTUI_KEY_NONE --
  * consumed whole, so their tail never leaks through as stray CHAR events
@@ -231,6 +267,8 @@ static int resolve_csi(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   unsigned int mods = p2 > 1 ? (unsigned int)(p2 - 1) & 7u : 0;
 
   switch (c) {
+  case 'u':
+    return resolve_csi_u(ev, kp, p1, mods);
   case 'A':
     return resolve_key(ev, kp, CTUI_KEY_UP, 0, mods);
   case 'B':

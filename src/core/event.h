@@ -28,7 +28,9 @@ typedef enum {
  * as far as the terminal reports them: CSI modifier params (ctrl+up =
  * "\x1b[1;5A"), ESC-prefixed bytes (alt+x), and SGR mouse button bits.
  * Plain ctrl+letter still arrives as CTUI_KEY_CHAR with the raw control
- * byte (0x01-0x1a) in ch and no CTRL bit, same as it always has. */
+ * byte (0x01-0x1a) in ch and no CTRL bit, same as it always has. Enter,
+ * Tab and Backspace only carry shift/ctrl after ctui_kitty_keys_enable()
+ * (core/term.h); legacy terminals send the same byte either way. */
 enum {
   CTUI_MOD_SHIFT = 1 << 0,
   CTUI_MOD_ALT = 1 << 1,

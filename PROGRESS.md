@@ -227,10 +227,28 @@ terminal resize.
 - **Input decoding** handles full CSI sequences (params, modifiers,
   `~` keys), SS3, alt+key, UTF-8 keypresses and SGR mouse reports
   (opt-in via `ctui_mouse_enable()`), and focus reports (`CSI I`/`CSI O`
-  -> `CTUI_FOCUS_EVENT`, opt-in via `ctui_focus_enable()`). Unknown
-  sequences are consumed whole and resolve to `CTUI_KEY_NONE`.
+  -> `CTUI_FOCUS_EVENT`, opt-in via `ctui_focus_enable()`), and kitty
+  keyboard protocol reports (`CSI code;mods u`, opt-in via
+  `ctui_kitty_keys_enable()`). Unknown sequences are consumed whole and
+  resolve to `CTUI_KEY_NONE`.
 
 ## Fixed / addressed
+
+- [x] **Modified Enter/Tab/Backspace** (2026-09-24, for ctui-wm's
+      launcher, where Enter / shift+Enter / ctrl+Enter do different
+      things): the legacy encoding sends `\r` for all three.
+      `ctui_kitty_keys_enable()` pushes the kitty keyboard protocol's
+      "disambiguate" flag (`CSI > 1 u`, popped by `ctui_shutdown()` with
+      `CSI < u`), and the decoder turns `CSI code;mods u` into the event
+      the legacy bytes would have given: 13 ENTER, 9 TAB (shift: BACKTAB),
+      27 ESC, ctrl+letter its control byte without the CTRL bit, anything
+      else a CHAR with mods; kitty's private-use codes (keypad, media keys)
+      are `CTUI_KEY_NONE`. Lock-key bits (caps/num lock) are masked off.
+      So an app that turns it on keeps working unchanged and only gains
+      mods. Checked against kitty 0.48.2's own encoder
+      (`encode_key_for_tty`): shift+Enter `CSI 13;2u`, ctrl+Enter
+      `CSI 13;5u`, Esc `CSI 27u`, ctrl+c `CSI 99;5u`. Tests in
+      `input_test.c`.
 
 - [x] **Multi-row Kitty placeholder images** (2026-09-23, for ctui-wm's
       `art` widget, a picture filling a whole zone):

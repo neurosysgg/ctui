@@ -216,7 +216,8 @@ addEventListener()-style: widgets register interest in one
 - `CTUI_KEYPRESS_EVENT_DATA` — `type` (arrows, ENTER/ESC/TAB, HOME/END/
   PGUP/PGDN/INSERT/DELETE/BACKTAB, CHAR, or NONE for an unrecognised
   sequence), `ch` (a codepoint for CHAR) and `mods`
-  (`CTUI_MOD_SHIFT/ALT/CTRL`, where the terminal reports them).
+  (`CTUI_MOD_SHIFT/ALT/CTRL`, where the terminal reports them; on
+  Enter/Tab/Backspace only after `ctui_kitty_keys_enable()`).
 - `CTUI_MOUSE_EVENT_DATA` — `action` (press/release/motion/scroll),
   `button`, absolute `row/col`, `mods`. Only produced after
   `ctui_mouse_enable()` (`term.h`); every listener gets every report
@@ -381,6 +382,12 @@ above into the loop described in "Life of a frame".
 - `ctui_focus_enable()` — opt into focus reports (`CTUI_FOCUS_EVENT`)
   when the terminal window gains/loses keyboard focus;
   `ctui_shutdown()` turns them back off.
+- `ctui_kitty_keys_enable()` — opt into the kitty keyboard protocol's
+  "disambiguate" level, so shift/ctrl+Enter, ctrl+Tab and
+  ctrl/shift+Backspace carry their `mods` (legacy terminals send the same
+  byte either way). Every key still decodes to the event its legacy bytes
+  would give (ctrl+letter is still the control byte); terminals without
+  the protocol ignore it; `ctui_shutdown()` restores the previous mode.
 
 ## `input.h` — the blocking read loop
 

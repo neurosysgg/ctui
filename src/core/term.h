@@ -32,4 +32,13 @@ void ctui_mouse_enable(int track_motion);
  * ctui_shutdown() turns it back off. */
 void ctui_focus_enable(void);
 
+/* opts into the kitty keyboard protocol's "disambiguate" level: keys the
+ * legacy encoding can't tell apart (shift/ctrl+Enter, ctrl+Tab,
+ * ctrl/shift+Backspace) arrive with their CTUI_MOD_* bits, and ESC is
+ * never confused with the start of a sequence. Everything else decodes to
+ * the same events as before (ctrl+letter is still its control byte).
+ * Terminals without the protocol ignore it. Call after ctui_init();
+ * ctui_shutdown() restores the previous mode. */
+void ctui_kitty_keys_enable(void);
+
 #endif

@@ -129,6 +129,59 @@ static void test_focus(void) {
                    "an I final with parameters isn't a focus report");
 }
 
+/* kitty keyboard protocol reports (ctui_kitty_keys_enable()) */
+static void test_csi_u(void) {
+  CTUI_EVENT ev;
+  CTUI_KEYPRESS_EVENT_DATA *kp;
+
+  feed("\x1b[13;2u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_ENTER &&
+                       kp->mods == CTUI_MOD_SHIFT,
+                   "CSI 13;2u is shift+ENTER");
+  feed("\x1b[13;5u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_ENTER &&
+                       kp->mods == CTUI_MOD_CTRL,
+                   "CSI 13;5u is ctrl+ENTER");
+  feed("\x1b[13;133u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_ENTER &&
+                       kp->mods == CTUI_MOD_CTRL,
+                   "num lock's bit (128) doesn't leak into mods");
+  feed("\x1b[27u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_ESC && kp->mods == 0,
+                   "CSI 27u is ESC");
+  feed("\x1b[9;2u\x1b[9;5u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_BACKTAB && kp->mods == 0,
+                   "CSI 9;2u is BACKTAB, like legacy shift+tab");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_TAB &&
+                       kp->mods == CTUI_MOD_CTRL,
+                   "CSI 9;5u is ctrl+TAB");
+  feed("\x1b[99;5u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_CHAR && kp->ch == 0x03 &&
+                       kp->mods == 0,
+                   "CSI 99;5u (ctrl+c) is the control byte 0x03, no CTRL "
+                   "bit -- the same event as legacy");
+  feed("\x1b[120;3u\x1b[127;5u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_CHAR && kp->ch == 'x' &&
+                       kp->mods == CTUI_MOD_ALT,
+                   "CSI 120;3u is alt+x");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_CHAR && kp->ch == 0x7f &&
+                       kp->mods == CTUI_MOD_CTRL,
+                   "CSI 127;5u is ctrl+backspace");
+  feed("\x1b[57399u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_NONE,
+                   "a kitty functional code (keypad 0) is ignored");
+}
+
 static void test_mouse(void) {
   CTUI_EVENT ev;
   CTUI_MOUSE_EVENT_DATA *md;
@@ -320,6 +373,7 @@ int main(void) {
   test_keys();
   test_mouse();
   test_focus();
+  test_csi_u();
   test_io_watch();
   test_timer_wake_and_tick();
   test_quit(&app, &w);
