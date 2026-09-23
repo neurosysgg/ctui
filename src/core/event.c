@@ -26,6 +26,20 @@ const char *ctui_keytype_name(CTUI_KEYTYPE type) {
     return "TAB";
   case CTUI_KEY_CHAR:
     return "CHAR";
+  case CTUI_KEY_HOME:
+    return "HOME";
+  case CTUI_KEY_END:
+    return "END";
+  case CTUI_KEY_PGUP:
+    return "PGUP";
+  case CTUI_KEY_PGDN:
+    return "PGDN";
+  case CTUI_KEY_INSERT:
+    return "INSERT";
+  case CTUI_KEY_DELETE:
+    return "DELETE";
+  case CTUI_KEY_BACKTAB:
+    return "BACKTAB";
   }
   return "UNKNOWN";
 }
@@ -46,6 +60,10 @@ const char *ctui_eventtype_name(CTUI_EVENTTYPE type) {
     return "TIMER";
   case CTUI_VALUE_CHANGED_EVENT:
     return "VALUE_CHANGED";
+  case CTUI_MOUSE_EVENT:
+    return "MOUSE";
+  case CTUI_IO_EVENT:
+    return "IO";
   case CTUI_DUMMY_EVENT:
     return "DUMMY";
   }
@@ -56,8 +74,55 @@ struct CTUI_EVENT_HANDLER {
   const char *source;
   CTUI_EVENTTYPE type;
   CTUI_WIDGET *widget;
-  int (*handler)(CTUI_WIDGET *self, CTUI_EVENT *ev);
+  int (*handler)(CTUI_WIDGET *self, CTUI_EVENT *ev); /* NULL = unregistered,
+                                                     * awaiting compaction */
 };
+
+/* how many ctui_handle_event() calls are on the stack (handlers emit
+ * events of their own, so this nests). Unregistration only tombstones
+ * while this is nonzero -- compacting mid-dispatch would shift entries
+ * under an index some outer loop is still walking. */
+static int g_dispatch_depth = 0;
+static int g_tombstones = 0;
+
+static void compact_handlers(void) {
+  int kept = 0;
+  for (int i = 0; i < g_app->handler_count; i++) {
+    if (g_app->handlers[i].handler) {
+      g_app->handlers[kept++] = g_app->handlers[i];
+    }
+  }
+  ctui_logf(E_INF,
+            "[CTUI:EVENT] - compacted registry @ tick %d (%d -> %d "
+            "handlers)\n",
+            ctui_tick_advance(), g_app->handler_count, kept);
+  g_app->handler_count = kept;
+  g_tombstones = 0;
+}
+
+void ctui_event_unregister(CTUI_WIDGET *widget) {
+  if (!g_app) {
+    ctui_log(E_WRN, "[CTUI:EVENT] - no app registered, nothing to "
+                    "unregister\n");
+    return;
+  }
+  int removed = 0;
+  for (int i = 0; i < g_app->handler_count; i++) {
+    CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
+    if (h->handler && h->widget == widget) {
+      h->handler = NULL;
+      removed++;
+    }
+  }
+  g_tombstones += removed;
+  ctui_logf(E_INF,
+            "[CTUI:EVENT] - unregistered %d handler(s) for widget %p @ tick "
+            "%d\n",
+            removed, (void *)widget, ctui_tick_advance());
+  if (g_dispatch_depth == 0 && g_tombstones) {
+    compact_handlers();
+  }
+}
 
 void ctui_event_register(const char *source, CTUI_EVENTTYPE type,
                          CTUI_WIDGET *widget,
@@ -96,7 +161,7 @@ static int ctui_event_dispatch_to_widget(CTUI_EVENT *ev,
   int changed = 0;
   for (int i = 0; i < g_app->handler_count; i++) {
     CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
-    if (h->type != ev->type || h->widget != widget)
+    if (!h->handler || h->type != ev->type || h->widget != widget)
       continue;
     if (h->source == NULL || ev->ev_source == NULL ||
         strcmp(h->source, ev->ev_source) != 0)
@@ -153,12 +218,13 @@ int ctui_handle_event(CTUI_EVENT *ev) {
     ctui_log(E_WRN, "[CTUI:EVENT] - no app registered, dropping event\n");
     return 0;
   }
+  g_dispatch_depth++;
   if (ev->scope == CTUI_EVENT_SCOPE_BUBBLE) {
     changed = ctui_event_dispatch_bubble(ev);
   } else {
     for (int i = 0; i < g_app->handler_count; i++) {
       CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
-      if (h->type != ev->type)
+      if (!h->handler || h->type != ev->type)
         continue;
       if (h->source == NULL || ev->ev_source == NULL ||
           strcmp(h->source, ev->ev_source) != 0)
@@ -166,6 +232,9 @@ int ctui_handle_event(CTUI_EVENT *ev) {
       if (h->handler(h->widget, ev))
         changed = 1;
     }
+  }
+  if (--g_dispatch_depth == 0 && g_tombstones) {
+    compact_handlers();
   }
   ctui_logf(E_INF, "[CTUI:EVENT] - event dispatched @ tick %d (changed=%d)\n",
             ctui_tick_advance(), changed);

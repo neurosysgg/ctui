@@ -122,6 +122,10 @@ void ctui_widget_tick_advance(CTUI_WIDGET *widget);
  * if the widget's (post-layout) origin falls outside comp. */
 void ctui_widget_init(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp);
 
+/* true if the absolute screen cell (row, col) lies inside widget's current
+ * x/y/w/h -- the hit test for CTUI_MOUSE_EVENT_DATA's row/col */
+int ctui_widget_contains(const CTUI_WIDGET *widget, int row, int col);
+
 /* writes into widget's slice of comp, at (row, col) local to the widget (0,0
  * = widget's top left). Rejects (logs + no-op) writes outside the widget's
  * declared w/h, writes past comp's bounds, or widgets never bound via

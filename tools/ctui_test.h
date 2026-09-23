@@ -57,7 +57,7 @@ static inline int ctui_test_summary(void) {
  * screen->cells reflects the keypress immediately. `ch` only matters when
  * type is CTUI_KEY_CHAR. */
 static inline int ctui_test_key(CTUI_APP *app, CTUI_SCREEN *screen,
-                                CTUI_KEYTYPE type, char ch) {
+                                CTUI_KEYTYPE type, uint32_t ch) {
   CTUI_KEYPRESS_EVENT_DATA kp = {.type = type, .ch = ch};
   CTUI_EVENT ev = {.type = CTUI_KEYPRESS_EVENT,
                    .scope = CTUI_EVENT_SCOPE_GLOBAL,

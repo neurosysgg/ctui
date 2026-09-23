@@ -18,4 +18,12 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode);
 void ctui_shutdown(void);
 void ctui_get_termsize(int *rows, int *cols);
 
+/* opts into SGR mouse reporting (CTUI_MOUSE_EVENT, core/event.h): presses,
+ * releases and wheel always; pointer motion too when track_motion is
+ * nonzero (including with no button held -- chatty, only ask for it if
+ * something hovers). Call after ctui_init(). Turns off the terminal's own
+ * click-to-select while active (kitty: hold shift to select anyway);
+ * ctui_shutdown() turns it back off. */
+void ctui_mouse_enable(int track_motion);
+
 #endif

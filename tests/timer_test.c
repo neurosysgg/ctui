@@ -39,6 +39,51 @@ static void sleep_ms(int ms) {
   nanosleep(&ts, NULL);
 }
 
+static CTUI_TIMER *g_self_cancel;
+
+static int handle_cancel_self(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  handle_timer(self, ev);
+  ctui_timer_cancel(g_self_cancel);
+  return 1;
+}
+
+static void test_cancel(int rows, int cols) {
+  COUNTER a = {0}, b = {0}, c = {0};
+  CTUI_WIDGET widget_a = ctui_widget_make(0, 0, 1, 1, &a, noop_render, NULL);
+  CTUI_WIDGET widget_b = ctui_widget_make(0, 0, 1, 1, &b, noop_render, NULL);
+  CTUI_WIDGET widget_c = ctui_widget_make(0, 0, 1, 1, &c, noop_render, NULL);
+  CTUI_WIDGET *widgets[] = {&widget_a};
+  CTUI_APP app;
+  ctui_app_init(&app, widgets, 1, rows, cols);
+
+  CTUI_TIMER *ta = ctui_timer_register_synchronized(40, &widget_a,
+                                                    handle_timer);
+  CTUI_TIMER *tb = ctui_timer_register_synchronized(40, &widget_b,
+                                                    handle_timer);
+  g_self_cancel = ctui_timer_register(40, &widget_c, handle_cancel_self);
+
+  ctui_timer_cancel(ta);
+  sleep_ms(60);
+  ctui_timer_tick();
+  CTUI_TEST_ASSERT(a.fire_count == 0 && b.fire_count == 1,
+                   "cancelling one synchronized member leaves the rest of "
+                   "its group firing");
+  CTUI_TEST_ASSERT(c.fire_count == 1,
+                   "a timer that cancels itself from its own handler still "
+                   "completes that firing");
+
+  sleep_ms(60);
+  ctui_timer_tick();
+  CTUI_TEST_ASSERT(c.fire_count == 1 && b.fire_count == 2,
+                   "...and never fires again");
+
+  ctui_timer_cancel(tb);
+  CTUI_TEST_ASSERT(ctui_timer_ms_until_due() == -1,
+                   "cancelling a group's last member drops the group, so "
+                   "there's no deadline left at all");
+  ctui_app_free(&app);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -83,6 +128,7 @@ int main(void) {
                    "by ~200ms");
 
   ctui_app_free(&app);
+  test_cancel(rows, cols);
   ctui_screen_free(screen);
   return ctui_test_summary();
 }

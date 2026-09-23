@@ -3,6 +3,7 @@
 #include "ctui_internal.h"
 #include "gfx.h"
 #include "input.h"
+#include "io.h"
 #include "log.h"
 #include "profile.h"
 #include "timer.h"
@@ -31,8 +32,11 @@ int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
   app->handlers = NULL;
   app->handler_count = 0;
   app->handler_cap = 0;
+  app->quit_on_esc = 1;
+  app->quit_requested = 0;
   g_app = app;
   ctui_timer_reset();
+  ctui_io_reset();
   ctui_widget_gfx_reset();
   ctui_logf(E_INF,
             "[CTUI:APP] - app initialised @ tick %d (%d widgets, %dx%d "
@@ -75,6 +79,7 @@ void ctui_app_free(CTUI_APP *app) {
             ctui_tick_advance());
   free(app->handlers);
   ctui_timer_reset();
+  ctui_io_reset();
   ctui_widget_gfx_reset();
   ctui_compositor_free(app->comp);
 }
@@ -155,6 +160,16 @@ static void run_frame(CTUI_APP *app, CTUI_SCREEN *screen) {
   ctui_profile_end(frame_span, "app.frame");
 }
 
+void ctui_app_quit(void) {
+  if (!g_app) {
+    ctui_log(E_WRN, "[CTUI:APP] - quit requested with no app registered\n");
+    return;
+  }
+  ctui_logf(E_INF, "[CTUI:APP] - quit requested @ tick %d\n",
+            ctui_tick_advance());
+  g_app->quit_requested = 1;
+}
+
 void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
   ctui_logf(E_INF, "[CTUI:APP] - run loop starting @ tick %d (tick_ms=%d)\n",
             ctui_tick_advance(), tick_ms);
@@ -163,7 +178,8 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
   CTUI_EVENT ev;
   ev.scope = CTUI_EVENT_SCOPE_GLOBAL;
 
-  while (ctui_input_loop(&ev, tick_ms)) {
+  app->quit_requested = 0;
+  while (!app->quit_requested && ctui_input_loop(&ev, tick_ms)) {
     if (ev.type == CTUI_RESIZE_EVENT) {
       CTUI_RESIZE_EVENT_DATA *resize_data = ev.event_data;
       ctui_app_resize(app, screen, resize_data->rows, resize_data->cols);
@@ -171,7 +187,7 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
       continue;
     }
 
-    if (ev.type == CTUI_KEYPRESS_EVENT) {
+    if (ev.type == CTUI_KEYPRESS_EVENT && app->quit_on_esc) {
       CTUI_KEYPRESS_EVENT_DATA *kp_data = ev.event_data;
       if (kp_data->type == CTUI_KEY_ESC) {
         ctui_logf(E_INF,
@@ -181,7 +197,16 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
       }
     }
 
-    int changed = ctui_handle_event(&ev);
+    int changed;
+    if (ev.type == CTUI_IO_EVENT) {
+      changed = ctui_io_dispatch(&ev);
+    } else if (ev.type == CTUI_TIMER_EVENT) {
+      /* just the loop waking for a deadline -- ctui_timer_tick() below
+       * does the actual firing, straight to each timer's own handler */
+      changed = 0;
+    } else {
+      changed = ctui_handle_event(&ev);
+    }
     if (ctui_timer_tick()) {
       changed = 1;
     }

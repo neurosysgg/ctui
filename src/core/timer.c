@@ -21,6 +21,7 @@ struct CTUI_TIMER {
   int duration_ms;
   long next_fire_ms;
   struct CTUI_TIMER_GROUP *group; /* NULL for independent timers */
+  int cancelled; /* set by ctui_timer_cancel(); swept by sweep_cancelled() */
 };
 
 typedef struct CTUI_TIMER_GROUP {
@@ -84,6 +85,7 @@ static CTUI_TIMER *make_timer(int duration_ms, CTUI_WIDGET *widget,
   timer->duration_ms = duration_ms;
   timer->group = group;
   timer->next_fire_ms = group ? 0 : now_ms() + duration_ms;
+  timer->cancelled = 0;
   return timer;
 }
 
@@ -129,6 +131,78 @@ CTUI_TIMER *ctui_timer_register(int duration_ms, CTUI_WIDGET *widget,
   return timer;
 }
 
+static int g_ticking = 0;
+static int g_cancelled_pending = 0;
+
+/* drops every cancelled timer (and any group left empty) -- only ever run
+ * outside ctui_timer_tick()'s own loops, which index these arrays */
+static void sweep_cancelled(void) {
+  int kept_groups = 0;
+  for (int i = 0; i < g_group_count; i++) {
+    CTUI_TIMER_GROUP *group = g_groups[i];
+    int kept = 0;
+    for (int m = 0; m < group->member_count; m++) {
+      if (group->members[m]->cancelled) {
+        free(group->members[m]);
+      } else {
+        group->members[kept++] = group->members[m];
+      }
+    }
+    group->member_count = kept;
+    if (kept == 0) {
+      free(group->members);
+      free(group);
+    } else {
+      g_groups[kept_groups++] = group;
+    }
+  }
+  g_group_count = kept_groups;
+
+  int kept = 0;
+  for (int i = 0; i < g_independent_count; i++) {
+    if (g_independent[i]->cancelled) {
+      free(g_independent[i]);
+    } else {
+      g_independent[kept++] = g_independent[i];
+    }
+  }
+  g_independent_count = kept;
+  g_cancelled_pending = 0;
+}
+
+void ctui_timer_cancel(CTUI_TIMER *timer) {
+  ctui_logf(E_INF,
+            "[CTUI:TIMER] - cancelled %s timer @ tick %d (widget=%p, "
+            "duration=%dms)\n",
+            timer->group ? "synchronized" : "independent", ctui_tick_advance(),
+            (void *)timer->widget, timer->duration_ms);
+  timer->cancelled = 1;
+  g_cancelled_pending = 1;
+  if (!g_ticking) {
+    sweep_cancelled();
+  }
+}
+
+long ctui_timer_ms_until_due(void) {
+  long earliest = -1;
+  for (int i = 0; i < g_group_count; i++) {
+    if (earliest < 0 || g_groups[i]->next_fire_ms < earliest) {
+      earliest = g_groups[i]->next_fire_ms;
+    }
+  }
+  for (int i = 0; i < g_independent_count; i++) {
+    if (!g_independent[i]->cancelled &&
+        (earliest < 0 || g_independent[i]->next_fire_ms < earliest)) {
+      earliest = g_independent[i]->next_fire_ms;
+    }
+  }
+  if (earliest < 0) {
+    return -1;
+  }
+  long left = earliest - now_ms();
+  return left > 0 ? left : 0;
+}
+
 static int fire(CTUI_TIMER *timer) {
   CTUI_EVENT ev = {.type = CTUI_TIMER_EVENT,
                    .scope = CTUI_EVENT_SCOPE_GLOBAL,
@@ -140,6 +214,7 @@ static int fire(CTUI_TIMER *timer) {
 int ctui_timer_tick(void) {
   long now = now_ms();
   int changed = 0;
+  g_ticking = 1;
 
   for (int i = 0; i < g_group_count; i++) {
     CTUI_TIMER_GROUP *group = g_groups[i];
@@ -151,7 +226,7 @@ int ctui_timer_tick(void) {
               "(duration=%dms, %d members)\n",
               ctui_tick_advance(), group->duration_ms, group->member_count);
     for (int m = 0; m < group->member_count; m++) {
-      if (fire(group->members[m])) {
+      if (!group->members[m]->cancelled && fire(group->members[m])) {
         changed = 1;
       }
     }
@@ -160,7 +235,7 @@ int ctui_timer_tick(void) {
 
   for (int i = 0; i < g_independent_count; i++) {
     CTUI_TIMER *timer = g_independent[i];
-    if (now < timer->next_fire_ms) {
+    if (timer->cancelled || now < timer->next_fire_ms) {
       continue;
     }
     ctui_logf(E_INF,
@@ -173,6 +248,10 @@ int ctui_timer_tick(void) {
     timer->next_fire_ms = now + timer->duration_ms;
   }
 
+  g_ticking = 0;
+  if (g_cancelled_pending) {
+    sweep_cancelled();
+  }
   return changed;
 }
 
@@ -196,6 +275,7 @@ void ctui_timer_reset(void) {
   g_independent = NULL;
   g_independent_count = 0;
   g_independent_cap = 0;
+  g_cancelled_pending = 0;
 
   ctui_logf(E_INF, "[CTUI:TIMER] - registry reset @ tick %d\n",
             ctui_tick_advance());

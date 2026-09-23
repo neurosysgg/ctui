@@ -191,6 +191,56 @@ static void test_bubble(CTUI_APP *app) {
                    "(reject-and-log), not dispatched");
 }
 
+static CTUI_WIDGET *g_unreg_x, *g_unreg_y;
+static int g_x_runs, g_y_runs;
+
+static int handler_unregisters(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  (void)ev;
+  g_x_runs++;
+  ctui_event_unregister(self);
+  ctui_event_unregister(g_unreg_y);
+  return 1;
+}
+
+static int handler_counts_y(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  (void)self;
+  (void)ev;
+  g_y_runs++;
+  return 1;
+}
+
+static void test_unregister(void) {
+  CTUI_WIDGET x = ctui_widget_make(0, 0, 1, 1, NULL, noop_render, NULL);
+  CTUI_WIDGET y = ctui_widget_make(0, 0, 1, 1, NULL, noop_render, NULL);
+  g_unreg_x = &x;
+  g_unreg_y = &y;
+  ctui_event_register("unreg", CTUI_VALUE_CHANGED_EVENT, &x,
+                      handler_unregisters);
+  ctui_event_register("unreg", CTUI_VALUE_CHANGED_EVENT, &y,
+                      handler_counts_y);
+
+  CTUI_EVENT ev = {.type = CTUI_VALUE_CHANGED_EVENT,
+                   .scope = CTUI_EVENT_SCOPE_GLOBAL,
+                   .ev_source = "unreg"};
+  ctui_handle_event(&ev);
+  CTUI_TEST_ASSERT(g_x_runs == 1 && g_y_runs == 0,
+                   "unregistering mid-dispatch takes effect immediately: y, "
+                   "registered after x and removed by x's handler, never "
+                   "runs in that same dispatch");
+
+  int changed = ctui_handle_event(&ev);
+  CTUI_TEST_ASSERT(changed == 0 && g_x_runs == 1 && g_y_runs == 0,
+                   "neither removed widget fires on later dispatches");
+
+  ctui_event_register("unreg", CTUI_VALUE_CHANGED_EVENT, &y,
+                      handler_counts_y);
+  ctui_handle_event(&ev);
+  CTUI_TEST_ASSERT(g_y_runs == 1,
+                   "a widget can register again after being unregistered "
+                   "(the compacted registry still accepts new entries)");
+  ctui_event_unregister(&y);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -235,6 +285,7 @@ int main(void) {
                    "under");
 
   test_bubble(&app);
+  test_unregister();
 
   ctui_app_free(&app);
   return ctui_test_summary();

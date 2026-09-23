@@ -15,6 +15,7 @@
 #include "core/widget.h"
 #include "core/event.h"
 #include "core/timer.h"
+#include "core/io.h"
 #include "core/util.h"
 #include "core/group.h"
 #include "core/split.h"

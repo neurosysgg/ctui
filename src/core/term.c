@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 static struct termios orig_termios;
+static int g_mouse_enabled = 0;
 
 volatile sig_atomic_t g_resize_pending = 0;
 unsigned int g_gfx_mode = 0;
@@ -124,6 +125,17 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
   return 0;
 }
 
+void ctui_mouse_enable(int track_motion) {
+  /* 1000 = press/release, 1003 = any-motion, 1006 = SGR encoding (no
+   * 223-column limit, unambiguous release button) */
+  printf(track_motion ? "\x1b[?1000h\x1b[?1003h\x1b[?1006h"
+                      : "\x1b[?1000h\x1b[?1006h");
+  fflush(stdout);
+  g_mouse_enabled = 1;
+  ctui_logf(E_INF, "[CTUI:TERM] - mouse reporting on @ tick %d (motion=%d)\n",
+            ctui_tick_advance(), track_motion);
+}
+
 void ctui_shutdown(void) {
   ctui_logf(E_INF, "[CTUI:INIT] - shutting down @ tick %d\n",
             ctui_tick_advance());
@@ -133,6 +145,10 @@ void ctui_shutdown(void) {
    * ctui_gfx_kitty_shm_reap()'s own doc comment. */
   ctui_gfx_kitty_shm_reap();
   ctui_log_shutdown();
+  if (g_mouse_enabled) {
+    printf("\x1b[?1006l\x1b[?1003l\x1b[?1000l");
+    g_mouse_enabled = 0;
+  }
   printf("\x1b[?25h\x1b[?1049l");
   fflush(stdout);
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);

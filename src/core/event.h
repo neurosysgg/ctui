@@ -3,6 +3,8 @@
 
 #include "widget.h"
 
+#include <stdint.h>
+
 typedef enum {
   CTUI_KEY_NONE = 0,
   CTUI_KEY_UP,
@@ -13,12 +15,61 @@ typedef enum {
   CTUI_KEY_ESC,
   CTUI_KEY_TAB,
   CTUI_KEY_CHAR,
+  CTUI_KEY_HOME,
+  CTUI_KEY_END,
+  CTUI_KEY_PGUP,
+  CTUI_KEY_PGDN,
+  CTUI_KEY_INSERT,
+  CTUI_KEY_DELETE,
+  CTUI_KEY_BACKTAB, /* shift+tab */
 } CTUI_KEYTYPE;
+
+/* modifier bits on CTUI_KEYPRESS_EVENT_DATA.mods/CTUI_MOUSE_EVENT_DATA.mods,
+ * as far as the terminal reports them: CSI modifier params (ctrl+up =
+ * "\x1b[1;5A"), ESC-prefixed bytes (alt+x), and SGR mouse button bits.
+ * Plain ctrl+letter still arrives as CTUI_KEY_CHAR with the raw control
+ * byte (0x01-0x1a) in ch and no CTRL bit, same as it always has. */
+enum {
+  CTUI_MOD_SHIFT = 1 << 0,
+  CTUI_MOD_ALT = 1 << 1,
+  CTUI_MOD_CTRL = 1 << 2,
+};
 
 typedef struct {
   CTUI_KEYTYPE type;
-  char ch;
+  uint32_t ch; /* the typed Unicode codepoint, for CTUI_KEY_CHAR (decoded
+                * from however many UTF-8 bytes the terminal sent); plain
+                * char comparisons work as-is for ASCII */
+  unsigned int mods; /* CTUI_MOD_* */
 } CTUI_KEYPRESS_EVENT_DATA;
+
+typedef enum {
+  CTUI_MOUSE_PRESS,
+  CTUI_MOUSE_RELEASE,
+  CTUI_MOUSE_MOTION, /* only reported after ctui_mouse_enable(1) */
+  CTUI_MOUSE_SCROLL_UP,
+  CTUI_MOUSE_SCROLL_DOWN,
+} CTUI_MOUSE_ACTION;
+
+typedef struct {
+  CTUI_MOUSE_ACTION action;
+  int button; /* 0 left, 1 middle, 2 right; -1 for motion with nothing
+               * held and for scroll */
+  int row, col; /* 0-based absolute screen cell -- test against a widget
+                 * with ctui_widget_contains() */
+  unsigned int mods; /* CTUI_MOD_* */
+} CTUI_MOUSE_EVENT_DATA;
+
+/* readiness bits for ctui_io_watch() (core/io.h) */
+enum {
+  CTUI_IO_READ = 1 << 0,
+  CTUI_IO_WRITE = 1 << 1,
+};
+
+typedef struct {
+  int fd;             /* the watched fd that's ready */
+  unsigned int ready; /* CTUI_IO_READ/CTUI_IO_WRITE bits that are ready */
+} CTUI_IO_EVENT_DATA;
 
 typedef struct {
   int rows, cols; /* new terminal size */
@@ -59,6 +110,16 @@ typedef enum {
                             * emit one by calling ctui_handle_event() from
                             * within its own handler -- see
                             * ctui_menu_handle_keypress() for the pattern. */
+  CTUI_MOUSE_EVENT, /* SGR mouse report, ev_source "input" -- see
+                     * CTUI_MOUSE_EVENT_DATA. Never emitted until the app
+                     * opts in with ctui_mouse_enable(). Dispatched through
+                     * the registry like a keypress, to every listener:
+                     * each checks ctui_widget_contains() itself. */
+  CTUI_IO_EVENT,    /* a watched fd became ready -- see ctui_io_watch() in
+                     * core/io.h. ev_source "io", event_data is a
+                     * CTUI_IO_EVENT_DATA. Like CTUI_TIMER_EVENT, dispatched
+                     * directly to the watch's own (widget, handler), not
+                     * through the registry. */
   CTUI_DUMMY_EVENT,
 } CTUI_EVENTTYPE;
 
@@ -122,6 +183,13 @@ typedef struct CTUI_EVENT_HANDLER CTUI_EVENT_HANDLER;
 void ctui_event_register(const char *source, CTUI_EVENTTYPE type,
                          CTUI_WIDGET *widget,
                          int (*handler)(CTUI_WIDGET *self, CTUI_EVENT *ev));
+
+/* removes every registration made against widget -- the counterpart for
+ * a widget that goes away at runtime (a dismissed notification, a closed
+ * popup). Safe to call from inside a handler, including the widget's own:
+ * removed entries stop firing immediately, and the registry is compacted
+ * once the outermost ctui_handle_event() returns. */
+void ctui_event_unregister(CTUI_WIDGET *widget);
 
 /* walks the registry built by ctui_event_register(). Under
  * CTUI_EVENT_SCOPE_GLOBAL, calls handler(widget, ev) for every

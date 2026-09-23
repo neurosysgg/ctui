@@ -17,6 +17,14 @@ typedef struct {
   CTUI_EVENT_HANDLER *handlers;
   int handler_count;
   int handler_cap;
+
+  /* 1 (ctui_app_init()'s default) keeps the original behavior: ESC ends
+   * ctui_app_run() before any handler sees it. Set to 0 after
+   * ctui_app_init() for an app where ESC is an ordinary key (a shell, a
+   * launcher) -- it's then dispatched like any other keypress, and the
+   * app ends its run loop with ctui_app_quit() instead. */
+  int quit_on_esc;
+  int quit_requested; /* set by ctui_app_quit(), read by ctui_app_run() */
 } CTUI_APP;
 
 /* app / event loop */
@@ -35,11 +43,17 @@ int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
                   int cols);
 void ctui_app_free(CTUI_APP *app); /* frees app->comp and app->handlers */
 void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen);
-/* blocks until ESC; tick_ms is passed straight through to
+/* blocks until ESC (see quit_on_esc) or ctui_app_quit(); tick_ms is
+ * passed straight through to
  * ctui_input_loop() -- <= 0 means "block on input only" (unchanged
  * behavior), > 0 also wakes every tick_ms with no input to dispatch a
  * CTUI_TICK_EVENT through the registry, same as any other event */
 void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms);
+
+/* asks the running app's ctui_app_run() to return once the event currently
+ * being handled finishes (same frame, no further input read). Callable from
+ * any handler -- event, timer, or fd watch. */
+void ctui_app_quit(void);
 
 /* handles a terminal resize: reallocates app->comp and screen to rows x
  * cols (ctui_compositor_resize()/ctui_screen_resize()), re-runs

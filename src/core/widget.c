@@ -66,6 +66,11 @@ void ctui_widget_init(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp) {
             widget->w, widget->h);
 }
 
+int ctui_widget_contains(const CTUI_WIDGET *widget, int row, int col) {
+  return row >= widget->y && row < widget->y + widget->h && col >= widget->x &&
+         col < widget->x + widget->w;
+}
+
 /* shared bounds-checking/resolution for every putc variant below -- widget
  * not bound, out of widget bounds, or out of compositor bounds all log +
  * return NULL rather than write anywhere */
