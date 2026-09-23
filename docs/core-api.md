@@ -75,7 +75,8 @@ one Unicode codepoint (`uint32_t`); a width-2 glyph (CJK, emoji) takes
 its own cell plus a `CTUI_CELL_CONT` cell to its right, which
 `ctui_screen_flush()` skips since the terminal already advanced past
 it.
-`CTUI_COLOR_MODE_BASIC/256/RGB` says how `fg`/`bg` should be read —
+`CTUI_COLOR_MODE_BASIC/256/RGB/RGB_FG` says how `fg`/`bg` should be
+read (`RGB_FG`: a 24-bit fg over a basic `bg`) —
 independent of `CTUI_GFX_MODE` (`gfx.h`), which is what the *terminal
 session* negotiated, not how one cell is encoded. No functions here,
 just the type and the `CTUI_COLOR_*` basic-color enum.
@@ -111,6 +112,15 @@ their base glyphs.
   remove a Kitty pixel-graphics image directly to stdout, bypassing
   `CTUI_CELL` entirely. Only called from a widget's `gfx_render`
   (see `widget.h` below) — never call these from an ordinary `render()`.
+- `ctui_gfx_kitty_place_file(image_id, path, cols, rows)` — the other
+  way to show a Kitty image: the terminal loads a PNG from `path` itself
+  (`f=100,t=f`) as a *virtual placement* (`U=1`), shown wherever cells
+  hold `CTUI_GFX_KITTY_PLACEHOLDER` (U+10EEEE) with the id as their fg —
+  see `ctui_widget_put_kitty_placeholder()` below. Unlike
+  `ctui_gfx_kitty_display()` this is safe from a plain `render()`: the
+  image *is* text cells, so it moves, clips and clears with the rest of
+  the widget, and one widget can mix icons and text. Batched like every
+  Kitty escape; ids up to 24 bits.
 
 ## `screen.h` — `CTUI_SCREEN`
 
@@ -174,6 +184,11 @@ ever set; every other widget leaves both `NULL`.
   outside the widget's bounds or before `ctui_widget_init()` has run.
   `_256`/`_rgb` variants exist for richer color (see `cell.h`'s
   `CTUI_COLOR_MODE_*`) — opt-in per call site, not per widget.
+  `ctui_widget_putc_rgb_fg()` is a truecolor fg over a basic bg.
+- `ctui_widget_put_kitty_placeholder(widget, comp, row, col, image_id,
+  cols, bg)` — `cols` placeholder cells showing an image placed with
+  `ctui_gfx_kitty_place_file()`, one row high (taller needs per-cell
+  diacritics a one-codepoint `CTUI_CELL` can't hold).
 - `ctui_widget_contains(widget, row, col)` — hit test of an absolute
   cell against `x/y/w/h`, for `CTUI_MOUSE_EVENT_DATA`.
 - `ctui_widget_tick_advance(widget)` — per-widget frame counter, for

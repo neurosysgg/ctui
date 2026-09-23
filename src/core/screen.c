@@ -122,10 +122,15 @@ static int ansi_bg_code(unsigned char c) {
 }
 
 /* whichever fields matter for a cell's color_mode -- BASIC and 256 both
- * key off plain fg/bg (just different index spaces), RGB off fg_r../bg_r.. */
+ * key off plain fg/bg (just different index spaces), RGB off fg_r../bg_r..,
+ * RGB_FG off fg_r.. and plain bg */
 static int ctui_compare_ctuicell(CTUI_CELL *lhs, CTUI_CELL *rhs) {
   if (lhs->ch != rhs->ch || lhs->color_mode != rhs->color_mode) {
     return 0;
+  }
+  if (lhs->color_mode == CTUI_COLOR_MODE_RGB_FG) {
+    return lhs->fg_r == rhs->fg_r && lhs->fg_g == rhs->fg_g &&
+           lhs->fg_b == rhs->fg_b && lhs->bg == rhs->bg;
   }
   if (lhs->color_mode == CTUI_COLOR_MODE_RGB) {
     return lhs->fg_r == rhs->fg_r && lhs->fg_g == rhs->fg_g &&
@@ -142,6 +147,10 @@ static int color_changed(const CTUI_CELL *cur, const CTUI_CELL *last) {
   if (cur->color_mode != last->color_mode) {
     return 1;
   }
+  if (cur->color_mode == CTUI_COLOR_MODE_RGB_FG) {
+    return cur->fg_r != last->fg_r || cur->fg_g != last->fg_g ||
+           cur->fg_b != last->fg_b || cur->bg != last->bg;
+  }
   if (cur->color_mode == CTUI_COLOR_MODE_RGB) {
     return cur->fg_r != last->fg_r || cur->fg_g != last->fg_g ||
           cur->fg_b != last->fg_b || cur->bg_r != last->bg_r ||
@@ -157,6 +166,11 @@ static size_t emit_color(char *out, size_t cap, size_t len,
     return len + (size_t)snprintf(out + len, cap - len,
                                   "\x1b[38;5;%d;48;5;%dm", cell->fg,
                                   cell->bg);
+  case CTUI_COLOR_MODE_RGB_FG:
+    return len + (size_t)snprintf(out + len, cap - len,
+                                  "\x1b[38;2;%d;%d;%d;%dm", cell->fg_r,
+                                  cell->fg_g, cell->fg_b,
+                                  ansi_bg_code(cell->bg));
   case CTUI_COLOR_MODE_RGB:
     return len +
           (size_t)snprintf(out + len, cap - len,

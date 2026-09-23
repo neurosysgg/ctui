@@ -232,6 +232,21 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Kitty images as text cells** (2026-09-23, for ctui-wm's tray,
+      window list and dock icons, where icons and labels share a row):
+      `ctui_gfx_kitty_place_file()` has kitty load a PNG by path
+      (`a=T,U=1,f=100,t=f`, a virtual placement), and
+      `ctui_widget_put_kitty_placeholder()` shows it as U+10EEEE cells
+      whose 24-bit fg is the image id (kitty's Unicode placeholders).
+      Needed a new cell mode, `CTUI_COLOR_MODE_RGB_FG` (truecolor fg,
+      basic bg: an RGB cell would force an explicit background under a
+      transparent icon), with `ctui_widget_putc_rgb_fg()`. The existing
+      `gfx_render`/`ctui_gfx_kitty_display()` path stays for whole-widget
+      pixel content; this one needs no after-flush pass or delete
+      bookkeeping. One row per image. Verified in kitty 0.48.2 (ctui-wm's
+      zones); tests in `screen_test.c`, `widget_test.c`,
+      `kitty_protocol_test.c` (the escape's wire format).
+
 - [x] **Focus events** (2026-09-23, for ctui-wm's tray menu popup,
       which closes when the user clicks outside it):
       `ctui_focus_enable()` turns on the terminal's focus reporting

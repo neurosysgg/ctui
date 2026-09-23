@@ -107,6 +107,26 @@ static void test_puts_and_color_modes(void) {
                    "puts_rgb() writes each character via putc_rgb() in "
                    "sequence");
 
+  ctui_widget_putc_rgb_fg(&w, comp, 0, 5, 'f', 7, 8, 9, CTUI_COLOR_BLUE);
+  CTUI_CELL *fg_cell = &comp->cells[5];
+  CTUI_TEST_ASSERT(fg_cell->color_mode == CTUI_COLOR_MODE_RGB_FG &&
+                       fg_cell->fg_r == 7 && fg_cell->fg_g == 8 &&
+                       fg_cell->fg_b == 9 && fg_cell->bg == CTUI_COLOR_BLUE,
+                   "putc_rgb_fg() tags the cell CTUI_COLOR_MODE_RGB_FG: "
+                   "24-bit fg, basic bg");
+
+  ctui_widget_put_kitty_placeholder(&w, comp, 1, 10, 0x123456, 2,
+                                    CTUI_COLOR_DEFAULT);
+  CTUI_CELL *p0 = &comp->cells[1 * 20 + 10], *p1 = p0 + 1;
+  CTUI_TEST_ASSERT(p0->ch == CTUI_GFX_KITTY_PLACEHOLDER &&
+                       p1->ch == CTUI_GFX_KITTY_PLACEHOLDER &&
+                       p0->color_mode == CTUI_COLOR_MODE_RGB_FG &&
+                       p0->fg_r == 0x12 && p0->fg_g == 0x34 &&
+                       p0->fg_b == 0x56 && p1->fg_b == 0x56 &&
+                       p0[2].ch != CTUI_GFX_KITTY_PLACEHOLDER,
+                   "put_kitty_placeholder() writes cols U+10EEEE cells, the "
+                   "image id as their fg");
+
   ctui_compositor_free(comp);
 }
 

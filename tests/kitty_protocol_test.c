@@ -40,6 +40,13 @@ extern int ctui_gfx_kitty_apc_span(const char *buf, size_t len,
 extern int ctui_gfx_kitty_reply_is_ok(const char *buf, size_t len,
                                       unsigned int image_id);
 
+/* same gray-box arrangement: ctui_gfx_kitty_place_file()'s escape
+ * formatter, so its wire format is checkable without a terminal */
+extern size_t ctui_gfx_kitty_place_file_escape(char *out, size_t cap,
+                                               unsigned int image_id,
+                                               const char *path, int cols,
+                                               int rows);
+
 static void noop_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   (void)self;
   (void)comp;
@@ -250,6 +257,28 @@ static void test_kitty_apc_span(void) {
                    "apc_span() rejects a NULL/empty buffer");
 }
 
+static void test_place_file_escape(void) {
+  char out[256];
+  size_t n = ctui_gfx_kitty_place_file_escape(out, sizeof out, 7, "/i.png", 2,
+                                              1);
+  const char *want = "\x1b_Ga=T,U=1,f=100,t=f,i=7,c=2,r=1,q=2;L2kucG5n\x1b\\";
+  CTUI_TEST_ASSERT(n == strlen(want) && memcmp(out, want, n) == 0,
+                   "place_file: transmit + virtual placement (U=1) of a PNG "
+                   "by path (f=100,t=f), the path base64'd");
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_place_file_escape(out, sizeof out, 0, "/i.png", 2, 1) ==
+              0 &&
+          ctui_gfx_kitty_place_file_escape(out, sizeof out, 0x1000000,
+                                           "/i.png", 2, 1) == 0 &&
+          ctui_gfx_kitty_place_file_escape(out, sizeof out, 7, "", 2, 1) ==
+              0 &&
+          ctui_gfx_kitty_place_file_escape(out, sizeof out, 7, "/i.png", 0,
+                                           1) == 0 &&
+          ctui_gfx_kitty_place_file_escape(out, 20, 7, "/i.png", 2, 1) == 0,
+      "place_file refuses id 0, an id past 24 bits (placeholders carry it "
+      "in an RGB fg), an empty path, no cells, a buffer too small");
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -258,6 +287,7 @@ int main(void) {
   test_app_init_validation();
   test_kitty_shm_reply_parsing();
   test_kitty_apc_span();
+  test_place_file_escape();
 
   return ctui_test_summary();
 }

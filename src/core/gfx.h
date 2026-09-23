@@ -107,6 +107,25 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
  * bytes go through the Phase 5 batch buffer, not a direct write(). */
 void ctui_gfx_kitty_delete(unsigned int image_id);
 
+/* the Kitty protocol's Unicode placeholder: a cell holding it (fg = the
+ * image id) shows that cell's slice of the image's virtual placement --
+ * see ctui_widget_put_kitty_placeholder() (widget.h) */
+#define CTUI_GFX_KITTY_PLACEHOLDER 0x10EEEEu
+
+/* has the terminal load the PNG at path (an absolute path the terminal
+ * process can read; it decodes the file itself) as image_id, with a
+ * virtual placement cols x rows cells big (a=T,U=1,f=100,t=f): nothing
+ * shows until cells hold CTUI_GFX_KITTY_PLACEHOLDER with that id. Unlike
+ * ctui_gfx_kitty_display(), no pixels pass through here and nothing has to
+ * run after the text flush: a widget draws the placeholders in its plain
+ * render(), and the image scales into however many cells they cover.
+ * Re-placing the same id replaces the image. Batched like every Kitty
+ * escape (ctui_gfx_kitty_flush()); only call it once CTUI_GFX_KITTY was
+ * negotiated. No-op (logs E_WRN) if stdout isn't a real terminal, the id
+ * doesn't fit 24 bits or the path is too long. */
+void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
+                               int cols, int rows);
+
 /* issues the one real write() for every Kitty escape batched this frame
  * by ctui_gfx_kitty_display()/ctui_gfx_kitty_delete() (kitty_batch_append(),
  * core/gfx.c), then resets the batch for the next frame. Collapses what

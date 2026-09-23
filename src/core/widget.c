@@ -211,6 +211,33 @@ void ctui_widget_puts_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   widget_puts_styled(widget, comp, row, col, str, &style);
 }
 
+void ctui_widget_putc_rgb_fg(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
+                             int row, int col, uint32_t ch, unsigned char fg_r,
+                             unsigned char fg_g, unsigned char fg_b,
+                             unsigned char bg) {
+  CTUI_CELL style = {.fg_r = fg_r,
+                     .fg_g = fg_g,
+                     .fg_b = fg_b,
+                     .bg = bg,
+                     .color_mode = CTUI_COLOR_MODE_RGB_FG};
+  widget_put(widget, comp, row, col, ch, &style);
+}
+
+void ctui_widget_put_kitty_placeholder(CTUI_WIDGET *widget,
+                                       CTUI_COMPOSITOR *comp, int row, int col,
+                                       unsigned int image_id, int cols,
+                                       unsigned char bg) {
+  /* the id rides in the fg color; without row/column diacritics kitty
+   * takes row 0 and counts columns up from 0 along the run */
+  for (int i = 0; i < cols; i++) {
+    ctui_widget_putc_rgb_fg(widget, comp, row, col + i,
+                            CTUI_GFX_KITTY_PLACEHOLDER,
+                            (unsigned char)(image_id >> 16),
+                            (unsigned char)(image_id >> 8),
+                            (unsigned char)image_id, bg);
+  }
+}
+
 void ctui_widget_set_gfx_renderer(CTUI_WIDGET *widget, unsigned int mode,
                                   void (*render)(CTUI_WIDGET *self,
                                                  CTUI_COMPOSITOR *comp)) {

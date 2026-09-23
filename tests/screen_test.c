@@ -155,6 +155,24 @@ static void test_flush_256_and_rgb(void) {
       "a single changed RGB channel is enough for the shadow-buffer diff "
       "to treat the cell as changed and repaint it");
 
+  s->cells[0] = (CTUI_CELL){.ch = 'F',
+                            .bg = CTUI_COLOR_BLUE,
+                            .color_mode = CTUI_COLOR_MODE_RGB_FG,
+                            .fg_r = 1,
+                            .fg_g = 2,
+                            .fg_b = 3};
+  capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(strcmp(out, "\x1b[1;1H\x1b[38;2;1;2;3;44mF\x1b[0m") == 0,
+                   "flush emits a truecolor fg with a basic bg code for a "
+                   "CTUI_COLOR_MODE_RGB_FG cell");
+  n = capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(n == strlen("\x1b[0m"),
+                   "an unchanged RGB_FG cell is skipped on the next flush");
+  s->cells[0].bg = CTUI_COLOR_DEFAULT;
+  capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(strcmp(out, "\x1b[1;1H\x1b[38;2;1;2;3;49mF\x1b[0m") == 0,
+                   "... a changed bg alone repaints it");
+
   ctui_screen_free(s);
 }
 

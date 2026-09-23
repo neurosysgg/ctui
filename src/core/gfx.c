@@ -669,3 +669,57 @@ void ctui_gfx_kitty_delete(unsigned int image_id) {
   ctui_logf(E_INF, "[CTUI:GFX] - kitty_delete @ tick %d (id=%u)\n",
             ctui_tick_advance(), image_id);
 }
+
+/* longest path ctui_gfx_kitty_place_file() takes: PATH_MAX-ish, and kitty
+ * reads t=f paths from a single escape */
+#define CTUI_KITTY_PATH_MAX 4096
+
+/* the escape ctui_gfx_kitty_place_file() batches, into out (cap bytes);
+ * its length, or 0 if it doesn't fit or the arguments are unusable.
+ * Non-static only so tests/kitty_protocol_test.c can check the wire format
+ * without a terminal (same gray-box arrangement as
+ * ctui_gfx_kitty_reply_is_ok()); not in gfx.h. */
+size_t ctui_gfx_kitty_place_file_escape(char *out, size_t cap,
+                                        unsigned int image_id, const char *path,
+                                        int cols, int rows) {
+  size_t path_len = path ? strlen(path) : 0;
+  if (image_id == 0 || image_id > 0xFFFFFFu || path_len == 0 ||
+      path_len > CTUI_KITTY_PATH_MAX || cols < 1 || rows < 1) {
+    return 0;
+  }
+  int n = snprintf(out, cap, "\x1b_Ga=T,U=1,f=100,t=f,i=%u,c=%d,r=%d,q=2;",
+                   image_id, cols, rows);
+  if (n < 0 || (size_t)n + ctui_util_base64_len(path_len) + 3 > cap) {
+    return 0;
+  }
+  size_t len = (size_t)n;
+  len += ctui_util_base64_encode((const unsigned char *)path, path_len,
+                                 out + len, cap - len);
+  memcpy(out + len, "\x1b\\", 2);
+  return len + 2;
+}
+
+void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
+                               int cols, int rows) {
+  if (!isatty(STDOUT_FILENO)) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty_place_file rejected @ tick %d, stdout "
+              "isn't a real terminal\n",
+              ctui_tick_advance());
+    return;
+  }
+  char out[64 + (CTUI_KITTY_PATH_MAX + 2) / 3 * 4];
+  size_t n = ctui_gfx_kitty_place_file_escape(out, sizeof out, image_id, path,
+                                              cols, rows);
+  if (n == 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty_place_file rejected @ tick %d (id=%u, "
+              "%dx%d)\n",
+              ctui_tick_advance(), image_id, cols, rows);
+    return;
+  }
+  kitty_batch_append(out, n);
+  ctui_logf(E_INF,
+            "[CTUI:GFX] - kitty_place_file @ tick %d (id=%u, %dx%d) %s\n",
+            ctui_tick_advance(), image_id, cols, rows, path);
+}

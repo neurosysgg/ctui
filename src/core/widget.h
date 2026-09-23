@@ -170,6 +170,27 @@ void ctui_widget_puts_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           unsigned char bg_r, unsigned char bg_g,
                           unsigned char bg_b);
 
+/* a 24-bit fg over a basic CTUI_COLOR_* bg (CTUI_COLOR_MODE_RGB_FG): for a
+ * truecolor foreground that should keep the widget's usual background
+ * rather than paint an explicit RGB one. */
+void ctui_widget_putc_rgb_fg(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
+                             int row, int col, uint32_t ch, unsigned char fg_r,
+                             unsigned char fg_g, unsigned char fg_b,
+                             unsigned char bg);
+
+/* shows a Kitty image already placed with ctui_gfx_kitty_place_file()
+ * (gfx.h) as cols cells at (row, col): each is CTUI_GFX_KITTY_PLACEHOLDER
+ * with image_id (1..0xFFFFFF) as its 24-bit fg, over bg. Being ordinary
+ * cells, the image moves, clips and clears with the widget's text -- no
+ * gfx_render/ctui_gfx_kitty_delete() bookkeeping. One row only: taller
+ * images need per-cell row diacritics, which a one-codepoint CTUI_CELL
+ * can't hold. Only meaningful once CTUI_GFX_KITTY was negotiated; any
+ * other terminal shows its fallback glyph for U+10EEEE. */
+void ctui_widget_put_kitty_placeholder(CTUI_WIDGET *widget,
+                                       CTUI_COMPOSITOR *comp, int row, int col,
+                                       unsigned int image_id, int cols,
+                                       unsigned char bg);
+
 /* opts widget into a non-degradable graphics protocol (currently just
  * CTUI_GFX_KITTY, core/gfx.h) instead of the three text tiers every
  * widget gets from ctui_widget_make() by default. mode must be exactly

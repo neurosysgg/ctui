@@ -21,7 +21,7 @@ typedef struct {
    * every existing (CTUI_CELL){.fg = CTUI_COLOR_YELLOW, ...} literal keeps
    * meaning exactly what it always has. */
   unsigned char color_mode;
-  unsigned char fg_r, fg_g, fg_b; /* used only when color_mode == RGB */
+  unsigned char fg_r, fg_g, fg_b; /* used only when color_mode == RGB(_FG) */
   unsigned char bg_r, bg_g, bg_b;
 } CTUI_CELL;
 
@@ -45,6 +45,10 @@ enum {
   CTUI_COLOR_MODE_BASIC = 0, /* fg/bg are CTUI_COLOR_* indices, as above */
   CTUI_COLOR_MODE_256,       /* fg/bg are a 0-255 ANSI 256-color index */
   CTUI_COLOR_MODE_RGB,       /* fg_r/g/b, bg_r/g/b are used instead */
+  CTUI_COLOR_MODE_RGB_FG,    /* fg_r/g/b over a basic bg: a truecolor fg
+                              * that keeps the widget's own background
+                              * (e.g. a Kitty image placeholder, whose fg
+                              * *is* the image id -- gfx.h) */
 };
 
 #endif
