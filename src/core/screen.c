@@ -1,6 +1,7 @@
 #include "screen.h"
 
 #include "log.h"
+#include "utf8.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,23 +74,31 @@ void ctui_screen_clear(CTUI_SCREEN *s) {
   }
 }
 
-void ctui_screen_putc(CTUI_SCREEN *s, int row, int col, char ch,
+static int screen_put(CTUI_SCREEN *s, int row, int col, uint32_t ch,
                       unsigned char fg, unsigned char bg) {
   if (row < 0 || row >= s->rows || col < 0 || col >= s->cols) {
     ctui_logf(E_WRN,
               "[CTUI:SCREEN] - putc out of bounds @ tick %d (row=%d, col=%d, "
               "size=%dx%d)\n",
               ctui_tick_advance(), row, col, s->cols, s->rows);
-    return;
+    return ctui_utf8_cpwidth(ch);
   }
   ctui_logf(E_DBG,
-            "[CTUI:SCREEN] - putc @ tick %d (row=%d, col=%d, ch='%c')\n",
+            "[CTUI:SCREEN] - putc @ tick %d (row=%d, col=%d, ch=U+%04X)\n",
             ctui_tick_advance(), row, col, ch);
-  CTUI_CELL *cell = &s->cells[row * s->cols + col];
-  cell->ch = ch;
-  cell->bg = bg;
-  cell->fg = fg;
-  cell->color_mode = CTUI_COLOR_MODE_BASIC;
+  CTUI_CELL *line = &s->cells[row * s->cols];
+  int w = ctui_cell_set_ch(line, s->cols, col, s->cols, ch);
+  for (int i = col; i < col + w; i++) {
+    line[i].fg = fg;
+    line[i].bg = bg;
+    line[i].color_mode = CTUI_COLOR_MODE_BASIC;
+  }
+  return w;
+}
+
+void ctui_screen_putc(CTUI_SCREEN *s, int row, int col, uint32_t ch,
+                      unsigned char fg, unsigned char bg) {
+  screen_put(s, row, col, ch, fg, bg);
 }
 
 void ctui_screen_puts(CTUI_SCREEN *s, int row, int col, const char *str,
@@ -98,8 +107,10 @@ void ctui_screen_puts(CTUI_SCREEN *s, int row, int col, const char *str,
             "[CTUI:SCREEN] - puts @ tick %d (row=%d, col=%d, len=%zu): "
             "\"%s\"\n",
             ctui_tick_advance(), row, col, strlen(str), str);
-  for (int i = 0; str[i] != '\0'; i++) {
-    ctui_screen_putc(s, row, col + i, str[i], fg, bg);
+  while (*str) {
+    uint32_t cp;
+    str += ctui_utf8_decode(str, &cp);
+    col += screen_put(s, row, col, cp, fg, bg);
   }
 }
 
@@ -183,6 +194,12 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
       if (ctui_compare_ctuicell(cur, buf) == 1)
         continue;
 
+      /* the lead cell to its left draws both columns; if the lead
+       * itself didn't change, neither did this (ctui_cell_set_ch() keeps
+       * the pair consistent in both frames) */
+      if (cur->ch == CTUI_CELL_CONT)
+        continue;
+
       if (r != last_row || c != last_col) {
         len +=
             (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dH", r + 1, c + 1);
@@ -193,9 +210,16 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
         last_color = *cur;
       }
 
-      out[len++] = cur->ch;
+      /* never let a raw control byte reach the terminal -- a stray \n or
+       * ESC in cell content would corrupt the whole frame, not just one
+       * cell */
+      uint32_t ch = cur->ch;
+      if (ch < 0x20 || ch == 0x7F || (ch >= 0x80 && ch < 0xA0)) {
+        ch = 0xFFFD;
+      }
+      len += (size_t)ctui_utf8_encode(ch, out + len);
       last_row = r;
-      last_col = c + 1;
+      last_col = c + ctui_utf8_cpwidth(ch);
     }
   }
 

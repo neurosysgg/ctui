@@ -1,28 +1,44 @@
 #include "util.h"
 
 #include "log.h"
+#include "utf8.h"
 
 #include <string.h>
 
 int ctui_util_center_h(char *center_str, char *line, CTUI_CELL fill) {
   size_t str_len = strlen(center_str);
   size_t line_len = strlen(line);
+  size_t str_w = (size_t)ctui_utf8_width(center_str);
 
-  if (str_len > line_len) {
+  if (fill.ch >= 0x80) {
+    ctui_logf(E_WRN,
+              "[CTUI:UTIL] - center_h rejected @ tick %d, fill U+%04X isn't "
+              "ASCII\n",
+              ctui_tick_advance(), fill.ch);
+    return -1;
+  }
+  if (str_w > line_len || str_len > line_len) {
     ctui_logf(E_WRN,
               "[CTUI:UTIL] - center_h rejected @ tick %d, center_str (%zu "
-              "chars) longer than line (%zu chars)\n",
-              ctui_tick_advance(), str_len, line_len);
+              "cols, %zu bytes) doesn't fit line (%zu)\n",
+              ctui_tick_advance(), str_w, str_len, line_len);
     return -1;
   }
 
-  size_t total_pad = line_len - str_len;
+  /* pad by columns, but never write past strlen(line) bytes: multi-byte
+   * glyphs take more bytes than columns, so drop padding from the right
+   * (then the left) until the result fits the caller's buffer */
+  size_t total_pad = line_len - str_w;
+  if (str_len + total_pad > line_len) {
+    total_pad = line_len - str_len;
+  }
   size_t left_pad = total_pad / 2;
   size_t right_pad = total_pad - left_pad;
 
-  memset(line, fill.ch, left_pad);
+  memset(line, (int)fill.ch, left_pad);
   memcpy(line + left_pad, center_str, str_len);
-  memset(line + left_pad + str_len, fill.ch, right_pad);
+  memset(line + left_pad + str_len, (int)fill.ch, right_pad);
+  line[left_pad + str_len + right_pad] = '\0';
 
   ctui_logf(E_DBG,
             "[CTUI:UTIL] - center_h @ tick %d (\"%s\" in %zu-wide line, "
@@ -31,29 +47,45 @@ int ctui_util_center_h(char *center_str, char *line, CTUI_CELL fill) {
   return 0;
 }
 
+int ctui_util_center_col(const char *str, int width) {
+  int w = ctui_utf8_width(str);
+  return w >= width ? 0 : (width - w) / 2;
+}
+
 int ctui_util_truncate_str(char *str, size_t desired, char *trunc) {
   size_t str_len = strlen(str);
   size_t trunc_len = strlen(trunc);
+  size_t str_w = (size_t)ctui_utf8_width(str);
+  size_t trunc_w = (size_t)ctui_utf8_width(trunc);
 
-  if (str_len <= desired) {
+  if (str_w <= desired) {
     return 0;
   }
 
-  if (trunc_len > desired) {
+  if (trunc_w > desired) {
     ctui_logf(E_WRN,
               "[CTUI:UTIL] - truncate_str rejected @ tick %d, trunc (%zu "
-              "chars) longer than desired (%zu chars)\n",
-              ctui_tick_advance(), trunc_len, desired);
+              "cols) wider than desired (%zu cols)\n",
+              ctui_tick_advance(), trunc_w, desired);
     return -1;
   }
 
-  size_t keep = desired - trunc_len;
+  size_t keep = ctui_utf8_prefix(str, (int)(desired - trunc_w), NULL);
+  /* result must fit in str's existing bytes -- only possible to violate
+   * with a trunc whose byte length outgrows the tail it replaces */
+  if (keep + trunc_len > str_len) {
+    ctui_logf(E_WRN,
+              "[CTUI:UTIL] - truncate_str rejected @ tick %d, trunc (%zu "
+              "bytes) doesn't fit in the %zu bytes it would replace\n",
+              ctui_tick_advance(), trunc_len, str_len - keep);
+    return -1;
+  }
   memcpy(str + keep, trunc, trunc_len);
-  str[desired] = '\0';
+  str[keep + trunc_len] = '\0';
 
   ctui_logf(E_DBG,
-            "[CTUI:UTIL] - truncate_str @ tick %d (%zu chars -> %zu chars)\n",
-            ctui_tick_advance(), str_len, desired);
+            "[CTUI:UTIL] - truncate_str @ tick %d (%zu cols -> %zu cols)\n",
+            ctui_tick_advance(), str_w, desired);
   return 0;
 }
 

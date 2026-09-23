@@ -79,37 +79,53 @@ static inline void ctui_test_resize(CTUI_APP *app, CTUI_SCREEN *screen,
   ctui_app_render(app, screen);
 }
 
-/* reads a rendered character straight out of the screen's backing buffer --
- * the same array ctui_screen_flush() diffs against, so this is exactly
- * what would have hit the real terminal. '\0' if out of bounds. */
-static inline char ctui_test_cell(CTUI_SCREEN *screen, int row, int col) {
+/* reads a rendered codepoint straight out of the screen's backing buffer
+ * -- the same array ctui_screen_flush() diffs against, so this is exactly
+ * what would have hit the real terminal. Plain char literals compare fine
+ * for ASCII. CTUI_CELL_CONT for the right half of a wide glyph, 0 if out
+ * of bounds. */
+static inline uint32_t ctui_test_cell(CTUI_SCREEN *screen, int row, int col) {
   if (row < 0 || row >= screen->rows || col < 0 || col >= screen->cols) {
-    return '\0';
+    return 0;
   }
   return screen->cells[row * screen->cols + col].ch;
 }
 
-/* true if `needle` appears verbatim anywhere in `row` (cell-by-cell -- a
- * screen row isn't a NUL-terminated string). The common-case assertion:
- * "does this row show the text I expect", without caring about exact
- * column or trailing padding. */
+/* true if UTF-8 needle's glyphs occupy line[start..] exactly -- a wide
+ * glyph matches its lead cell plus the CTUI_CELL_CONT after it, i.e. how
+ * ctui_widget_puts() would have laid it out */
+static inline int ctui_test_match_at(const CTUI_CELL *line, int cols,
+                                     int start, const char *needle) {
+  int col = start;
+  while (*needle) {
+    uint32_t cp;
+    needle += ctui_utf8_decode(needle, &cp);
+    if (col >= cols || line[col].ch != cp) {
+      return 0;
+    }
+    col++;
+    if (ctui_utf8_cpwidth(cp) == 2) {
+      if (col >= cols || line[col].ch != CTUI_CELL_CONT) {
+        return 0;
+      }
+      col++;
+    }
+  }
+  return 1;
+}
+
+/* true if UTF-8 `needle` appears verbatim anywhere in `row` (cell-by-cell
+ * -- a screen row isn't a NUL-terminated string). The common-case
+ * assertion: "does this row show the text I expect", without caring
+ * about exact column or trailing padding. */
 static inline int ctui_test_row_contains(CTUI_SCREEN *screen, int row,
                                           const char *needle) {
-  if (row < 0 || row >= screen->rows) {
+  if (row < 0 || row >= screen->rows || needle[0] == '\0') {
     return 0;
   }
-  size_t needle_len = strlen(needle);
-  if (needle_len == 0 || needle_len > (size_t)screen->cols) {
-    return 0;
-  }
-  for (int col = 0; col <= screen->cols - (int)needle_len; col++) {
-    size_t i = 0;
-    for (; i < needle_len; i++) {
-      if (screen->cells[row * screen->cols + col + i].ch != needle[i]) {
-        break;
-      }
-    }
-    if (i == needle_len) {
+  const CTUI_CELL *line = &screen->cells[row * screen->cols];
+  for (int start = 0; start < screen->cols; start++) {
+    if (ctui_test_match_at(line, screen->cols, start, needle)) {
       return 1;
     }
   }

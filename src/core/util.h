@@ -14,17 +14,31 @@
 
 /* centers center_str within line in place, using line's current strlen() as
  * the target width (so line is expected to already be padded/allocated to
- * that width by the caller). Pads both sides with fill.ch; fill.fg/fill.bg
- * are accepted for symmetry with other CTUI_CELL-based APIs but unused
- * here, since line is a plain string, not a cell buffer. Fails if
- * center_str is longer than line -- truncate it first with
- * ctui_util_truncate_str() if it might not fit. */
+ * that width by the caller, with ASCII). Never writes more than
+ * strlen(line) bytes, whatever center_str contains. Centers by display
+ * columns when that fits; a multi-byte (UTF-8) center_str takes more bytes
+ * than columns, so its padding shrinks until it fits line's bytes, leaving
+ * it left of center. For exact UTF-8 centering without a string buffer, use
+ * ctui_util_center_col() and draw at that column instead. Pads with
+ * fill.ch, which must be ASCII; fill.fg/fill.bg are accepted for symmetry
+ * with other CTUI_CELL-based APIs but unused here, since line is a plain
+ * string, not a cell buffer. Fails if center_str is wider (or longer in
+ * bytes) than line -- truncate it first with ctui_util_truncate_str() if
+ * it might not fit. */
 int ctui_util_center_h(char *center_str, char *line, CTUI_CELL fill);
 
-/* truncates str in place to desired chars total, replacing its tail with
- * trunc (e.g. "...", ">>") so the result is exactly desired chars long.
- * No-op if str already fits within desired. Fails if trunc itself is longer
- * than desired. */
+/* the column at which str starts when centered in width columns (0 if it's
+ * as wide or wider) -- measured with ctui_utf8_width(), so correct for any
+ * UTF-8. Pair with ctui_widget_puts(..., col, str, ...). */
+int ctui_util_center_col(const char *str, int width);
+
+/* truncates UTF-8 str in place to at most desired display columns,
+ * replacing its tail with trunc (e.g. "...", ">>") -- never splitting a
+ * codepoint. Exactly desired columns wide unless a wide glyph would have
+ * straddled the cut, in which case one narrower. No-op if str already
+ * fits within desired. Fails if trunc itself is wider than desired, or if
+ * trunc's bytes wouldn't fit in the bytes it replaces (only possible with
+ * a multi-byte trunc like "…" on a short tail). */
 int ctui_util_truncate_str(char *str, size_t desired, char *trunc);
 
 /* linearly rescales value from [in_min, in_max] to [out_min, out_max],

@@ -4,6 +4,7 @@
 #include "compositor.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 typedef struct CTUI_WIDGET CTUI_WIDGET;
 
@@ -124,9 +125,14 @@ void ctui_widget_init(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp);
 /* writes into widget's slice of comp, at (row, col) local to the widget (0,0
  * = widget's top left). Rejects (logs + no-op) writes outside the widget's
  * declared w/h, writes past comp's bounds, or widgets never bound via
- * ctui_widget_init(). */
+ * ctui_widget_init(). ch is a Unicode codepoint (plain char literals work
+ * as-is for ASCII); a width-2 glyph also claims the cell to its right
+ * (see CTUI_CELL_CONT in cell.h) and is clipped to a space if that cell
+ * would fall outside the widget. Zero-width codepoints are dropped. puts
+ * takes UTF-8 and advances by each glyph's column width, not its byte
+ * count -- use ctui_utf8_width() to measure a string first. */
 void ctui_widget_putc(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
-                      int col, char ch, unsigned char fg, unsigned char bg);
+                      int col, uint32_t ch, unsigned char fg, unsigned char bg);
 void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                       int col, const char *str, unsigned char fg,
                       unsigned char bg);
@@ -138,7 +144,7 @@ void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
  * CTUI_GFX_ANSI256 via ctui_init(); nothing at this layer enforces that
  * yet (see GFX_DESIGN.md's Phase 4, deferred). */
 void ctui_widget_putc_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
-                          int col, char ch, unsigned char fg256,
+                          int col, uint32_t ch, unsigned char fg256,
                           unsigned char bg256);
 void ctui_widget_puts_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           int col, const char *str, unsigned char fg256,
@@ -150,7 +156,7 @@ void ctui_widget_puts_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
  * least CTUI_GFX_TRUECOLOR via ctui_init(); nothing at this layer enforces
  * that yet (see GFX_DESIGN.md's Phase 4, deferred). */
 void ctui_widget_putc_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
-                          int col, char ch, unsigned char fg_r,
+                          int col, uint32_t ch, unsigned char fg_r,
                           unsigned char fg_g, unsigned char fg_b,
                           unsigned char bg_r, unsigned char bg_g,
                           unsigned char bg_b);

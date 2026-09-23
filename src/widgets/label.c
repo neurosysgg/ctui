@@ -8,10 +8,13 @@ void ctui_label_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   ctui_logf(E_INF, "[CTUI:LABEL] - rendering @ tick %d (%dx%d): \"%s\"\n",
             ctui_tick_advance(), self->w, self->h, label->text);
 
-  char line[self->w + 1];
-  memset(line, ' ', (size_t)self->w);
-  line[self->w] = '\0';
-  ctui_util_center_h(label->text, line, (CTUI_CELL){.ch = ' '});
-
-  ctui_widget_puts(self, comp, row, 0, line, label->fg, label->bg);
+  /* text wider than the label is clipped to what fits (it used to be
+   * dropped entirely -- center_h rejected it and the row stayed blank) */
+  int width;
+  size_t n = ctui_utf8_prefix(label->text, self->w, &width);
+  char fit[n + 1];
+  memcpy(fit, label->text, n);
+  fit[n] = '\0';
+  ctui_widget_puts(self, comp, row, (self->w - width) / 2, fit, label->fg,
+                   label->bg);
 }

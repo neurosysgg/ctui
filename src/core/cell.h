@@ -1,8 +1,18 @@
 #ifndef CTUI_CELL_H
 #define CTUI_CELL_H
 
+#include <stdint.h>
+
+/* marks the right half of a width-2 glyph: the cell immediately left of
+ * it holds the glyph itself. Never a valid codepoint (> U+10FFFF), and
+ * outside 0xFFFFFF80-0xFFFFFFFF too, which is where a sign-extended
+ * (char) byte passed to a putc lands -- so it can't collide with content. ctui_screen_flush() emits nothing for
+ * it, since the terminal already advanced past it drawing the lead cell;
+ * core/utf8.c's ctui_cell_set_ch() keeps lead and CONT paired. */
+#define CTUI_CELL_CONT ((uint32_t)0x80000000u)
+
 typedef struct {
-  char ch;
+  uint32_t ch; /* one Unicode codepoint, or CTUI_CELL_CONT */
   unsigned char fg;
   unsigned char bg;
 

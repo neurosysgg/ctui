@@ -4,6 +4,7 @@
 #include "cell.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 typedef struct {
   int rows, cols;
@@ -19,7 +20,7 @@ typedef struct {
 CTUI_SCREEN *ctui_screen_create(int rows, int cols);
 void ctui_screen_free(CTUI_SCREEN *s);
 void ctui_screen_clear(CTUI_SCREEN *s);
-void ctui_screen_putc(CTUI_SCREEN *s, int row, int col, char ch,
+void ctui_screen_putc(CTUI_SCREEN *s, int row, int col, uint32_t ch,
                       unsigned char fg, unsigned char bg);
 void ctui_screen_puts(CTUI_SCREEN *s, int row, int col, const char *str,
                       unsigned char fg, unsigned char bg);

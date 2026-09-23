@@ -11,9 +11,9 @@ typedef struct {
 
   /* Kitty pixel tier only -- see ctui_border_kitty_gfx_render()'s doc
    * comment for why these have no equivalent in the ANSI16/256/TRUECOLOR
-   * text render above: CTUI_CELL.ch is a single byte, so a text-tier
-   * corner is always exactly one glyph, and there's no smaller-than-a-
-   * cell shape a text renderer can draw. A pixel renderer has neither
+   * text render above: a text-tier corner is always exactly one glyph
+   * in one cell, and there's no smaller-than-a-cell shape a text
+   * renderer can draw. A pixel renderer has neither
    * limit, so rounding and a soft two-tone stroke are opt-in here without
    * touching the text path at all. */
   int rounded; /* 0 = square corners (default), nonzero = rounded */
