@@ -159,13 +159,14 @@ else.
   under `src/core/`, in dependency order.
 - `src/core/` — the core engine, one `.c`/`.h` pair per subsystem (screen
   buffer, compositor, widget lifecycle, groups, splits, event registry,
-  terminal I/O, string-layout utilities, logging) plus a private
+  terminal I/O, fd watches, UTF-8, string-layout utilities, logging)
+  plus a private
   `ctui_internal.h` for the handful of statics (`g_app`,
   `g_resize_pending`) shared only between core translation units. Has no
   knowledge of any specific widget.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
   `menu`, `status`, `debug_info`, `dump_palette`, `grid`, `list`,
-  `periodic`, `kitty_image`), each a small `.c`/`.h` pair built entirely
+  `periodic`, `kitty_image`, `clock`), each a small `.c`/`.h` pair built entirely
   on the public `ctui.h` API.
 - `examples_apps/` — real, runnable ctui apps, one subfolder each
   (`examples_apps/<name>/main.c` + an optional local `widgets/`):
@@ -246,7 +247,12 @@ else.
   like `clock` can redraw without waiting on a keypress. `tick_ms <= 0`
   is the original blocking-on-input-only behavior.
 - **Terminal I/O**: raw ANSI/terminfo escapes via termios, no external
-  dependencies.
+  dependencies. Text is UTF-8 (cells hold codepoints, wide glyphs span
+  two cells); input decodes full CSI sequences, modifiers, UTF-8 and
+  opt-in SGR mouse reports.
+- **fd watches**: `ctui_io_watch()` hooks any file descriptor (a socket,
+  a pipe, a DBus connection) into the same `select()` as input and
+  timers — no threads needed for widgets fed from outside.
 
 Details and rationale live in `PROGRESS.md`.
 

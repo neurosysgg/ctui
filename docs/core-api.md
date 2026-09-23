@@ -21,8 +21,9 @@ Apps and widgets `#include "ctui.h"` and nothing else from core —
 that one header pulls in every `core/*.h` in dependency order:
 
 ```
-cell.h → gfx.h → screen.h → compositor.h → widget.h → event.h →
-timer.h → util.h → group.h → split.h → app.h → term.h → input.h → log.h
+cell.h → utf8.h → gfx.h → screen.h → compositor.h → widget.h →
+event.h → timer.h → io.h → util.h → group.h → split.h → app.h →
+term.h → input.h → log.h
 ```
 
 That order is also roughly the dependency order below: each
@@ -43,15 +44,24 @@ useful to have in one place since it's spread across four functions:
    previous frame, writes only what changed) → `ctui_widget_flush_gfx()`
    (fires any Kitty-style non-degradable renderer queued this frame —
    always *after* flush, never before).
-3. **Loop**: `ctui_input_loop()` blocks for a key (or, with
-   `tick_ms > 0`, up to `tick_ms` before emitting a `CTUI_TICK_EVENT`).
+3. **Loop**: `ctui_input_loop()` sleeps in one `select()` over stdin,
+   every `ctui_io_watch()`ed fd, the next timer deadline and (with
+   `tick_ms > 0`) the tick deadline, and returns whichever fires
+   first as one event.
    - `CTUI_RESIZE_EVENT` → `ctui_app_resize()` (reallocate
      compositor/screen, re-run every widget's `layout()` + rebind,
      dispatch the event) → render/flush/flush_gfx again.
-   - `CTUI_KEY_ESC` → break the loop.
-   - anything else → `ctui_handle_event()` (fires registered
-     handlers) and `ctui_timer_tick()` (fires due timers); if either
-     reports a visible change, render/flush/flush_gfx again.
+   - `CTUI_KEY_ESC` → break the loop, unless the app set
+     `quit_on_esc = 0` (then it's an ordinary key).
+   - `CTUI_IO_EVENT` → `ctui_io_dispatch()` (the watch's own handler).
+   - `CTUI_TIMER_EVENT` (a deadline wake) → nothing beyond the
+     `ctui_timer_tick()` below.
+   - anything else (keys, mouse, ticks) → `ctui_handle_event()` (fires
+     registered handlers).
+   - then always `ctui_timer_tick()` (fires due timers); if anything
+     reported a visible change, render/flush/flush_gfx again.
+   - `ctui_app_quit()` from any handler ends the loop after that
+     iteration.
 4. **Teardown**: `ctui_app_free()`, `ctui_screen_free()`,
    `ctui_shutdown()`.
 
@@ -60,11 +70,36 @@ Everything below is one of the pieces in that sequence.
 ## `cell.h` — `CTUI_CELL`
 
 The unit everything ends up as: one character cell (`ch`, `fg`, `bg`,
-plus `color_mode` and, for RGB cells, `fg_r/g/b`/`bg_r/g/b`).
+plus `color_mode` and, for RGB cells, `fg_r/g/b`/`bg_r/g/b`). `ch` is
+one Unicode codepoint (`uint32_t`); a width-2 glyph (CJK, emoji) takes
+its own cell plus a `CTUI_CELL_CONT` cell to its right, which
+`ctui_screen_flush()` skips since the terminal already advanced past
+it.
 `CTUI_COLOR_MODE_BASIC/256/RGB` says how `fg`/`bg` should be read —
 independent of `CTUI_GFX_MODE` (`gfx.h`), which is what the *terminal
 session* negotiated, not how one cell is encoded. No functions here,
 just the type and the `CTUI_COLOR_*` basic-color enum.
+
+## `utf8.h` — codepoints and column widths
+
+- `ctui_utf8_decode(s, &cp)` / `ctui_utf8_encode(cp, out)` — one
+  codepoint at a time; malformed input decodes as U+FFFD consuming one
+  byte, so a walk always progresses.
+- `ctui_utf8_cpwidth(cp)` / `ctui_utf8_width(s)` — terminal columns
+  (0, 1, 2) via libc `wcwidth()`, i.e. the same answer the terminal
+  uses. ctui switches `LC_CTYPE` to `C.UTF-8` on first use only if the
+  app left it at `"C"`. Measure strings with `ctui_utf8_width()`, never
+  `strlen()`, before laying them out.
+- `ctui_utf8_prefix(s, cols, &width)` — longest byte prefix fitting in
+  `cols` columns without splitting a glyph.
+- `ctui_cell_set_ch(...)` — core-internal: writes a glyph while
+  keeping wide lead/`CTUI_CELL_CONT` pairs consistent (overwriting
+  either half blanks the other). Widgets go through
+  `ctui_widget_putc/puts()` instead.
+
+No grapheme clustering: zero-width codepoints (combining marks, ZWJ)
+are dropped, so decomposed accents and ZWJ emoji sequences render as
+their base glyphs.
 
 ## `gfx.h` — graphics capability negotiation
 
@@ -132,10 +167,15 @@ ever set; every other widget leaves both `NULL`.
   resize-specific code needed elsewhere.
 - `ctui_widget_putc/puts(widget, comp, row, col, ch, fg, bg)` — the
   normal way a `render()` draws, in coordinates local to the widget
-  (0,0 = its own top-left). Silently rejects (logs `E_WRN`) writes
+  (0,0 = its own top-left). `ch` is a codepoint (char literals work
+  for ASCII) and `puts` takes UTF-8, advancing by column width, not
+  bytes. A wide glyph that wouldn't fit before the widget's right edge
+  becomes a space. Silently rejects (logs `E_WRN`) writes
   outside the widget's bounds or before `ctui_widget_init()` has run.
   `_256`/`_rgb` variants exist for richer color (see `cell.h`'s
   `CTUI_COLOR_MODE_*`) — opt-in per call site, not per widget.
+- `ctui_widget_contains(widget, row, col)` — hit test of an absolute
+  cell against `x/y/w/h`, for `CTUI_MOUSE_EVENT_DATA`.
 - `ctui_widget_tick_advance(widget)` — per-widget frame counter, for
   debugging/perf; called by `ctui_app_render()` immediately before and
   after each widget's render.
@@ -151,9 +191,18 @@ ever set; every other widget leaves both `NULL`.
 addEventListener()-style: widgets register interest in one
 `(source, type)` pair instead of implementing a catch-all handler.
 
-- `CTUI_EVENTTYPE` — `CTUI_KEYPRESS_EVENT`, `CTUI_RESIZE_EVENT`,
-  `CTUI_TICK_EVENT`, `CTUI_TIMER_EVENT`, `CTUI_VALUE_CHANGED_EVENT`,
-  plus unused `CTUI_FOCUS_EVENT`/`CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
+- `CTUI_EVENTTYPE` — `CTUI_KEYPRESS_EVENT`, `CTUI_MOUSE_EVENT`,
+  `CTUI_RESIZE_EVENT`, `CTUI_TICK_EVENT`, `CTUI_TIMER_EVENT`,
+  `CTUI_IO_EVENT`, `CTUI_VALUE_CHANGED_EVENT`, plus unused
+  `CTUI_FOCUS_EVENT`/`CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
+- `CTUI_KEYPRESS_EVENT_DATA` — `type` (arrows, ENTER/ESC/TAB, HOME/END/
+  PGUP/PGDN/INSERT/DELETE/BACKTAB, CHAR, or NONE for an unrecognised
+  sequence), `ch` (a codepoint for CHAR) and `mods`
+  (`CTUI_MOD_SHIFT/ALT/CTRL`, where the terminal reports them).
+- `CTUI_MOUSE_EVENT_DATA` — `action` (press/release/motion/scroll),
+  `button`, absolute `row/col`, `mods`. Only produced after
+  `ctui_mouse_enable()` (`term.h`); every listener gets every report
+  and hit-tests with `ctui_widget_contains()`.
 - `CTUI_EVENT_SCOPE` — `CTUI_EVENT_SCOPE_GLOBAL` (default; every
   matching `(source, type)` handler runs, `origin` ignored) or
   `CTUI_EVENT_SCOPE_BUBBLE` (only handlers registered on `ev->origin`
@@ -168,6 +217,9 @@ addEventListener()-style: widgets register interest in one
   by source alone under `GLOBAL` scope (`CTUI_EVENT_SCOPE_BUBBLE` +
   `.origin = self` fixes this per-registration, opt-in). Requires
   `ctui_app_init()` to have run first (registrations live on `g_app`).
+- `ctui_event_unregister(widget)` — drops every registration made
+  against `widget`; safe mid-dispatch (tombstoned, compacted after the
+  outermost `ctui_handle_event()` returns).
 - `ctui_handle_event(ev)` — under `GLOBAL`, fires every handler whose
   `(source, type)` matches `ev`, in registration order; under `BUBBLE`,
   fires only handlers whose `(source, type, widget)` all match a widget
@@ -193,13 +245,36 @@ single `tick_ms`.
 - `ctui_timer_tick()` — fires every due timer/group, dispatching a
   `CTUI_TIMER_EVENT` (source `"timer"`) directly to its `(widget,
   handler)` pair, bypassing the `ctui_handle_event()` registry.
-  `ctui_app_run()` calls this once per loop iteration; real firing
-  resolution is bounded by whatever `tick_ms` the run loop was given.
+  `ctui_app_run()` calls this once per loop iteration, and
+  `ctui_input_loop()` wakes the loop at the next deadline
+  (`ctui_timer_ms_until_due()`), so timers fire on time regardless of
+  `tick_ms`.
+- `ctui_timer_cancel(timer)` — stops and frees one registration (an
+  emptied synchronized group goes with it); safe from inside any
+  timer handler, including its own.
 - `ctui_timer_reset()` — called by `ctui_app_init()`/`ctui_app_free()`;
   apps never call this themselves.
 
 Widget-level glue lives in `src/widgets/periodic.c` (`ctui_periodic_
 register()`), not here — see `PROGRESS.md`'s Timers entry.
+
+## `io.h` — fd watches
+
+For widgets fed by something other than the keyboard: a DBus
+connection, a unix socket, a child's pipe, inotify.
+
+- `ctui_io_watch(fd, CTUI_IO_READ | CTUI_IO_WRITE, widget, handler)` —
+  adds `fd` to the run loop's `select()`. Readiness arrives as a
+  `CTUI_IO_EVENT` dispatched straight to `handler` (like timers, not
+  through the registry), with a `CTUI_IO_EVENT_DATA` (`fd`, `ready`
+  bits). Level-triggered, so drain what's there. The caller keeps
+  owning `fd`.
+- `ctui_io_set_events(watch, events)` — change the mask (e.g. only
+  ask for `CTUI_IO_WRITE` while output is queued; `0` pauses).
+- `ctui_io_unwatch(watch)` — stop and free; safe mid-dispatch. Close
+  the fd after this, not before.
+- `ctui_io_fill/ready/dispatch/reset` — core-internal plumbing for
+  `ctui_input_loop()`/`ctui_app_run()`/`ctui_app_init()`.
 
 ## `group.h` — `CTUI_GROUP`
 
@@ -226,8 +301,13 @@ Partitioning: divides one region into disjoint sub-areas.
 - `CTUI_SPLIT_V` (stack, divide height), `CTUI_SPLIT_H` (side by side,
   divide width), `CTUI_SPLIT_GRID` (near-square auto grid, row-major,
   purely a function of `count`).
+- `weights` — optional per-child sizing for V/H (`NULL` = even): a
+  negative weight `-n` pins a child to exactly `n` cells, positive
+  weights share whatever's left proportionally, `0` gets nothing. See
+  `CTUI_SPLIT.weights` in `split.h` for rounding/clipping rules.
 - `ctui_split_layout(self, comp)` — divides `self`'s *current*
-  `x/y/w/h` evenly across `children[0..count-1]`, rebinding each via
+  `x/y/w/h` across `children[0..count-1]` (evenly, or per
+  `weights`), rebinding each via
   `ctui_widget_init()` against the same real compositor (no virtual
   sub-buffer). Assign directly as a widget's `layout()` for a
   fixed-position split, or call at the end of your own `layout()` if
@@ -255,7 +335,12 @@ above into the loop described in "Life of a frame".
   fail, `-1`, only for a widget that opted into a non-degradable
   protocol it didn't get — see `docs/protocol.md`). `0`/`-1`, same
   convention as `ctui_init()`.
-- `ctui_app_free(app)` — frees `app->comp` and `app->handlers`.
+- `ctui_app_free(app)` — frees `app->comp` and `app->handlers` (and
+  resets the timer and fd-watch registries).
+- `app->quit_on_esc` — `1` after `ctui_app_init()`; set it to `0` for
+  an app where ESC is an ordinary key (a shell, a launcher).
+- `ctui_app_quit()` — ends `ctui_app_run()` once the current event
+  finishes; callable from any handler.
 - `ctui_app_render(app, screen)` / `ctui_app_resize(app, screen, rows,
   cols)` / `ctui_app_run(app, screen, tick_ms)` — see "Life of a
   frame" above for exactly what each does and in what order.
@@ -269,13 +354,18 @@ above into the loop described in "Life of a frame".
 - `ctui_shutdown()` — restores the terminal.
 - `ctui_get_termsize(rows, cols)` — current terminal dimensions, for
   the initial `ctui_app_init()`/`ctui_screen_create()` call.
+- `ctui_mouse_enable(track_motion)` — opt into SGR mouse reports
+  (`CTUI_MOUSE_EVENT`); `ctui_shutdown()` turns them back off. While
+  on, the terminal's own click-to-select needs shift held.
 
 ## `input.h` — the blocking read loop
 
-- `ctui_input_loop(ev, tick_ms)` — blocks for one key (raw-mode
-  byte/ESC-sequence decoding happens here), or up to `tick_ms` before
-  emitting a `CTUI_TICK_EVENT` if nothing arrived. Returns `0` on
-  EOF/error. Not usually called directly by app code — `ctui_app_run()`
+- `ctui_input_loop(ev, tick_ms)` — blocks until the first of: a key
+  or mouse report on stdin (CSI/SS3/SGR/UTF-8 decoding happens here;
+  unknown sequences are consumed whole and come back as
+  `CTUI_KEY_NONE`), a watched fd (`CTUI_IO_EVENT`), a timer deadline
+  (`CTUI_TIMER_EVENT`), or `tick_ms` without input
+  (`CTUI_TICK_EVENT`). Returns `0` on EOF/error. Not usually called directly by app code — `ctui_app_run()`
   is the one caller; reach for this yourself only if you're building a
   custom run loop instead of using `ctui_app_run()`.
 
@@ -300,7 +390,9 @@ Not tied to any specific widget:
 - `ctui_util_center_h(center_str, line, fill)` /
   `ctui_util_truncate_str(str, desired, trunc)` — string-layout helpers
   for building a `render()`'s text before pushing it through
-  `ctui_widget_puts()`.
+  `ctui_widget_puts()`. Both count display columns, not bytes;
+  `center_h`'s buffer needs extra room for multi-byte glyphs (see
+  `util.h`).
 - `ctui_util_rescale_i(value, in_min, in_max, out_min, out_max)` —
   integer linear rescale, clamped, for cell/pixel/color-channel math.
 - `CTUI_MARGIN`, `ctui_margin_uniform(n)`, `ctui_util_inset(content,

@@ -203,9 +203,53 @@ terminal resize.
   plain `gcov`) reports current line coverage per `src/core/*.c` file
   — see the changelog entry below for the current numbers and which
   gaps are structural (pty-only) vs. actually missing tests.
+- **Text is UTF-8, cells are codepoints** (`core/utf8.c`).
+  `CTUI_CELL.ch` is a `uint32_t` codepoint; a width-2 glyph occupies
+  its cell plus a `CTUI_CELL_CONT` marker cell to its right, and
+  `ctui_cell_set_ch()` is the one place that keeps lead/CONT pairs
+  consistent when something overwrites half of one. Widths come from
+  libc `wcwidth()` (ctui flips `LC_CTYPE` to `C.UTF-8` lazily, and only
+  if the app left it at `"C"`), so they agree with the terminal rather
+  than a hand-maintained table going stale. `ctui_screen_flush()`
+  encodes UTF-8, skips CONT cells, tracks the cursor by glyph width,
+  and never emits a raw control byte (U+FFFD instead). Deliberately no
+  grapheme clustering: zero-width codepoints are dropped.
+- **One `select()` for everything** (`core/input.c`, `core/io.c`).
+  `ctui_input_loop()` waits on stdin, every `ctui_io_watch()`ed fd, the
+  next timer deadline (`ctui_timer_ms_until_due()`) and the tick
+  deadline together, returning whichever fires first as a single
+  event. fd watches and timers dispatch straight to their own handler;
+  keys/mouse/ticks go through the registry. This is what lets a widget
+  own a DBus connection or a socket without threads, and timers no
+  longer depend on `tick_ms` to fire. The tick deadline is only reset
+  by real input, so "tick after tick_ms without input" still holds
+  however often other sources wake the loop.
+- **Input decoding** handles full CSI sequences (params, modifiers,
+  `~` keys), SS3, alt+key, UTF-8 keypresses and SGR mouse reports
+  (opt-in via `ctui_mouse_enable()`). Unknown sequences are consumed
+  whole and resolve to `CTUI_KEY_NONE`.
 
 ## Fixed / addressed
 
+- [x] **ctui-wm prerequisites** (see `~/Projects/ctui-wm/PLAN.md`,
+      Phase 1): UTF-8 cells/strings, fd watches + timer-deadline
+      wakeups, `quit_on_esc`/`ctui_app_quit()`, SGR mouse +
+      `ctui_widget_contains()`, weighted/pinned `CTUI_SPLIT` children,
+      and `ctui_event_unregister()`/`ctui_timer_cancel()`/
+      `ctui_io_unwatch()`, all safe to call mid-dispatch (tombstone +
+      sweep once the outermost dispatch returns). Also fixed along the
+      way: multi-byte escape sequences (Delete, PgUp, Home, ctrl+arrow,
+      ...) used to be read as exactly two bytes after ESC, leaking their
+      tail as stray `CTUI_KEY_CHAR`s, and an unrecognised sequence
+      resolved to `CTUI_KEY_ESC`, which quit the app. New tests:
+      `tests/utf8_test.c`, `tests/input_test.c` (drives the real
+      `select()`/`read()` path through a pipe swapped in for stdin, so
+      input decoding is now covered headlessly), plus unregister/cancel/
+      weights cases in the event/timer/split tests.
+      `tools/pty_harness.py` now decodes UTF-8 by column width (wide
+      glyphs take 2 columns) and skips APC/OSC strings, so its `dump`
+      grid matches a real terminal for non-ASCII output and Kitty-mode
+      apps; `raw` prints UTF-8 instead of U+FFFD per non-ASCII byte.
 - [x] `src/ctui.c`/`src/ctui.h` split into `src/core/`, one `.c`/`.h`
       pair per subsystem (`screen`, `compositor`, `widget`, `event`,
       `app`, `group`, `split`, `term`, `input`, `log`, `util`, plus a
@@ -1226,6 +1270,23 @@ terminal resize.
 
 ## Known issues / deliberately deferred
 
+- **Per-byte `putc` of UTF-8 text no longer works by accident.** Since
+  cells became codepoints, `ctui_widget_putc(..., str[i], ...)` over a
+  UTF-8 string turns each byte of a multi-byte glyph into U+FFFD (a
+  sign-extended `char` isn't a codepoint). Before, the raw bytes happened
+  to reach the terminal in order and reassemble, at the price of
+  misaligning the rest of the row. Walk the string with
+  `ctui_utf8_decode()` or just use `puts`. Known caller: ctui-mus's
+  `src/gui/widgets/header.c` (only visible with a non-ASCII
+  `header_title`), to fix when its vendored ctui is bumped past this.
+  Checked 2026-09-23 by running ctui-mus against both ctui versions
+  under `tools/pty_harness.py`: identical output otherwise, and its
+  UTF-8 file names are now correctly aligned (they were shifted a
+  column per multi-byte glyph before).
+- **`CTUI_LABEL`/`CTUI_CLOCK` clip over-wide text** to what fits,
+  centered. Before, `ctui_util_center_h()` rejected it and the row
+  stayed blank (seen with ctui-mus's cwd label on a long path).
+
 - **A full-terminal-sized Kitty image (e.g. `border.c`'s background) has
   no cheap path left in Phase 5.** Compressing it costs ~14ms of
   GUI-thread CPU (`CTUI_DEFLATE_MAX_INPUT` now declines it instead);
@@ -1285,15 +1346,11 @@ terminal resize.
 - **`CTUI_FOCUS_EVENT` and `CTUI_WIDGET_REDRAW` are declared (and
   named, in `ctui_eventtype_name()`) but never emitted.** Reserved
   event types with no producer yet.
-- **No handler unregistration.** `ctui_event_register()` has no
-  counterpart to remove a registration; fine while the demo's widgets
-  live for the whole program, would matter for widgets that come and
-  go dynamically.
-- **No timer unregistration either**, same reasoning as event handlers
-  above — `ctui_timer_register()`/`ctui_timer_register_synchronized()`
-  return a `CTUI_TIMER *` but there's no `ctui_timer_cancel()` yet to
-  do anything with it.
-- **`CTUI_SPLIT` only divides evenly, no per-child weights/ratios.** On
+- ~~No handler unregistration.~~ **Fixed** — `ctui_event_unregister()`.
+- ~~No timer unregistration either.~~ **Fixed** — `ctui_timer_cancel()`.
+- ~~`CTUI_SPLIT` only divides evenly~~ **Fixed** — `CTUI_SPLIT.weights`
+  (pinned + proportional sizes). Original note kept for context:
+  **`CTUI_SPLIT` only divides evenly, no per-child weights/ratios.** On
   a short terminal, the demo's 2-pane split (menu + debug_info, each
   wanting 7 rows) gets capped to whatever the main area's inner height
   actually has and split 50/50 — which can clip the menu's last item
@@ -1304,18 +1361,16 @@ terminal resize.
 
 ## Next up
 
-- Promote `CTUI_CLOCK` from its `examples_apps/clock/widgets/` staging
-  spot to `src/widgets/`, once a second app actually needs it — see the
-  `examples_apps/` entry above for the promotion criterion. (`CTUI_LIST`
-  made this jump already, promoted alongside `player`.)
+- ~~Promote `CTUI_CLOCK` to `src/widgets/`~~ — done: ctui-wm is the
+  second app (its zones' `clock` widget). Gained an optional strftime
+  `format` field on the way (NULL keeps `%H:%M:%S`).
 - `player`'s `CTUI_METER` (currently staged in
   `examples_apps/player/widgets/`) is a similar promotion candidate once
   a second app wants a level meter/viz.
 - FLAC decoder for `player`, once the WAV decoder + `CTUI_DECODER`
   interface have proven themselves further — deferred from v1 by design,
   see `examples_apps/player/DESIGN.md`.
-- Weighted/unequal `CTUI_SPLIT` panes, once the even-split limitation
-  above actually bites on a real layout.
+- ~~Weighted/unequal `CTUI_SPLIT` panes~~ — done (`CTUI_SPLIT.weights`).
 - ~~Per-instance event identity~~ — done via `CTUI_EVENT_SCOPE_BUBBLE`
   (`.origin = self`); see `EVENT_DESIGN.md`. Focus for raw input events
   (`CTUI_KEYPRESS_EVENT` has no origin widget without a focus concept)
