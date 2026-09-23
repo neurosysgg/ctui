@@ -97,6 +97,34 @@ int main(void) {
   CTUI_TEST_ASSERT(child_c.x == 0 && child_c.y == 5,
                    "GRID wraps pane 2 to the start of the second row");
 
+  /* weights: a 1-row pinned header, then a 1:2 flex split of the rest */
+  int weights[] = {-1, 1, 2};
+  split.mode = CTUI_SPLIT_V;
+  split.weights = weights;
+  ctui_split_layout(&split_w, app.comp);
+  CTUI_TEST_ASSERT(child_a.y == 0 && child_a.h == 1,
+                   "a negative weight pins a child to exactly that many "
+                   "cells");
+  CTUI_TEST_ASSERT(child_b.y == 1 && child_b.h == 3 && child_c.y == 4 &&
+                       child_c.h == 6,
+                   "positive weights share the remaining 9 rows 1:2 (3 + 6), "
+                   "the rounding remainder landing on the last flex child");
+
+  int oversized[] = {-8, -8, 1};
+  split.weights = oversized;
+  ctui_split_layout(&split_w, app.comp);
+  CTUI_TEST_ASSERT(child_a.h == 8 && child_b.h == 2 && child_c.h == 0 &&
+                       child_c.y == 10,
+                   "pinned sizes are granted in order and clipped once the "
+                   "axis runs out, never overlapping or overflowing");
+
+  int no_flex[] = {-2, 0, 0};
+  split.weights = no_flex;
+  ctui_split_layout(&split_w, app.comp);
+  CTUI_TEST_ASSERT(child_a.h == 2 && child_b.h == 0 && child_c.h == 8,
+                   "with no positive weight, the last child absorbs the "
+                   "leftover so the split still covers its whole area");
+
   ctui_app_free(&app);
   ctui_screen_free(screen);
   return ctui_test_summary();

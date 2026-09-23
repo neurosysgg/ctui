@@ -37,6 +37,18 @@ typedef struct {
                            * immediately via
                            * ctui_split_layout(self, split->comp) instead of
                            * waiting for the next resize */
+  const int *weights;     /* optional, caller-owned, parallel to children[]
+                           * (read for the first count entries). NULL (the
+                           * zero-init default) keeps the even division
+                           * above. Otherwise, per child along the split
+                           * axis: a negative weight -n pins that child to
+                           * exactly n cells (a 1-row status bar); a
+                           * positive weight takes a proportional share of
+                           * whatever the pinned children leave, with the
+                           * rounding remainder going to the last
+                           * positive-weight child; 0 gets nothing. Pinned
+                           * sizes are granted in order and clipped once
+                           * the axis runs out. Ignored by CTUI_SPLIT_GRID. */
 } CTUI_SPLIT;
 
 /* sub-compositor utility: divides self's CURRENT x/y/w/h evenly among

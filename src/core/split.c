@@ -28,6 +28,49 @@ static int ctui_split_is_active_child(CTUI_WIDGET *parent, CTUI_WIDGET *child) {
   return 0;
 }
 
+/* fills sizes[0..count) along an axis of length total -- see
+ * CTUI_SPLIT.weights for the rules */
+static void ctui_split_sizes(const CTUI_SPLIT *split, int total, int *sizes) {
+  int count = split->count;
+  if (!split->weights) {
+    int base = total / count;
+    for (int i = 0; i < count; i++) {
+      sizes[i] = base;
+    }
+    sizes[count - 1] += total - base * count;
+    return;
+  }
+
+  int left = total, weight_sum = 0, last_flex = -1;
+  for (int i = 0; i < count; i++) {
+    int w = split->weights[i];
+    if (w < 0) {
+      sizes[i] = -w < left ? -w : left;
+      left -= sizes[i];
+    } else {
+      sizes[i] = 0;
+      weight_sum += w;
+      if (w > 0) {
+        last_flex = i;
+      }
+    }
+  }
+  if (weight_sum == 0) {
+    /* nothing flexible to absorb the leftover -- the last child does, so
+     * the split still covers its whole area */
+    sizes[count - 1] += left;
+    return;
+  }
+  int given = 0;
+  for (int i = 0; i < count; i++) {
+    if (split->weights[i] > 0) {
+      sizes[i] = left * split->weights[i] / weight_sum;
+      given += sizes[i];
+    }
+  }
+  sizes[last_flex] += left - given;
+}
+
 void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   CTUI_SPLIT *split = self->widget_data;
   split->comp = comp;
@@ -41,30 +84,29 @@ void ctui_split_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     return;
   }
 
+  int sizes[split->count];
   if (split->mode == CTUI_SPLIT_V) {
-    int base = self->h / split->count;
-    int remainder = self->h - base * split->count;
+    ctui_split_sizes(split, self->h, sizes);
     int y = self->y;
     for (int i = 0; i < split->count; i++) {
       CTUI_WIDGET *child = split->children[i];
       child->x = self->x;
       child->w = self->w;
       child->y = y;
-      child->h = base + (i == split->count - 1 ? remainder : 0);
+      child->h = sizes[i];
       y += child->h;
       child->parent = self;
       ctui_widget_init(child, comp);
     }
   } else if (split->mode == CTUI_SPLIT_H) {
-    int base = self->w / split->count;
-    int remainder = self->w - base * split->count;
+    ctui_split_sizes(split, self->w, sizes);
     int x = self->x;
     for (int i = 0; i < split->count; i++) {
       CTUI_WIDGET *child = split->children[i];
       child->y = self->y;
       child->h = self->h;
       child->x = x;
-      child->w = base + (i == split->count - 1 ? remainder : 0);
+      child->w = sizes[i];
       x += child->w;
       child->parent = self;
       ctui_widget_init(child, comp);
