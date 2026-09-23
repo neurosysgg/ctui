@@ -212,6 +212,17 @@ static int resolve_csi(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   if (params[0] == '<' && (c == 'M' || c == 'm')) {
     return resolve_mouse(ev, kp, md, params + 1, c);
   }
+  /* focus reports (ctui_focus_enable()): a bare CSI I / CSI O */
+  if (!params[0] && (c == 'I' || c == 'O')) {
+    static CTUI_FOCUS_EVENT_DATA focus_data;
+    focus_data.focused = c == 'I';
+    ev->type = CTUI_FOCUS_EVENT;
+    ev->ev_source = "input";
+    ev->event_data = &focus_data;
+    ctui_logf(E_INF, "[CTUI:INPUT] - resolved focus %s @ tick %d\n",
+              c == 'I' ? "in" : "out", ctui_tick_advance());
+    return 1;
+  }
 
   /* "p1;p2": p1 selects the key for '~' finals, p2 is 1 + modifier bits */
   char *end;

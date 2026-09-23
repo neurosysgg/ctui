@@ -60,6 +60,10 @@ typedef struct {
   unsigned int mods; /* CTUI_MOD_* */
 } CTUI_MOUSE_EVENT_DATA;
 
+typedef struct {
+  int focused; /* 1 = the terminal window gained keyboard focus, 0 = lost it */
+} CTUI_FOCUS_EVENT_DATA;
+
 /* readiness bits for ctui_io_watch() (core/io.h) */
 enum {
   CTUI_IO_READ = 1 << 0,
@@ -88,7 +92,11 @@ typedef struct {
 
 typedef enum {
   CTUI_KEYPRESS_EVENT,
-  CTUI_FOCUS_EVENT,
+  CTUI_FOCUS_EVENT, /* the terminal window gained/lost keyboard focus
+                     * (CSI I / CSI O), ev_source "input" -- see
+                     * CTUI_FOCUS_EVENT_DATA. Never emitted until the app
+                     * opts in with ctui_focus_enable(). Dispatched through
+                     * the registry to every listener. */
   CTUI_WIDGET_REDRAW,
   CTUI_RESIZE_EVENT,
   CTUI_TICK_EVENT, /* periodic timer tick; emitted by ctui_app_run() (via

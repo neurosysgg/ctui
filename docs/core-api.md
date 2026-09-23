@@ -193,8 +193,8 @@ addEventListener()-style: widgets register interest in one
 
 - `CTUI_EVENTTYPE` — `CTUI_KEYPRESS_EVENT`, `CTUI_MOUSE_EVENT`,
   `CTUI_RESIZE_EVENT`, `CTUI_TICK_EVENT`, `CTUI_TIMER_EVENT`,
-  `CTUI_IO_EVENT`, `CTUI_VALUE_CHANGED_EVENT`, plus unused
-  `CTUI_FOCUS_EVENT`/`CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
+  `CTUI_IO_EVENT`, `CTUI_VALUE_CHANGED_EVENT`, `CTUI_FOCUS_EVENT`, plus
+  unused `CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
 - `CTUI_KEYPRESS_EVENT_DATA` — `type` (arrows, ENTER/ESC/TAB, HOME/END/
   PGUP/PGDN/INSERT/DELETE/BACKTAB, CHAR, or NONE for an unrecognised
   sequence), `ch` (a codepoint for CHAR) and `mods`
@@ -203,6 +203,9 @@ addEventListener()-style: widgets register interest in one
   `button`, absolute `row/col`, `mods`. Only produced after
   `ctui_mouse_enable()` (`term.h`); every listener gets every report
   and hit-tests with `ctui_widget_contains()`.
+- `CTUI_FOCUS_EVENT_DATA` — `focused` (1 = the terminal window gained
+  keyboard focus, 0 = lost it). Only produced after
+  `ctui_focus_enable()` (`term.h`), source `"input"`.
 - `CTUI_EVENT_SCOPE` — `CTUI_EVENT_SCOPE_GLOBAL` (default; every
   matching `(source, type)` handler runs, `origin` ignored) or
   `CTUI_EVENT_SCOPE_BUBBLE` (only handlers registered on `ev->origin`
@@ -357,6 +360,9 @@ above into the loop described in "Life of a frame".
 - `ctui_mouse_enable(track_motion)` — opt into SGR mouse reports
   (`CTUI_MOUSE_EVENT`); `ctui_shutdown()` turns them back off. While
   on, the terminal's own click-to-select needs shift held.
+- `ctui_focus_enable()` — opt into focus reports (`CTUI_FOCUS_EVENT`)
+  when the terminal window gains/loses keyboard focus;
+  `ctui_shutdown()` turns them back off.
 
 ## `input.h` — the blocking read loop
 

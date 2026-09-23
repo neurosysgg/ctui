@@ -19,6 +19,7 @@
 
 static struct termios orig_termios;
 static int g_mouse_enabled = 0;
+static int g_focus_enabled = 0;
 
 volatile sig_atomic_t g_resize_pending = 0;
 unsigned int g_gfx_mode = 0;
@@ -136,6 +137,14 @@ void ctui_mouse_enable(int track_motion) {
             ctui_tick_advance(), track_motion);
 }
 
+void ctui_focus_enable(void) {
+  printf("\x1b[?1004h");
+  fflush(stdout);
+  g_focus_enabled = 1;
+  ctui_logf(E_INF, "[CTUI:TERM] - focus reporting on @ tick %d\n",
+            ctui_tick_advance());
+}
+
 void ctui_shutdown(void) {
   ctui_logf(E_INF, "[CTUI:INIT] - shutting down @ tick %d\n",
             ctui_tick_advance());
@@ -148,6 +157,10 @@ void ctui_shutdown(void) {
   if (g_mouse_enabled) {
     printf("\x1b[?1006l\x1b[?1003l\x1b[?1000l");
     g_mouse_enabled = 0;
+  }
+  if (g_focus_enabled) {
+    printf("\x1b[?1004l");
+    g_focus_enabled = 0;
   }
   printf("\x1b[?25h\x1b[?1049l");
   fflush(stdout);

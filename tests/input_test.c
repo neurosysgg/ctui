@@ -112,6 +112,23 @@ static CTUI_MOUSE_EVENT_DATA *next_mouse(CTUI_EVENT *ev) {
   return ev->event_data;
 }
 
+static void test_focus(void) {
+  CTUI_EVENT ev;
+  feed("\x1b[O");
+  CTUI_TEST_ASSERT(ctui_input_loop(&ev, 0) && ev.type == CTUI_FOCUS_EVENT &&
+                       !((CTUI_FOCUS_EVENT_DATA *)ev.event_data)->focused,
+                   "CSI O is a focus-out event");
+  feed("\x1b[I");
+  CTUI_TEST_ASSERT(ctui_input_loop(&ev, 0) && ev.type == CTUI_FOCUS_EVENT &&
+                       ((CTUI_FOCUS_EVENT_DATA *)ev.event_data)->focused,
+                   "CSI I is a focus-in event");
+  feed("\x1b[1;5I");
+  CTUI_TEST_ASSERT(ctui_input_loop(&ev, 0) && ev.type == CTUI_KEYPRESS_EVENT &&
+                       ((CTUI_KEYPRESS_EVENT_DATA *)ev.event_data)->type ==
+                           CTUI_KEY_NONE,
+                   "an I final with parameters isn't a focus report");
+}
+
 static void test_mouse(void) {
   CTUI_EVENT ev;
   CTUI_MOUSE_EVENT_DATA *md;
@@ -302,6 +319,7 @@ int main(void) {
 
   test_keys();
   test_mouse();
+  test_focus();
   test_io_watch();
   test_timer_wake_and_tick();
   test_quit(&app, &w);

@@ -26,4 +26,10 @@ void ctui_get_termsize(int *rows, int *cols);
  * ctui_shutdown() turns it back off. */
 void ctui_mouse_enable(int track_motion);
 
+/* opts into focus reporting (CTUI_FOCUS_EVENT, core/event.h): the terminal
+ * says when its window gains or loses keyboard focus -- e.g. a popup that
+ * closes when the user clicks elsewhere. Call after ctui_init();
+ * ctui_shutdown() turns it back off. */
+void ctui_focus_enable(void);
+
 #endif

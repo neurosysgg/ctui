@@ -226,10 +226,22 @@ terminal resize.
   however often other sources wake the loop.
 - **Input decoding** handles full CSI sequences (params, modifiers,
   `~` keys), SS3, alt+key, UTF-8 keypresses and SGR mouse reports
-  (opt-in via `ctui_mouse_enable()`). Unknown sequences are consumed
-  whole and resolve to `CTUI_KEY_NONE`.
+  (opt-in via `ctui_mouse_enable()`), and focus reports (`CSI I`/`CSI O`
+  -> `CTUI_FOCUS_EVENT`, opt-in via `ctui_focus_enable()`). Unknown
+  sequences are consumed whole and resolve to `CTUI_KEY_NONE`.
 
 ## Fixed / addressed
+
+- [x] **Focus events** (2026-09-23, for ctui-wm's tray menu popup,
+      which closes when the user clicks outside it):
+      `ctui_focus_enable()` turns on the terminal's focus reporting
+      (DECSET 1004, turned back off by `ctui_shutdown()`), and the
+      input decoder turns a bare `CSI I`/`CSI O` into
+      `CTUI_FOCUS_EVENT` (source `"input"`, `CTUI_FOCUS_EVENT_DATA.
+      focused`). `CSI I` with parameters stays an unknown sequence.
+      Verified in kitty 0.48.2: an os-panel (layer-shell surface) gets
+      `CSI O` when the user clicks another window. Tests in
+      `input_test.c`.
 
 - [x] **ctui-wm prerequisites** (see `~/Projects/ctui-wm/PLAN.md`,
       Phase 1): UTF-8 cells/strings, fd watches + timer-deadline
@@ -1343,9 +1355,10 @@ terminal resize.
   string still collide for any listener that hasn't opted in.
 - ~~`CTUI_EVENT_SCOPE` is vestigial.~~ **Fixed** — `CTUI_EVENT_SCOPE_
   BUBBLE` now exists alongside `_GLOBAL`; see `EVENT_DESIGN.md`.
-- **`CTUI_FOCUS_EVENT` and `CTUI_WIDGET_REDRAW` are declared (and
-  named, in `ctui_eventtype_name()`) but never emitted.** Reserved
-  event types with no producer yet.
+- **`CTUI_WIDGET_REDRAW` is declared (and named, in
+  `ctui_eventtype_name()`) but never emitted.** A reserved event type
+  with no producer yet. (`CTUI_FOCUS_EVENT` has one now: terminal focus
+  reports, see Fixed.)
 - ~~No handler unregistration.~~ **Fixed** — `ctui_event_unregister()`.
 - ~~No timer unregistration either.~~ **Fixed** — `ctui_timer_cancel()`.
 - ~~`CTUI_SPLIT` only divides evenly~~ **Fixed** — `CTUI_SPLIT.weights`
