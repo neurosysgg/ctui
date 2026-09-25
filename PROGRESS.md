@@ -234,6 +234,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Cutting text with an ellipsis** (2026-09-25, for ctui-wm, whose
+      widgets each carried the same "cut to width" helper and cut media
+      titles, network names etc. mid-word with no sign of it):
+      `ctui_widget_puts_cut(widget, comp, row, col, str, width, fg, bg)`
+      writes `str` cut to `width` columns; a string that doesn't fit ends
+      in "…" (U+2026, one glyph, one column) right after its last visible
+      glyph (spaces before the cut dropped: "Doku…", not "Doku …"), never
+      splitting a wide glyph. Returns the columns written, so the caller
+      can place what follows. Unlike `ctui_util_truncate_str()` it works
+      on the way out rather than in place, so a 3-byte "…" never needs
+      room in the caller's buffer. Tests in `widget_test.c`.
+
 - [x] **Drag tracking for the mouse** (2026-09-25, for ctui-wm's volume
       and brightness sliders, which should follow click+drag):
       `ctui_mouse_enable()` takes `CTUI_MOUSE_TRACK_DRAG` (xterm's 1002,

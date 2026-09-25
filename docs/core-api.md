@@ -186,6 +186,10 @@ ever set; every other widget leaves both `NULL`.
   `_256`/`_rgb` variants exist for richer color (see `cell.h`'s
   `CTUI_COLOR_MODE_*`) — opt-in per call site, not per widget.
   `ctui_widget_putc_rgb_fg()` is a truecolor fg over a basic bg.
+- `ctui_widget_puts_cut(widget, comp, row, col, str, width, fg, bg)` —
+  `puts` cut to `width` columns, a string that doesn't fit ending in "…"
+  (U+2026) in the last one; returns the columns written. The way to draw
+  anything (a title, a name) that may be longer than its room.
 - `ctui_widget_put_kitty_placeholder(widget, comp, row, col, image_id,
   cols, rows, bg)` — a `cols` x `rows` block of placeholder cells showing
   an image placed with `ctui_gfx_kitty_place_file()` (placed at the same

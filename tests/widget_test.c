@@ -63,6 +63,49 @@ static void test_putc_bounds(void) {
   ctui_compositor_free(comp);
 }
 
+static void test_puts_cut(void) {
+  CTUI_COMPOSITOR *comp = ctui_compositor_create(4, 10);
+  CTUI_WIDGET w = ctui_widget_make(0, 0, 10, 4, NULL, noop_render, NULL);
+  ctui_widget_init(&w, comp);
+
+  int used = ctui_widget_puts_cut(&w, comp, 0, 0, "abc", 5, CTUI_COLOR_RED,
+                                  CTUI_COLOR_DEFAULT);
+  CTUI_TEST_ASSERT(used == 3 && comp->cells[2].ch == 'c' &&
+                       comp->cells[3].ch == ' ',
+                   "puts_cut() writes a string that fits as-is");
+
+  used = ctui_widget_puts_cut(&w, comp, 1, 2, "abcdef", 4, CTUI_COLOR_RED,
+                              CTUI_COLOR_DEFAULT);
+  CTUI_CELL *r1 = &comp->cells[10];
+  CTUI_TEST_ASSERT(used == 4 && r1[2].ch == 'a' && r1[4].ch == 'c' &&
+                       r1[5].ch == 0x2026 && r1[6].ch == ' ' &&
+                       r1[5].fg == CTUI_COLOR_RED,
+                   "puts_cut() ends a string that doesn't fit in one "
+                   "\"\u2026\" glyph in the last column");
+
+  used = ctui_widget_puts_cut(&w, comp, 2, 0, "a\xe4\xb8\xad" "b", 3,
+                              CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
+  CTUI_CELL *r2 = &comp->cells[20];
+  CTUI_TEST_ASSERT(used == 2 && r2[0].ch == 'a' && r2[1].ch == 0x2026,
+                   "puts_cut() never splits a wide glyph to make room for "
+                   "the ellipsis");
+
+  used = ctui_widget_puts_cut(&w, comp, 2, 4, "ab  cdef", 5, CTUI_COLOR_DEFAULT,
+                              CTUI_COLOR_DEFAULT);
+  CTUI_TEST_ASSERT(used == 3 && r2[5].ch == 'b' && r2[6].ch == 0x2026,
+                   "puts_cut() drops the spaces before the ellipsis");
+
+  used = ctui_widget_puts_cut(&w, comp, 3, 0, "abcdef", 6, CTUI_COLOR_DEFAULT,
+                              CTUI_COLOR_DEFAULT);
+  int zero = ctui_widget_puts_cut(&w, comp, 3, 0, "xyz", 0, CTUI_COLOR_DEFAULT,
+                                  CTUI_COLOR_DEFAULT);
+  CTUI_TEST_ASSERT(used == 6 && zero == 0 && comp->cells[30].ch == 'a',
+                   "puts_cut() fits an exact-width string whole and writes "
+                   "nothing for width 0");
+
+  ctui_compositor_free(comp);
+}
+
 static void test_puts_and_color_modes(void) {
   CTUI_COMPOSITOR *comp = ctui_compositor_create(5, 20);
   CTUI_WIDGET w = ctui_widget_make(0, 0, 20, 5, NULL, noop_render, NULL);
@@ -218,6 +261,7 @@ int main(void) {
 
   test_putc_bounds();
   test_puts_and_color_modes();
+  test_puts_cut();
   test_widget_init_out_of_bounds();
   test_gfx_dispatch();
 

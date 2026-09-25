@@ -165,6 +165,37 @@ void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   widget_puts_styled(widget, comp, row, col, str, &style);
 }
 
+int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                         int col, const char *str, int width,
+                         unsigned char fg, unsigned char bg) {
+  if (width <= 0) {
+    return 0;
+  }
+  CTUI_CELL style = {.fg = fg, .bg = bg, .color_mode = CTUI_COLOR_MODE_BASIC};
+  int w;
+  size_t n = ctui_utf8_prefix(str, width, &w);
+  if (!str[n]) {
+    widget_puts_styled(widget, comp, row, col, str, &style);
+    return w;
+  }
+  /* the prefix one column short of width, then U+2026 right after it:
+   * "Doku…", never "Doku …" */
+  n = ctui_utf8_prefix(str, width - 1, &w);
+  while (n > 0 && str[n - 1] == ' ') {
+    n--;
+    w--;
+  }
+  const char *end = str + n;
+  int c = col;
+  while (str < end) {
+    uint32_t cp;
+    str += ctui_utf8_decode(str, &cp);
+    c += widget_put(widget, comp, row, c, cp, &style);
+  }
+  widget_put(widget, comp, row, col + w, 0x2026, &style);
+  return w + 1;
+}
+
 void ctui_widget_putc_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           int col, uint32_t ch, unsigned char fg256,
                           unsigned char bg256) {

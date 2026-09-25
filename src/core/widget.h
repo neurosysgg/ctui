@@ -141,6 +141,14 @@ void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                       int col, const char *str, unsigned char fg,
                       unsigned char bg);
 
+/* puts() cut to at most width columns from col: a string that doesn't fit
+ * ends in "…" (U+2026, one glyph) right after its last visible glyph
+ * (spaces before the cut are dropped). Returns the columns written (0 for
+ * width <= 0), for placing what comes after. */
+int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                         int col, const char *str, int width,
+                         unsigned char fg, unsigned char bg);
+
 /* same as ctui_widget_putc()/puts() above, except fg/bg are read as a
  * 0-255 ANSI 256-color index (CTUI_COLOR_MODE_256) instead of a basic
  * CTUI_COLOR_* index -- opt-in for a widget that explicitly wants the
