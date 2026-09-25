@@ -2,7 +2,8 @@
  * is swapped for a pipe, so the real select()/read() path runs against
  * whatever raw bytes the test writes into the other end -- the exact
  * bytes a terminal would send. Covers key decoding (CSI + modifiers, SS3,
- * alt+key, UTF-8, unknown sequences), SGR mouse reports, fd watches,
+ * alt+key, UTF-8, unknown sequences), SGR mouse reports (and the
+ * tracking modes ctui_mouse_enable() asks for), fd watches,
  * timer-deadline wakeups, CTUI_TICK_EVENT, and ctui_app_run()'s
  * quit_on_esc/ctui_app_quit() handling. Termios is never touched (pipes
  * have none), so ctui_init() isn't needed. */
@@ -210,12 +211,55 @@ static void test_mouse(void) {
                    "32 (motion) + 3 (no button) + 16 (ctrl) is buttonless "
                    "ctrl-motion");
 
+  feed("\x1b[<32;7;2M");
+  md = next_mouse(&ev);
+  CTUI_TEST_ASSERT(md && md->action == CTUI_MOUSE_MOTION &&
+                       md->button == 0 && md->col == 6 && md->row == 1,
+                   "32 (motion) + 0: a drag with the left button held");
+
   CTUI_WIDGET w = ctui_widget_make(8, 3, 4, 2, NULL, NULL, NULL);
   CTUI_TEST_ASSERT(ctui_widget_contains(&w, 4, 9) &&
                        !ctui_widget_contains(&w, 5, 9) &&
                        !ctui_widget_contains(&w, 4, 12),
                    "ctui_widget_contains() hit-tests absolute cells against "
                    "x/y/w/h, exclusive on the far edges");
+}
+
+/* what ctui_mouse_enable(track) writes to the terminal (stdout, caught
+ * in a pipe) */
+static const char *mouse_enable_writes(int track) {
+  static char buf[256];
+  int p[2];
+  pipe(p);
+  fflush(stdout);
+  int saved = dup(STDOUT_FILENO);
+  dup2(p[1], STDOUT_FILENO);
+  close(p[1]);
+  ctui_mouse_enable(track);
+  fflush(stdout);
+  dup2(saved, STDOUT_FILENO);
+  close(saved);
+  ssize_t n = read(p[0], buf, sizeof buf - 1);
+  buf[n > 0 ? n : 0] = '\0';
+  close(p[0]);
+  return buf;
+}
+
+/* the terminal has one tracking mode: ctui_mouse_enable() only raises it */
+static void test_mouse_modes(void) {
+  CTUI_TEST_ASSERT(strcmp(mouse_enable_writes(CTUI_MOUSE_TRACK_CLICKS),
+                          "\x1b[?1000h\x1b[?1006h") == 0,
+                   "clicks: 1000 + SGR");
+  CTUI_TEST_ASSERT(strcmp(mouse_enable_writes(CTUI_MOUSE_TRACK_DRAG),
+                          "\x1b[?1000h\x1b[?1002h\x1b[?1006h") == 0,
+                   "drag raises it to 1002 (button-event tracking)");
+  CTUI_TEST_ASSERT(!*mouse_enable_writes(CTUI_MOUSE_TRACK_CLICKS),
+                   "asking for clicks again doesn't drop the drag");
+  CTUI_TEST_ASSERT(strcmp(mouse_enable_writes(CTUI_MOUSE_TRACK_ANY),
+                          "\x1b[?1000h\x1b[?1003h\x1b[?1006h") == 0,
+                   "any motion raises it to 1003");
+  CTUI_TEST_ASSERT(!*mouse_enable_writes(CTUI_MOUSE_TRACK_DRAG),
+                   "a later drag doesn't narrow 1003 back to 1002");
 }
 
 static int g_io_calls = 0;
@@ -372,6 +416,7 @@ int main(void) {
 
   test_keys();
   test_mouse();
+  test_mouse_modes();
   test_focus();
   test_csi_u();
   test_io_watch();

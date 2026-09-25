@@ -379,6 +379,11 @@ above into the loop described in "Life of a frame".
 - `ctui_mouse_enable(track_motion)` — opt into SGR mouse reports
   (`CTUI_MOUSE_EVENT`); `ctui_shutdown()` turns them back off. While
   on, the terminal's own click-to-select needs shift held.
+  `track_motion`: `CTUI_MOUSE_TRACK_CLICKS` (0: presses, releases,
+  wheel), `CTUI_MOUSE_TRACK_DRAG` (2: plus motion while a button is
+  held, for sliders and drag handles) or `CTUI_MOUSE_TRACK_ANY` (1: plus
+  every motion, for hover; chatty). The terminal has one mode, so calls
+  only raise it: widgets can each ask for their own level in any order.
 - `ctui_focus_enable()` — opt into focus reports (`CTUI_FOCUS_EVENT`)
   when the terminal window gains/loses keyboard focus;
   `ctui_shutdown()` turns them back off.

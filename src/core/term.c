@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 static struct termios orig_termios;
+/* 0 off, else 1 + the tracking level: clicks 1, drag 2, any motion 3 */
 static int g_mouse_enabled = 0;
 static int g_focus_enabled = 0;
 static int g_kitty_keys_enabled = 0;
@@ -128,12 +129,20 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
 }
 
 void ctui_mouse_enable(int track_motion) {
-  /* 1000 = press/release, 1003 = any-motion, 1006 = SGR encoding (no
+  int level = track_motion == CTUI_MOUSE_TRACK_ANY    ? 3
+              : track_motion == CTUI_MOUSE_TRACK_DRAG ? 2
+                                                      : 1;
+  if (level <= g_mouse_enabled) {
+    return; /* already at least that: setting a lower mode would drop it */
+  }
+  /* 1000 = press/release, 1002 = motion with a button held, 1003 = any
+   * motion (each replaces the one before), 1006 = SGR encoding (no
    * 223-column limit, unambiguous release button) */
-  printf(track_motion ? "\x1b[?1000h\x1b[?1003h\x1b[?1006h"
+  printf(level == 3   ? "\x1b[?1000h\x1b[?1003h\x1b[?1006h"
+         : level == 2 ? "\x1b[?1000h\x1b[?1002h\x1b[?1006h"
                       : "\x1b[?1000h\x1b[?1006h");
   fflush(stdout);
-  g_mouse_enabled = 1;
+  g_mouse_enabled = level;
   ctui_logf(E_INF, "[CTUI:TERM] - mouse reporting on @ tick %d (motion=%d)\n",
             ctui_tick_advance(), track_motion);
 }
@@ -166,7 +175,7 @@ void ctui_shutdown(void) {
   ctui_gfx_kitty_shm_reap();
   ctui_log_shutdown();
   if (g_mouse_enabled) {
-    printf("\x1b[?1006l\x1b[?1003l\x1b[?1000l");
+    printf("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
     g_mouse_enabled = 0;
   }
   if (g_focus_enabled) {

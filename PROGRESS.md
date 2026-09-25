@@ -234,6 +234,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Drag tracking for the mouse** (2026-09-25, for ctui-wm's volume
+      and brightness sliders, which should follow click+drag):
+      `ctui_mouse_enable()` takes `CTUI_MOUSE_TRACK_DRAG` (xterm's 1002,
+      motion reported only while a button is held) next to
+      `CTUI_MOUSE_TRACK_CLICKS` (0) and `CTUI_MOUSE_TRACK_ANY` (1, 1003),
+      the old values unchanged. The terminal keeps one tracking mode (a
+      later `?1002h` replaces an earlier `?1003h`), so the function now
+      only ever raises it: a widget asking for clicks or drag after
+      another asked for any motion no longer narrows it, and repeat calls
+      write nothing. `ctui_shutdown()` also resets 1002. Tests in
+      `input_test.c` (the sequences written, a drag report).
+
 - [x] **Modified Enter/Tab/Backspace** (2026-09-24, for ctui-wm's
       launcher, where Enter / shift+Enter / ctrl+Enter do different
       things): the legacy encoding sends `\r` for all three.

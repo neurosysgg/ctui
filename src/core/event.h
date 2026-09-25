@@ -48,7 +48,8 @@ typedef struct {
 typedef enum {
   CTUI_MOUSE_PRESS,
   CTUI_MOUSE_RELEASE,
-  CTUI_MOUSE_MOTION, /* only reported after ctui_mouse_enable(1) */
+  CTUI_MOUSE_MOTION, /* only reported after ctui_mouse_enable() with
+                      * CTUI_MOUSE_TRACK_ANY or _DRAG */
   CTUI_MOUSE_SCROLL_UP,
   CTUI_MOUSE_SCROLL_DOWN,
 } CTUI_MOUSE_ACTION;

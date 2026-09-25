@@ -18,12 +18,20 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode);
 void ctui_shutdown(void);
 void ctui_get_termsize(int *rows, int *cols);
 
+/* ctui_mouse_enable()'s track_motion */
+#define CTUI_MOUSE_TRACK_CLICKS 0 /* presses, releases, wheel */
+#define CTUI_MOUSE_TRACK_ANY 1    /* + every pointer motion */
+#define CTUI_MOUSE_TRACK_DRAG 2   /* + motion while a button is held */
+
 /* opts into SGR mouse reporting (CTUI_MOUSE_EVENT, core/event.h): presses,
- * releases and wheel always; pointer motion too when track_motion is
- * nonzero (including with no button held -- chatty, only ask for it if
- * something hovers). Call after ctui_init(). Turns off the terminal's own
- * click-to-select while active (kitty: hold shift to select anyway);
- * ctui_shutdown() turns it back off. */
+ * releases and wheel always; pointer motion too with CTUI_MOUSE_TRACK_ANY
+ * (including with no button held -- chatty, only ask for it if something
+ * hovers) or, for dragging, only while a button is held with
+ * CTUI_MOUSE_TRACK_DRAG. The terminal has one tracking mode, so calls only
+ * ever raise it (clicks < drag < any): widgets sharing a terminal can each
+ * ask for what they need, in any order. Call after ctui_init(). Turns off
+ * the terminal's own click-to-select while active (kitty: hold shift to
+ * select anyway); ctui_shutdown() turns it back off. */
 void ctui_mouse_enable(int track_motion);
 
 /* opts into focus reporting (CTUI_FOCUS_EVENT, core/event.h): the terminal
