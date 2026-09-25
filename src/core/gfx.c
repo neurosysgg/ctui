@@ -283,12 +283,21 @@ int ctui_gfx_kitty_apc_span(const char *buf, size_t len, size_t *start,
   return 0;
 }
 
+/* 1 once buf holds a whole APC reply, introducer to terminator: what
+ * ctui_gfx_kitty_probe_shm() stops reading at, instead of sitting out its
+ * timeout. Non-static and absent from gfx.h like apc_span() above, for
+ * tests/kitty_protocol_test.c. */
+int ctui_gfx_kitty_apc_complete(const char *buf, size_t len) {
+  size_t start = 0, end = 0;
+  return ctui_gfx_kitty_apc_span(buf, len, &start, &end) && end - start >= 5 &&
+         buf[end - 2] == '\x1b' && buf[end - 1] == '\\';
+}
+
 /* how long ctui_gfx_kitty_probe_shm() waits for a reply before assuming
  * the terminal either doesn't support t=s or isn't a real Kitty terminal
  * at all -- generous enough for a real terminal's near-instant APC reply
- * to arrive over a local pty, short enough that a terminal which will
- * never reply (the common case: anything that isn't Kitty) doesn't stall
- * ctui_init() noticeably. */
+ * to arrive over a local pty. Only a terminal that never replies waits it
+ * out; a reply ends the wait as soon as it's complete. */
 #define CTUI_KITTY_PROBE_TIMEOUT_MS 250
 
 /* Phase 6: one-shot startup probe for Kitty's t=s (shared-memory)
@@ -387,6 +396,11 @@ void ctui_gfx_kitty_probe_shm(void) {
       break;
     }
     reply_len += (size_t)r;
+    /* kitty answers at once: done as soon as the reply is in (waiting
+     * out the timeout cost every ctui app 250 ms at startup) */
+    if (ctui_gfx_kitty_apc_complete(reply, reply_len)) {
+      break;
+    }
   }
 
   /* a=q means the terminal was never asked to keep this segment open

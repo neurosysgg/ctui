@@ -6,11 +6,20 @@
  * real terminal aren't covered here -- see docs/protocol.md's testing
  * checklist for how that was verified (a throwaway pty check, not
  * something that belongs in a headless suite). */
+/* posix_openpt()/grantpt()/ptsname() for the probe's pty test */
+#define _XOPEN_SOURCE 700
+
 #include "ctui.h"
 
 #include "ctui_test.h"
 
+#include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <termios.h>
+#include <time.h>
+#include <unistd.h>
 
 /* g_gfx_mode is intentionally private (core/ctui_internal.h, never
  * included by ctui.h -- see that header's own comment). Redeclaring the
@@ -36,6 +45,8 @@ extern unsigned int g_gfx_mode;
  * tested without a live pty. */
 extern int ctui_gfx_kitty_apc_span(const char *buf, size_t len,
                                    size_t *start, size_t *end);
+
+extern int ctui_gfx_kitty_apc_complete(const char *buf, size_t len);
 
 extern int ctui_gfx_kitty_reply_is_ok(const char *buf, size_t len,
                                       unsigned int image_id);
@@ -257,6 +268,92 @@ static void test_kitty_apc_span(void) {
                    "apc_span() rejects a NULL/empty buffer");
 }
 
+static void test_kitty_apc_complete(void) {
+  static const char whole[] = "\x1b_Gi=1;OK\x1b\\";
+  static const char typed[] = "a\x1b_Gi=1;OK\x1b\\b";
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_apc_complete(whole, sizeof whole - 1) &&
+                       ctui_gfx_kitty_apc_complete(typed, sizeof typed - 1),
+                   "apc_complete(): a terminated reply, with or without "
+                   "input around it");
+  CTUI_TEST_ASSERT(!ctui_gfx_kitty_apc_complete(whole, sizeof whole - 2) &&
+                       !ctui_gfx_kitty_apc_complete(whole, 5) &&
+                       !ctui_gfx_kitty_apc_complete("abc", 3) &&
+                       !ctui_gfx_kitty_apc_complete(NULL, 0),
+                   "apc_complete(): not yet -- half a terminator, half a "
+                   "reply, no reply");
+}
+
+/* the probe against a pty: the parent plays the terminal and answers
+ * (reply: NULL = never, else in two writes gap_ms apart); the child runs
+ * ctui_gfx_kitty_probe_shm() on the pty and exits with how long it took,
+ * in 10 ms units */
+static int probe_ms(const char *reply, int gap_ms) {
+  int master = posix_openpt(O_RDWR | O_NOCTTY);
+  if (master < 0 || grantpt(master) != 0 || unlockpt(master) != 0) {
+    return -1;
+  }
+  pid_t pid = fork();
+  if (pid == 0) {
+    int slave = open(ptsname(master), O_RDWR);
+    struct termios t;
+    tcgetattr(slave, &t);
+    t.c_lflag &= ~(unsigned)(ECHO | ICANON);
+    t.c_cc[VMIN] = 1;
+    t.c_cc[VTIME] = 0;
+    tcsetattr(slave, TCSANOW, &t);
+    dup2(slave, STDIN_FILENO);
+    dup2(slave, STDOUT_FILENO);
+    struct timespec a, b;
+    clock_gettime(CLOCK_MONOTONIC, &a);
+    ctui_gfx_kitty_probe_shm();
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    long ms = (b.tv_sec - a.tv_sec) * 1000 + (b.tv_nsec - a.tv_nsec) / 1000000;
+    _exit((int)(ms / 10 > 250 ? 250 : ms / 10));
+  }
+  /* the query first, up to its ESC \ */
+  char buf[256];
+  size_t got = 0;
+  while (got < sizeof buf) {
+    ssize_t r = read(master, buf + got, sizeof buf - got);
+    if (r <= 0) {
+      break;
+    }
+    got += (size_t)r;
+    if (got >= 2 && buf[got - 2] == '\x1b' && buf[got - 1] == '\\') {
+      break;
+    }
+  }
+  if (reply) {
+    size_t half = strlen(reply) / 2;
+    ssize_t w = write(master, reply, half);
+    struct timespec gap = {0, gap_ms * 1000000L};
+    nanosleep(&gap, NULL);
+    w = write(master, reply + half, strlen(reply) - half);
+    (void)w;
+  }
+  int status = 0;
+  waitpid(pid, &status, 0);
+  close(master);
+  return WIFEXITED(status) ? WEXITSTATUS(status) * 10 : -1;
+}
+
+static void test_kitty_probe_timing(void) {
+  int ms = probe_ms("\x1b_Gi=1;OK\x1b\\", 0);
+  CTUI_TEST_ASSERT(ms >= 0 && ms < 100,
+                   "the probe returns once kitty's reply is in, not after "
+                   "its 250 ms timeout (%d ms)",
+                   ms);
+  ms = probe_ms("\x1b_Gi=1;OK\x1b\\", 30);
+  CTUI_TEST_ASSERT(ms >= 20 && ms < 150,
+                   "a reply in two pieces: it waits for the second (%d ms)",
+                   ms);
+  ms = probe_ms(NULL, 0);
+  CTUI_TEST_ASSERT(ms >= 200,
+                   "no reply (not kitty): it still waits the timeout out "
+                   "(%d ms)",
+                   ms);
+}
+
 static void test_place_file_escape(void) {
   char out[256];
   size_t n = ctui_gfx_kitty_place_file_escape(out, sizeof out, 7, "/i.png", 2,
@@ -287,6 +384,8 @@ int main(void) {
   test_app_init_validation();
   test_kitty_shm_reply_parsing();
   test_kitty_apc_span();
+  test_kitty_apc_complete();
+  test_kitty_probe_timing();
   test_place_file_escape();
 
   return ctui_test_summary();

@@ -234,6 +234,17 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **ctui_init() no longer sits out the kitty shm probe** (2026-09-25,
+      found timing ctui-wm's Alt+Tab popup: 250 of its ~330 ms from launch
+      to first frame were `ctui_init()`): `ctui_gfx_kitty_probe_shm()`
+      read until its 250 ms deadline even after kitty's reply had come
+      in, so every ctui app on kitty started 250 ms late. It now stops as
+      soon as the reply is complete (`ctui_gfx_kitty_apc_complete()`, a
+      gray-box helper next to `apc_span()`); a terminal that never
+      replies still waits the timeout out. Tests in
+      `kitty_protocol_test.c`, the probe itself against a pty playing the
+      terminal (instant reply, a reply in two pieces, no reply).
+
 - [x] **Cutting text with an ellipsis** (2026-09-25, for ctui-wm, whose
       widgets each carried the same "cut to width" helper and cut media
       titles, network names etc. mid-word with no sign of it):
