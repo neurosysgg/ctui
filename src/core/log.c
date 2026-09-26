@@ -65,9 +65,15 @@ int ctui_logf(int level, const char *fmt, ...) {
   return log_result;
 }
 
+static const char *log_path = "ctui.log";
+
+void ctui_log_set_path(const char *path) {
+  log_path = path ? path : "ctui.log";
+}
+
 void ctui_log_init(int verbosity) {
   _ctui_ticks = 0;
-  logger = init_logger("ctui.log", verbosity);
+  logger = init_logger((char *)log_path, verbosity);
   ctui_tick_advance();
   ctui_logf(E_INF, "[CTUI:LOG] - logger initialised @ tick %d.\n",
             _ctui_ticks);

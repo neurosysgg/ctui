@@ -5,9 +5,16 @@
  * ctui_log_shutdown(). Every other test calls ctui_log_init(E_ALL), so
  * nothing else in the suite ever takes the "filtered out" branch or calls
  * shutdown. */
+#define _POSIX_C_SOURCE 200809L /* mkstemp() */
+
 #include "ctui.h"
 
 #include "ctui_test.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 int main(void) {
   ctui_log_init(E_ERR); /* only E_ERR passes -- everything else is masked */
@@ -32,6 +39,27 @@ int main(void) {
                    "each call");
 
   ctui_log_shutdown();
+
+  /* a path of the app's own */
+  char path[] = "/tmp/ctui-log-test-XXXXXX";
+  int fd = mkstemp(path);
+  CTUI_TEST_ASSERT(fd >= 0, "a scratch log file");
+  close(fd);
+  ctui_log_set_path(path);
+  ctui_log_init(E_ALL);
+  ctui_log(E_INF, "into the app's log\n");
+  ctui_log_shutdown();
+  ctui_log_set_path(NULL);
+  FILE *f = fopen(path, "r");
+  char buf[4096] = "";
+  size_t n = f ? fread(buf, 1, sizeof buf - 1, f) : 0;
+  buf[n] = '\0';
+  if (f) {
+    fclose(f);
+  }
+  CTUI_TEST_ASSERT(strstr(buf, "into the app's log") != NULL,
+                   "ctui_log_set_path() moves the log");
+  remove(path);
 
   return ctui_test_summary();
 }

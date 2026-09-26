@@ -9,6 +9,12 @@
  * ctui_init() calls this itself, so normal apps don't need it. */
 void ctui_log_init(int verbosity);
 
+/* the file ctui_log_init() (so ctui_init()) opens: "ctui.log" in the cwd
+ * unless set here first. path is kept, not copied; NULL goes back to the
+ * default. For an app whose cwd is the user's (a file manager), not a
+ * directory of its own. */
+void ctui_log_set_path(const char *path);
+
 /* the logging half of ctui_shutdown() -- closes the log file opened by
  * ctui_log_init(). Split out for the same reason ctui_log_init() is: kept
  * separate from terminal teardown so a headless caller could shut down

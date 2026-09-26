@@ -234,6 +234,12 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The log's path** (2026-09-26, for ctui-wm's apps: a file manager's
+      cwd is the user's directory, where a `ctui.log` doesn't belong):
+      `ctui_log_set_path(path)` before `ctui_init()` picks the file
+      `ctui_log_init()` opens; NULL (or never calling it) keeps
+      `ctui.log` in the cwd. Tested in `log_test.c`.
+
 - [x] **App widgets** (2026-09-26, for ctui-wm's built-in apps --
       `ctui-files`, `ctui-settings`, `ctui-vms` -- and the text input its
       launcher and prompt popups each carried): six widgets that share

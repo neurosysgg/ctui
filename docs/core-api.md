@@ -420,6 +420,9 @@ above into the loop described in "Life of a frame".
   (`tools/ctui_test.h`) can get a working logger without a real tty.
   `ctui_init()` calls `ctui_log_init()` itself — normal apps never
   call it directly.
+- `ctui_log_set_path(path)` — the file `ctui_log_init()` opens
+  (default `ctui.log` in the cwd); call before `ctui_init()`. For an app
+  whose cwd is the user's (a file manager). The path is kept, not copied.
 - `ctui_log(level, str)` / `ctui_logf(level, fmt, ...)` — `level` is
   exactly one of `E_DBG`/`E_WRN`/`E_INF`/`E_ERR` (`src/logger.h`).
   Every non-trivial core operation logs through these — grep
