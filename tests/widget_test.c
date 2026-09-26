@@ -256,12 +256,28 @@ static void test_gfx_dispatch(void) {
   ctui_compositor_free(comp);
 }
 
+static void test_puts_n(void) {
+  CTUI_COMPOSITOR *comp = ctui_compositor_create(2, 10);
+  CTUI_WIDGET w = ctui_widget_make(0, 0, 10, 2, NULL, noop_render, NULL);
+  ctui_widget_init(&w, comp);
+  int n = ctui_widget_puts_n(&w, comp, 0, 0, "h\xc3\xa9llo world", 6,
+                             CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
+  CTUI_TEST_ASSERT(n == 5 && comp->cells[1].ch == 0xe9 &&
+                       comp->cells[4].ch == 'o' && comp->cells[5].ch == ' ',
+                   "puts_n() draws the glyphs of its first n bytes (%d)", n);
+  n = ctui_widget_puts_n(&w, comp, 1, 0, "ab", 9, CTUI_COLOR_DEFAULT,
+                         CTUI_COLOR_DEFAULT);
+  CTUI_TEST_ASSERT(n == 2, "puts_n() stops at a NUL before n");
+  ctui_compositor_free(comp);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
   test_putc_bounds();
   test_puts_and_color_modes();
   test_puts_cut();
+  test_puts_n();
   test_widget_init_out_of_bounds();
   test_gfx_dispatch();
 

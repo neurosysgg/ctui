@@ -41,6 +41,14 @@ int ctui_util_center_col(const char *str, int width);
  * a multi-byte trunc like "…" on a short tail). */
 int ctui_util_truncate_str(char *str, size_t desired, char *trunc);
 
+/* one line of s word-wrapped at width columns: returns how many bytes of
+ * s the line shows (blanks at its end left out) and sets *next to where
+ * the following line starts (past the blanks at the break and a '\n').
+ * Words stay whole where they fit, a longer one is cut by columns, and
+ * each line takes at least one glyph, so a loop `while (*s)` over it
+ * always ends. Draw the bytes with ctui_widget_puts_n(). */
+size_t ctui_util_wrap(const char *s, int width, const char **next);
+
 /* linearly rescales value from [in_min, in_max] to [out_min, out_max],
  * clamping value to [in_min, in_max] first so out-of-range input can't
  * produce an out-of-range result. Integer math throughout (truncates

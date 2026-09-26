@@ -9,6 +9,22 @@
 
 #include <string.h>
 
+/* the lines of s wrapped at w, joined by '|' */
+static const char *wrapped(const char *s, int w) {
+  static char out[256];
+  out[0] = '\0';
+  while (*s) {
+    const char *next;
+    size_t n = ctui_util_wrap(s, w, &next);
+    if (out[0]) {
+      strcat(out, "|");
+    }
+    strncat(out, s, n);
+    s = next;
+  }
+  return out;
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -96,6 +112,26 @@ int main(void) {
                    "inset rejects a margin that consumes the whole width");
   CTUI_TEST_ASSERT(stale.x == -1 && stale.w == -1,
                    "a rejected inset leaves content's geometry untouched");
+
+  /* --- ctui_util_wrap --- */
+  CTUI_TEST_ASSERT(!strcmp(wrapped("one two three", 7), "one two|three"),
+                   "wrap keeps words whole: %s", wrapped("one two three", 7));
+  CTUI_TEST_ASSERT(!strcmp(wrapped("abcdefgh ij", 3), "abc|def|gh|ij"),
+                   "wrap cuts a word longer than the line: %s",
+                   wrapped("abcdefgh ij", 3));
+  CTUI_TEST_ASSERT(!strcmp(wrapped("a\n\nb", 5), "a||b"),
+                   "wrap keeps an empty line between two breaks: %s",
+                   wrapped("a\n\nb", 5));
+  CTUI_TEST_ASSERT(!strcmp(wrapped("abc   def", 3), "abc|def"),
+                   "wrap drops the blanks at a break: %s",
+                   wrapped("abc   def", 3));
+  CTUI_TEST_ASSERT(!strcmp(wrapped("日本語です", 4), "日本|語で|す"),
+                   "wrap counts columns, not bytes: %s",
+                   wrapped("日本語です", 4));
+  CTUI_TEST_ASSERT(!strcmp(wrapped("xy", 0), "x|y"),
+                   "wrap at width 0 still moves a glyph per line");
+  CTUI_TEST_ASSERT(!strcmp(wrapped("end\n", 9), "end"),
+                   "a trailing newline adds no line");
 
   return ctui_test_summary();
 }

@@ -188,3 +188,38 @@ size_t ctui_util_base64_encode(const unsigned char *src, size_t len,
             ctui_tick_advance(), len, di);
   return di;
 }
+
+size_t ctui_util_wrap(const char *s, int width, const char **next) {
+  size_t i = 0, brk = 0;
+  int col = 0;
+  while (s[i] && s[i] != '\n') {
+    uint32_t cp;
+    int k = ctui_utf8_decode(s + i, &cp);
+    k = k > 0 ? k : 1;
+    int cw = ctui_utf8_cpwidth(cp);
+    cw = cw > 0 ? cw : 0;
+    if (cp == ' ' && i > 0) {
+      brk = i;
+    }
+    if (col + cw > width && i > 0) {
+      break;
+    }
+    col += cw;
+    i += (size_t)k;
+  }
+  size_t end = i;
+  if (s[i] && s[i] != '\n' && brk > 0) { /* cut inside a word: at the blank */
+    end = i = brk;
+  }
+  while (end > 0 && s[end - 1] == ' ') {
+    end--;
+  }
+  while (s[i] == ' ') {
+    i++;
+  }
+  if (s[i] == '\n') {
+    i++;
+  }
+  *next = s + i;
+  return end;
+}

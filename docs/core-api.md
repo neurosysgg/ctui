@@ -190,6 +190,10 @@ ever set; every other widget leaves both `NULL`.
   `puts` cut to `width` columns, a string that doesn't fit ending in "…"
   (U+2026) in the last one; returns the columns written. The way to draw
   anything (a title, a name) that may be longer than its room.
+- `ctui_widget_puts_n(widget, comp, row, col, str, n, fg, bg)` — puts of
+  `str`'s first `n` bytes (stopping early at a NUL): a slice of a longer
+  text, such as a line from `ctui_util_wrap()`, drawn without copying it
+  out. Returns the columns written.
 - `ctui_widget_put_kitty_placeholder(widget, comp, row, col, image_id,
   cols, rows, bg)` — a `cols` x `rows` block of placeholder cells showing
   an image placed with `ctui_gfx_kitty_place_file()` (placed at the same
@@ -433,6 +437,11 @@ Not tied to any specific widget:
   `ctui_widget_puts()`. Both count display columns, not bytes;
   `center_h`'s buffer needs extra room for multi-byte glyphs (see
   `util.h`).
+- `ctui_util_wrap(s, width, &next)` — one word-wrapped line of `s`: the
+  bytes it shows (blanks at its end left out) and, in `next`, where the
+  following line starts (past the blanks at the break and a `'\n'`).
+  Words stay whole where they fit, longer ones are cut by columns; each
+  line takes at least one glyph, so `while (*s)` over it always ends.
 - `ctui_util_rescale_i(value, in_min, in_max, out_min, out_max)` —
   integer linear rescale, clamped, for cell/pixel/color-channel math.
 - `CTUI_MARGIN`, `ctui_margin_uniform(n)`, `ctui_util_inset(content,

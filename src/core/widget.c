@@ -165,6 +165,24 @@ void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   widget_puts_styled(widget, comp, row, col, str, &style);
 }
 
+int ctui_widget_puts_n(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                       int col, const char *str, size_t n, unsigned char fg,
+                       unsigned char bg) {
+  CTUI_CELL style = {.fg = fg, .bg = bg, .color_mode = CTUI_COLOR_MODE_BASIC};
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - puts_n @ tick %d (row=%d, col=%d, n=%zu): "
+            "\"%.*s\"\n",
+            ctui_tick_advance(), row, col, n, (int)n, str);
+  const char *end = str + n;
+  int c = col;
+  while (str < end && *str) {
+    uint32_t cp;
+    str += ctui_utf8_decode(str, &cp);
+    c += widget_put(widget, comp, row, c, cp, &style);
+  }
+  return c - col;
+}
+
 int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                          int col, const char *str, int width,
                          unsigned char fg, unsigned char bg) {

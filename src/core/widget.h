@@ -141,6 +141,13 @@ void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                       int col, const char *str, unsigned char fg,
                       unsigned char bg);
 
+/* puts() of str's first n bytes (fewer if a NUL comes first): a slice of
+ * a longer text drawn without copying it out, e.g. a line from
+ * ctui_util_wrap(). Returns the columns written. */
+int ctui_widget_puts_n(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                       int col, const char *str, size_t n, unsigned char fg,
+                       unsigned char bg);
+
 /* puts() cut to at most width columns from col: a string that doesn't fit
  * ends in "…" (U+2026, one glyph) right after its last visible glyph
  * (spaces before the cut are dropped). Returns the columns written (0 for
