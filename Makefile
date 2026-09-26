@@ -40,7 +40,10 @@ ctui-player: $(CORE_SRC) $(CORE_HDR) examples_apps/player/main.c $(wildcard exam
 ctui-kitty_demo: $(CORE_SRC) $(CORE_HDR) examples_apps/kitty_demo/main.c $(wildcard examples_apps/kitty_demo/widgets/*)
 	$(CC) $(CFLAGS) -o ctui-kitty_demo $(CORE_SRC) examples_apps/kitty_demo/main.c $(wildcard examples_apps/kitty_demo/widgets/*.c) $(LDLIBS)
 
-examples: ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo ctui-demo-advanced
+ctui-gallery: $(CORE_SRC) $(CORE_HDR) examples_apps/gallery/main.c $(wildcard examples_apps/gallery/widgets/*)
+	$(CC) $(CFLAGS) -o ctui-gallery $(CORE_SRC) examples_apps/gallery/main.c $(wildcard examples_apps/gallery/widgets/*.c) $(LDLIBS)
+
+examples: ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo ctui-demo-advanced ctui-gallery
 
 all: ctui-demo examples
 
@@ -54,7 +57,7 @@ coverage: $(CORE_SRC) $(CORE_HDR) $(TEST_SRC) tools/ctui_test.h tools/coverage.s
 	@bash tools/coverage.sh
 
 clean:
-	rm -f ctui-demo ctui-demo-advanced ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN)
+	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN)
 	rm -rf coverage
 
 .PHONY: clean examples all test coverage

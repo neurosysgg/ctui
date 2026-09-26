@@ -1,0 +1,246 @@
+#include "table.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#define GAP 1 /* columns between two columns */
+
+static int body_rows(const CTUI_TABLE *t, int h) {
+  int n = h - (t->header ? 1 : 0);
+  return n > 0 ? n : 0;
+}
+
+static void scroll_into_view(CTUI_TABLE *t, int rows) {
+  if (t->selected < t->scroll) {
+    t->scroll = t->selected;
+  } else if (rows > 0 && t->selected >= t->scroll + rows) {
+    t->scroll = t->selected - rows + 1;
+  }
+  int top = t->count - (rows > 0 ? rows : 1);
+  if (t->scroll > top) { /* no blank rows under the last one */
+    t->scroll = top;
+  }
+  if (t->scroll < 0) {
+    t->scroll = 0;
+  }
+}
+
+void ctui_table_select(CTUI_TABLE *t, int row) {
+  if (row >= t->count) {
+    row = t->count - 1;
+  }
+  t->selected = row < 0 ? 0 : row;
+  scroll_into_view(t, t->page);
+}
+
+static int move(CTUI_TABLE *t, int to) {
+  int was = t->selected;
+  ctui_table_select(t, to);
+  return t->selected != was ? CTUI_TABLE_MOVED : CTUI_TABLE_NONE;
+}
+
+int ctui_table_key(CTUI_TABLE *t, const CTUI_KEYPRESS_EVENT_DATA *kp) {
+  if (t->count <= 0) {
+    return CTUI_TABLE_NONE;
+  }
+  int page = t->page > 1 ? t->page - 1 : 1;
+  switch (kp->type) {
+  case CTUI_KEY_UP:
+    return move(t, t->selected - 1);
+  case CTUI_KEY_DOWN:
+    return move(t, t->selected + 1);
+  case CTUI_KEY_PGUP:
+    return move(t, t->selected - page);
+  case CTUI_KEY_PGDN:
+    return move(t, t->selected + page);
+  case CTUI_KEY_HOME:
+    return move(t, 0);
+  case CTUI_KEY_END:
+    return move(t, t->count - 1);
+  case CTUI_KEY_ENTER:
+    return CTUI_TABLE_ACTIVATE;
+  case CTUI_KEY_INSERT:
+    break;
+  case CTUI_KEY_CHAR:
+    if (kp->ch == ' ' && !kp->mods) {
+      break;
+    }
+    return CTUI_TABLE_NONE;
+  default:
+    return CTUI_TABLE_NONE;
+  }
+  if (!t->marks) {
+    return CTUI_TABLE_NONE;
+  }
+  t->marks[t->selected] = !t->marks[t->selected];
+  move(t, t->selected + 1);
+  return CTUI_TABLE_MARK;
+}
+
+/* column i's left edge and width at total width w */
+static void column_span(const CTUI_TABLE *t, int w, int i, int *x,
+                        int *width) {
+  int fixed = 0, flex = 0;
+  for (int c = 0; c < t->column_count; c++) {
+    if (t->columns[c].width > 0) {
+      fixed += t->columns[c].width;
+    } else {
+      flex++;
+    }
+  }
+  int rest = w - fixed - GAP * (t->column_count - 1);
+  rest = rest > 0 ? rest : 0;
+  int at = 0, given = 0, seen = 0;
+  for (int c = 0; c <= i; c++) {
+    int cw = t->columns[c].width;
+    if (cw <= 0) { /* the last flexible column takes the remainder */
+      seen++;
+      cw = seen == flex ? rest - given : rest / flex;
+      given += cw;
+    }
+    if (c == i) {
+      *x = at;
+      *width = at + cw > w ? w - at : cw;
+      if (*width < 0) {
+        *width = 0;
+      }
+      return;
+    }
+    at += cw + GAP;
+  }
+}
+
+int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
+                     const CTUI_MOUSE_EVENT_DATA *m) {
+  if (!ctui_widget_contains(self, m->row, m->col)) {
+    return CTUI_TABLE_NONE;
+  }
+  t->page = body_rows(t, self->h);
+  if (m->action == CTUI_MOUSE_SCROLL_UP) {
+    return move(t, t->selected - 3);
+  }
+  if (m->action == CTUI_MOUSE_SCROLL_DOWN) {
+    return move(t, t->selected + 3);
+  }
+  if (m->action != CTUI_MOUSE_PRESS || (m->button != 0 && m->button != 2)) {
+    return CTUI_TABLE_NONE;
+  }
+  int row = m->row - self->y, col = m->col - self->x;
+  if (t->header && row == 0) {
+    if (m->button != 0) {
+      return CTUI_TABLE_NONE;
+    }
+    for (int c = 0; c < t->column_count; c++) {
+      int x, w;
+      column_span(t, self->w, c, &x, &w);
+      if (col >= x && col < x + w) {
+        t->sort_desc = t->sort_col == c ? !t->sort_desc : 0;
+        t->sort_col = c;
+        return CTUI_TABLE_SORT;
+      }
+    }
+    return CTUI_TABLE_NONE;
+  }
+  int r = t->scroll + row - (t->header ? 1 : 0);
+  if (r < 0 || r >= t->count) {
+    return CTUI_TABLE_NONE;
+  }
+  if (m->button == 2) {
+    ctui_table_select(t, r);
+    return CTUI_TABLE_MENU;
+  }
+  if (r == t->selected) {
+    return CTUI_TABLE_ACTIVATE;
+  }
+  return move(t, r);
+}
+
+static void draw_cell(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
+                      int x, int w, const char *s, int right,
+                      unsigned char fg, unsigned char bg) {
+  if (w <= 0 || !s) {
+    return;
+  }
+  int sw = ctui_utf8_width(s);
+  int at = right && sw < w ? x + w - sw : x;
+  ctui_widget_puts_cut(self, comp, row, at, s, w, fg, bg);
+}
+
+void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  CTUI_TABLE *t = self->widget_data;
+  const CTUI_STYLE *st = ctui_style_of(t->style);
+  t->page = body_rows(t, self->h);
+  if (t->count > 0) {
+    ctui_table_select(t, t->selected);
+  }
+  if (self->w <= 0) {
+    return;
+  }
+  int row = 0;
+  if (t->header && self->h > 0) {
+    for (int c = 0; c < t->column_count; c++) {
+      int x, w;
+      column_span(t, self->w, c, &x, &w);
+      char title[128];
+      snprintf(title, sizeof title, "%s%s", t->columns[c].title,
+               c != t->sort_col ? ""
+               : t->sort_desc   ? " \xe2\x96\xbe"   /* ▾ */
+                                : " \xe2\x96\xb4"); /* ▴ */
+      draw_cell(self, comp, 0, x, w, title, t->columns[c].align_right,
+                st->title_fg, st->bg);
+    }
+    row = 1;
+  }
+  char scratch[256];
+  for (int r = t->scroll; r < t->count && row < self->h; r++, row++) {
+    int sel = r == t->selected, marked = t->marks && t->marks[r];
+    unsigned char fg = t->row_fg ? t->row_fg(t->ctx, r) : 0;
+    fg = marked ? st->mark_fg : fg ? fg : st->fg;
+    unsigned char bg = st->bg;
+    if (sel) {
+      fg = marked ? st->mark_fg : st->sel_fg;
+      bg = st->sel_bg;
+      for (int c = 0; c < self->w; c++) {
+        ctui_widget_putc(self, comp, row, c, ' ', fg, bg);
+      }
+    }
+    for (int c = 0; c < t->column_count; c++) {
+      int x, w;
+      column_span(t, self->w, c, &x, &w);
+      scratch[0] = '\0';
+      const char *s = t->cell(t->ctx, r, c, scratch, sizeof scratch);
+      draw_cell(self, comp, row, x, w, s, t->columns[c].align_right, fg, bg);
+    }
+  }
+}
+
+static const char *const action_names[] = {"", "moved", "activate", "mark",
+                                           "sort", "menu"};
+
+static int emit(CTUI_WIDGET *self, int what) {
+  if (what == CTUI_TABLE_NONE) {
+    return 0;
+  }
+  CTUI_TABLE *t = self->widget_data;
+  ctui_logf(E_INF, "[CTUI:TABLE] - %s @ tick %d (row %d of %d)\n",
+            action_names[what], ctui_tick_advance(), t->selected, t->count);
+  CTUI_VALUE_CHANGED_EVENT_DATA changed = {
+      .value = action_names[what],
+      .enabled = what == CTUI_TABLE_SORT ? t->sort_col : t->selected};
+  CTUI_EVENT out = {.type = CTUI_VALUE_CHANGED_EVENT,
+                    .scope = CTUI_EVENT_SCOPE_GLOBAL,
+                    .ev_source = "table",
+                    .event_data = &changed,
+                    .origin = self};
+  ctui_handle_event(&out);
+  return 1;
+}
+
+int ctui_table_handle_keypress(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  return emit(self, ctui_table_key(self->widget_data, ev->event_data));
+}
+
+int ctui_table_handle_mouse(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  return emit(self,
+              ctui_table_mouse(self->widget_data, self, ev->event_data));
+}

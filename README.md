@@ -166,8 +166,9 @@ else.
   knowledge of any specific widget.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
   `menu`, `status`, `debug_info`, `dump_palette`, `grid`, `list`,
-  `periodic`, `kitty_image`, `clock`), each a small `.c`/`.h` pair built entirely
-  on the public `ctui.h` API.
+  `periodic`, `kitty_image`, `clock`, and the app widgets sharing one
+  `style`: `entry`, `table`, `dialog`, `textview`, `form`, `tabs`), each a
+  small `.c`/`.h` pair built entirely on the public `ctui.h` API.
 - `examples_apps/` — real, runnable ctui apps, one subfolder each
   (`examples_apps/<name>/main.c` + an optional local `widgets/`):
   `hello` (the minimal border + label app walked through in Usage above),
@@ -191,7 +192,9 @@ else.
   between `CTUI_GRID` presses and its tokens), `player` (a WAV player
   with a live VU-meter viz, playing through ALSA — see
   `examples_apps/player/DESIGN.md` for the full design notes on its
-  decoder/output/process pipeline), and `kitty_demo` (the minimal
+  decoder/output/process pipeline), `gallery` (the app widgets together:
+  a sidebar switching between a settings form, a sortable file table with
+  marks and dialogs over it, and a text pane), and `kitty_demo` (the minimal
   single-widget proving-ground `CTUI_KITTY_IMAGE` first shipped in —
   see `docs/protocol.md` for how a non-degradable graphics protocol
   like Kitty's is added, and for the separate write-up on integrating

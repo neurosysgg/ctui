@@ -234,6 +234,61 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **App widgets** (2026-09-26, for ctui-wm's built-in apps --
+      `ctui-files`, `ctui-settings`, `ctui-vms` -- and the text input its
+      launcher and prompt popups each carried): six widgets that share
+      one theme struct and one shape.
+      - `CTUI_STYLE` (`widgets/style.h`): fg, bg, dim, title, selection,
+        mark and error colours; every app widget takes `const CTUI_STYLE
+        *style`, NULL = `ctui_style_default`, so an app themes them all in
+        one place.
+      - The shape: each widget's state is a plain struct the app owns; a
+        pure `ctui_X_key()` / `ctui_X_mouse()` returns what happened
+        (`CTUI_TABLE_MOVED`, `CTUI_FORM_CHANGED`, ...), so an app with
+        several panes routes input itself (one handler, the focused
+        pane's function); `ctui_X_handle_keypress/_mouse()` wrap them for
+        the registry and emit `CTUI_VALUE_CHANGED_EVENT` with the action
+        as `value` ("moved", "activate", "changed", ...) and the row/item
+        in `enabled`.
+      - `CTUI_ENTRY` (`entry.h`): a one-line input over a caller-owned
+        buffer, shell keys (words, ctrl+w/u/k/a/e, ctrl/alt+backspace),
+        scrolled to the cursor (a block over its glyph), secret mode
+        (dots), placeholder; freed bytes are zeroed. Named "entry"
+        because `ctui_input_*` is core's read loop. `ctui_entry_draw()`
+        embeds it in other widgets (form rows, dialogs).
+      - `CTUI_TABLE` (`table.h`): columns (fixed or sharing the rest,
+        right-aligned numbers), a header with the sort column's ▴/▾,
+        cursor, scroll, marks (space/insert), per-row fg. Rows come from
+        a `cell(ctx, row, col, scratch, cap)` callback, called only for
+        the rows on screen: a 100 000-entry directory costs a screenful.
+        Sorting stays the app's (a header click reports SORT).
+      - `CTUI_DIALOG` (`dialog.h`): a centred modal box -- title, wrapped
+        text, an optional entry, an optional progress bar, buttons;
+        closes on a pick or Esc. Modality is the app's routing (the
+        registry can't stop a key).
+      - `CTUI_TEXTVIEW` (`textview.h`): read-only text indexed by line
+        once; word-wrapped (long words cut) or unwrapped with a sideways
+        scroll; tabs to 8, control bytes as '?', CRLF handled; End walks
+        up from the last row instead of down from the view.
+      - `CTUI_FORM` (`form.h`): settings rows -- heading, entry, toggle,
+        choice, slider (click + drag), button; focus skips headings and
+        disabled rows; sliders share one bar width so they line up.
+      - `CTUI_TABS` (`tabs.h`): a sidebar (vertical, with headings) or a
+        tab bar (scrolled to the selection).
+      - Core additions they needed: `ctui_util_wrap()` (one word-wrapped
+        line of a string: its byte length and where the next starts, no
+        copying) and `ctui_widget_puts_n()` (puts of a byte range), both
+        generic.
+      - `examples_apps/gallery`: all six in one app (sidebar -> form /
+        table / text pages, dialogs over the table), routed by one
+        handler. Verified in a pty and under ASan/UBSan. Tests:
+        `entry_test`, `table_test`, `dialog_test`, `textview_test`,
+        `form_test`, `tabs_test`, plus wrap in `util_test` and puts_n in
+        `widget_test`.
+      - Promoted straight to `src/widgets/` rather than staged: ctui-wm
+        already carried two text inputs, and its three apps need the rest
+        (PLAN.md phase 12 there).
+
 - [x] **ctui_init() no longer sits out the kitty shm probe** (2026-09-25,
       found timing ctui-wm's Alt+Tab popup: 250 of its ~330 ms from launch
       to first frame were `ctui_init()`): `ctui_gfx_kitty_probe_shm()`
