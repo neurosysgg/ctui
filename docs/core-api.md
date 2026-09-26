@@ -402,6 +402,13 @@ above into the loop described in "Life of a frame".
   would give (ctrl+letter is still the control byte); terminals without
   the protocol ignore it; `ctui_shutdown()` restores the previous mode.
 
+- `ctui_suspend()` / `ctui_resume()` — hand the terminal to a child (an
+  editor, a pager) and take it back: suspend leaves the alternate screen,
+  turns the modes above off and restores the termios `ctui_init()` found;
+  resume brings all of that back and makes the next `ctui_input_loop()`
+  report a `CTUI_RESIZE_EVENT`, so `ctui_app_run()` redraws every cell.
+  Call them from a handler around the child's `fork()`/`waitpid()`.
+
 ## `input.h` — the blocking read loop
 
 - `ctui_input_loop(ev, tick_ms)` — blocks until the first of: a key

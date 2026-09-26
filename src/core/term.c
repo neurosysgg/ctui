@@ -17,7 +17,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-static struct termios orig_termios;
+static struct termios orig_termios, raw_termios;
 /* 0 off, else 1 + the tracking level: clicks 1, drag 2, any motion 3 */
 static int g_mouse_enabled = 0;
 static int g_focus_enabled = 0;
@@ -88,6 +88,7 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
   raw.c_cc[VTIME] = 0;
   ctui_tick_advance();
 
+  raw_termios = raw;
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
     ctui_log(E_ERR, "[CTUI:TERM] - TCSAFLUSH error\n");
     return -1;
@@ -128,6 +129,51 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
   return 0;
 }
 
+static void mouse_on(int level) {
+  printf(level == 3   ? "\x1b[?1000h\x1b[?1003h\x1b[?1006h"
+         : level == 2 ? "\x1b[?1000h\x1b[?1002h\x1b[?1006h"
+                      : "\x1b[?1000h\x1b[?1006h");
+}
+
+/* every mode ctui turned on, off again (the flags stay: for a resume) */
+static void modes_off(void) {
+  if (g_mouse_enabled) {
+    printf("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
+  }
+  if (g_focus_enabled) {
+    printf("\x1b[?1004l");
+  }
+  if (g_kitty_keys_enabled) {
+    printf("\x1b[<u");
+  }
+  printf("\x1b[?25h\x1b[?1049l");
+}
+
+void ctui_suspend(void) {
+  ctui_logf(E_INF, "[CTUI:TERM] - suspended @ tick %d\n",
+            ctui_tick_advance());
+  modes_off();
+  fflush(stdout);
+  tcsetattr(STDIN_FILENO, TCSADRAIN, &orig_termios);
+}
+
+void ctui_resume(void) {
+  tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios);
+  printf("\x1b[?1049h\x1b[?25l");
+  if (g_mouse_enabled) {
+    mouse_on(g_mouse_enabled);
+  }
+  if (g_focus_enabled) {
+    printf("\x1b[?1004h");
+  }
+  if (g_kitty_keys_enabled) {
+    printf("\x1b[>1u");
+  }
+  fflush(stdout);
+  g_resize_pending = 1; /* a full redraw, at whatever size it is now */
+  ctui_logf(E_INF, "[CTUI:TERM] - resumed @ tick %d\n", ctui_tick_advance());
+}
+
 void ctui_mouse_enable(int track_motion) {
   int level = track_motion == CTUI_MOUSE_TRACK_ANY    ? 3
               : track_motion == CTUI_MOUSE_TRACK_DRAG ? 2
@@ -138,9 +184,7 @@ void ctui_mouse_enable(int track_motion) {
   /* 1000 = press/release, 1002 = motion with a button held, 1003 = any
    * motion (each replaces the one before), 1006 = SGR encoding (no
    * 223-column limit, unambiguous release button) */
-  printf(level == 3   ? "\x1b[?1000h\x1b[?1003h\x1b[?1006h"
-         : level == 2 ? "\x1b[?1000h\x1b[?1002h\x1b[?1006h"
-                      : "\x1b[?1000h\x1b[?1006h");
+  mouse_on(level);
   fflush(stdout);
   g_mouse_enabled = level;
   ctui_logf(E_INF, "[CTUI:TERM] - mouse reporting on @ tick %d (motion=%d)\n",
@@ -174,19 +218,8 @@ void ctui_shutdown(void) {
    * ctui_gfx_kitty_shm_reap()'s own doc comment. */
   ctui_gfx_kitty_shm_reap();
   ctui_log_shutdown();
-  if (g_mouse_enabled) {
-    printf("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
-    g_mouse_enabled = 0;
-  }
-  if (g_focus_enabled) {
-    printf("\x1b[?1004l");
-    g_focus_enabled = 0;
-  }
-  if (g_kitty_keys_enabled) {
-    printf("\x1b[<u");
-    g_kitty_keys_enabled = 0;
-  }
-  printf("\x1b[?25h\x1b[?1049l");
+  modes_off();
+  g_mouse_enabled = g_focus_enabled = g_kitty_keys_enabled = 0;
   fflush(stdout);
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }

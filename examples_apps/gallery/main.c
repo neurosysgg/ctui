@@ -6,7 +6,11 @@
  *
  * Keys: up/down pick a page, Enter or right goes into it, Esc back out;
  * in the table d asks to delete, r renames, p copies (a progress box);
- * in the text w toggles wrapping; q or ctrl+c quits from the sidebar. */
+ * in the text w toggles wrapping and v opens it in $PAGER (ctui steps
+ * aside meanwhile: ctui_suspend()/ctui_resume()); q or ctrl+c quits from
+ * the sidebar. */
+#define _POSIX_C_SOURCE 200809L /* fork(), mkstemp() */
+
 #include "ctui.h"
 #include "widgets/dialog.h"
 #include "widgets/entry.h"
@@ -18,6 +22,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define SIDEBAR 16
 #define FILES 200
@@ -282,6 +288,36 @@ static void dialog_done(int what) {
   }
 }
 
+/* the text in $PAGER, the terminal handed over meanwhile */
+static void page_text(void) {
+  char path[] = "/tmp/ctui-gallery-XXXXXX";
+  int fd = mkstemp(path);
+  if (fd < 0 || write(fd, text, sizeof text - 1) < 0) {
+    snprintf(status, sizeof status, "pager: no temp file");
+    if (fd >= 0) {
+      close(fd);
+    }
+    return;
+  }
+  close(fd);
+  const char *pager = getenv("PAGER");
+  pager = pager && *pager ? pager : "less";
+  ctui_suspend();
+  pid_t pid = fork();
+  if (pid == 0) {
+    execlp("sh", "sh", "-c", "exec $0 \"$1\"", pager, path, (char *)NULL);
+    _exit(127);
+  }
+  int st = 0;
+  if (pid > 0) {
+    waitpid(pid, &st, 0);
+  }
+  ctui_resume();
+  unlink(path);
+  snprintf(status, sizeof status, "pager: %s exited %d", pager,
+           WIFEXITED(st) ? WEXITSTATUS(st) : -1);
+}
+
 static int page_key(CTUI_WIDGET *self, const CTUI_KEYPRESS_EVENT_DATA *kp) {
   if (side.selected == 1 + PAGE_FORM) {
     int what = ctui_form_key(&form, kp);
@@ -308,6 +344,10 @@ static int page_key(CTUI_WIDGET *self, const CTUI_KEYPRESS_EVENT_DATA *kp) {
   if (kp->type == CTUI_KEY_CHAR && kp->ch == 'w') {
     textview.wrap = !textview.wrap;
     textview.hscroll = 0;
+    return 1;
+  }
+  if (kp->type == CTUI_KEY_CHAR && kp->ch == 'v') {
+    page_text();
     return 1;
   }
   return ctui_textview_key(&textview, kp);

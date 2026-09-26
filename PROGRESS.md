@@ -234,6 +234,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Handing the terminal to a child** (2026-09-26, for ctui-wm's file
+      manager, which runs `$EDITOR` in its own terminal when there's no
+      desktop to open a tab in): `ctui_suspend()` leaves the alternate
+      screen, turns mouse/focus/kitty-keys off (their flags kept) and
+      restores the original termios; `ctui_resume()` restores raw mode
+      (kept from `ctui_init()`), the alternate screen and those modes, and
+      sets `g_resize_pending`, so the loop's next event is a resize: the
+      same path a real `SIGWINCH` takes, which reallocates, clears the
+      terminal and redraws every cell -- at whatever size the terminal has
+      now. `ctui_shutdown()` shares the modes-off sequence. Verified in a
+      pty: the gallery's `v` opens its text in `$PAGER`.
+
 - [x] **The log's path** (2026-09-26, for ctui-wm's apps: a file manager's
       cwd is the user's directory, where a `ctui.log` doesn't belong):
       `ctui_log_set_path(path)` before `ctui_init()` picks the file

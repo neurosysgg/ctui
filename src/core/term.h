@@ -49,4 +49,14 @@ void ctui_focus_enable(void);
  * ctui_shutdown() restores the previous mode. */
 void ctui_kitty_keys_enable(void);
 
+/* hand the terminal to a child for a while (an editor, a pager, a shell):
+ * ctui_suspend() leaves the alternate screen, turns the mouse/focus/
+ * keyboard modes off and puts the terminal back as ctui_init() found it;
+ * run the child, wait for it, then ctui_resume() brings back raw mode, the
+ * alternate screen and the modes that were on, and makes the next
+ * ctui_input_loop() report a CTUI_RESIZE_EVENT, so ctui_app_run() redraws
+ * every cell (the terminal's size may have changed meanwhile, too). */
+void ctui_suspend(void);
+void ctui_resume(void);
+
 #endif
