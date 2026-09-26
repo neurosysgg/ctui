@@ -222,7 +222,7 @@ addEventListener()-style: widgets register interest in one
   `CTUI_IO_EVENT`, `CTUI_VALUE_CHANGED_EVENT`, `CTUI_FOCUS_EVENT`, plus
   unused `CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
 - `CTUI_KEYPRESS_EVENT_DATA` — `type` (arrows, ENTER/ESC/TAB, HOME/END/
-  PGUP/PGDN/INSERT/DELETE/BACKTAB, CHAR, or NONE for an unrecognised
+  PGUP/PGDN/INSERT/DELETE/BACKTAB, F1-F12 (`CTUI_KEY_F1 + n - 1`), CHAR, or NONE for an unrecognised
   sequence), `ch` (a codepoint for CHAR) and `mods`
   (`CTUI_MOD_SHIFT/ALT/CTRL`, where the terminal reports them; on
   Enter/Tab/Backspace only after `ctui_kitty_keys_enable()`).

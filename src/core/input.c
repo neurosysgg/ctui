@@ -283,7 +283,24 @@ static int resolve_csi(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
     return resolve_key(ev, kp, CTUI_KEY_END, 0, mods);
   case 'Z':
     return resolve_key(ev, kp, CTUI_KEY_BACKTAB, 0, mods);
+  case 'P':
+  case 'Q':
+  case 'R':
+  case 'S':
+    /* F1-F4 with modifiers: "CSI 1;5P" (bare, they come as SS3) */
+    if (p1 <= 1) {
+      return resolve_key(ev, kp, (CTUI_KEYTYPE)(CTUI_KEY_F1 + (c - 'P')), 0,
+                         mods);
+    }
+    break;
   case '~':
+    /* F5-F12 skip 16 and 22 (the VT220's gaps); 11-14 are F1-F4 on some
+     * terminals */
+    if ((p1 >= 11 && p1 <= 15) || (p1 >= 17 && p1 <= 21) || p1 == 23 ||
+        p1 == 24) {
+      int n = p1 <= 15 ? (int)p1 - 11 : p1 <= 21 ? (int)p1 - 12 : (int)p1 - 13;
+      return resolve_key(ev, kp, (CTUI_KEYTYPE)(CTUI_KEY_F1 + n), 0, mods);
+    }
     switch (p1) {
     case 1:
     case 7:
@@ -357,7 +374,7 @@ static int resolve_escape(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
     return resolve_csi(ev, kp, md);
   }
   if (c == 'O') {
-    /* SS3: arrows/home/end in application cursor mode */
+    /* SS3: arrows/home/end in application cursor mode, F1-F4 */
     unsigned char f;
     if (read_byte_timeout(&f, CTUI_INPUT_SEQ_TIMEOUT_MS)) {
       switch (f) {
@@ -373,6 +390,12 @@ static int resolve_escape(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
         return resolve_key(ev, kp, CTUI_KEY_HOME, 0, 0);
       case 'F':
         return resolve_key(ev, kp, CTUI_KEY_END, 0, 0);
+      case 'P':
+      case 'Q':
+      case 'R':
+      case 'S':
+        return resolve_key(ev, kp, (CTUI_KEYTYPE)(CTUI_KEY_F1 + (f - 'P')), 0,
+                           0);
       default:
         break;
       }

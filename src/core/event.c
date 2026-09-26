@@ -40,6 +40,23 @@ const char *ctui_keytype_name(CTUI_KEYTYPE type) {
     return "DELETE";
   case CTUI_KEY_BACKTAB:
     return "BACKTAB";
+  case CTUI_KEY_F1:
+  case CTUI_KEY_F2:
+  case CTUI_KEY_F3:
+  case CTUI_KEY_F4:
+  case CTUI_KEY_F5:
+  case CTUI_KEY_F6:
+  case CTUI_KEY_F7:
+  case CTUI_KEY_F8:
+  case CTUI_KEY_F9:
+  case CTUI_KEY_F10:
+  case CTUI_KEY_F11:
+  case CTUI_KEY_F12: {
+    static const char *const names[] = {"F1", "F2", "F3",  "F4",
+                                        "F5", "F6", "F7",  "F8",
+                                        "F9", "F10", "F11", "F12"};
+    return names[type - CTUI_KEY_F1];
+  }
   }
   return "UNKNOWN";
 }

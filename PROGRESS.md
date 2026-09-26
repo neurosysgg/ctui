@@ -234,6 +234,15 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Function keys** (2026-09-26, for ctui-wm's file manager: F2
+      renames, F7 makes a folder, the keys GUI file managers taught):
+      `CTUI_KEY_F1`-`CTUI_KEY_F12`, contiguous (`CTUI_KEY_F1 + n - 1`),
+      appended after `BACKTAB`. Decoded from SS3 P-S (F1-F4 bare), CSI
+      `1;mP`-`S` (F1-F4 with modifiers; a first param other than 1 stays
+      NONE, so a cursor position report can't pass for F3), and CSI
+      `11-15`, `17-21`, `23`, `24` `~` (the VT220's numbering, gaps at 16
+      and 22), with the usual modifier param. Tested in `input_test.c`.
+
 - [x] **Handing the terminal to a child** (2026-09-26, for ctui-wm's file
       manager, which runs `$EDITOR` in its own terminal when there's no
       desktop to open a tab in): `ctui_suspend()` leaves the alternate

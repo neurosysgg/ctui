@@ -22,6 +22,18 @@ typedef enum {
   CTUI_KEY_INSERT,
   CTUI_KEY_DELETE,
   CTUI_KEY_BACKTAB, /* shift+tab */
+  CTUI_KEY_F1,      /* ... through CTUI_KEY_F12, in order: F1 + n - 1 */
+  CTUI_KEY_F2,
+  CTUI_KEY_F3,
+  CTUI_KEY_F4,
+  CTUI_KEY_F5,
+  CTUI_KEY_F6,
+  CTUI_KEY_F7,
+  CTUI_KEY_F8,
+  CTUI_KEY_F9,
+  CTUI_KEY_F10,
+  CTUI_KEY_F11,
+  CTUI_KEY_F12,
 } CTUI_KEYTYPE;
 
 /* modifier bits on CTUI_KEYPRESS_EVENT_DATA.mods/CTUI_MOUSE_EVENT_DATA.mods,

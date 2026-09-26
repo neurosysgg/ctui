@@ -77,6 +77,30 @@ static void test_keys(void) {
   CTUI_TEST_ASSERT(all, "PGUP/PGDN/HOME/END/BACKTAB decode from back-to-back "
                         "sequences in one read");
 
+  feed("\x1bOP\x1bOS\x1b[15~\x1b[18~\x1b[21~\x1b[24~\x1b[12~");
+  CTUI_KEYTYPE fkeys[] = {CTUI_KEY_F1,  CTUI_KEY_F4,  CTUI_KEY_F5,
+                          CTUI_KEY_F7,  CTUI_KEY_F10, CTUI_KEY_F12,
+                          CTUI_KEY_F2};
+  all = 1;
+  for (int i = 0; i < 7; i++) {
+    kp = next_key(&ev);
+    all = all && kp && kp->type == fkeys[i] && kp->mods == 0;
+  }
+  CTUI_TEST_ASSERT(all, "F1-F12: SS3 P-S, CSI 11-24~ with the VT220's gaps");
+
+  feed("\x1b[1;2Q\x1b[2;5R\x1b[18;2~");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_F2 && kp->mods == CTUI_MOD_SHIFT,
+                   "CSI 1;2Q is shift+F2");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_NONE,
+                   "CSI 2;5R is no F3 (only a first param of 1 is)");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_F7 && kp->mods == CTUI_MOD_SHIFT,
+                   "CSI 18;2~ is shift+F7");
+  CTUI_TEST_ASSERT(!strcmp(ctui_keytype_name(CTUI_KEY_F10), "F10"),
+                   "F10's name");
+
   feed("\x1bOB");
   kp = next_key(&ev);
   CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_DOWN,
