@@ -234,6 +234,26 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Kitty images painted in place** (2026-09-27, for ctui-wm's
+      visualizer and ctui-audio's lanes): `CTUI_GFX_KITTY_IMAGE`
+      (`ctui_gfx_kitty_image_new/begin/commit/free`, gfx.h). Every
+      `ctui_gfx_kitty_display()` frame deflates the pixels, then
+      `shm_open`s, sizes, maps, copies into and unmaps a new segment;
+      here the caller paints straight into a mapped shm object and a
+      frame is one `link(2)` of it under a fresh name in `/dev/shm`
+      (where glibc and musl keep `shm_open()` objects), sent raw as
+      `t=s`. kitty reads a `t=s` object in full before it `shm_unlink`s
+      the name (kitty/graphics.c, 0.49), so `st_nlink` back to 1 means a
+      buffer may be painted again: three rotate, `begin()` returns NULL
+      while all are unread (the caller skips the frame), a buffer unread
+      for 2 s is taken back, `keep` repaints over the last frame. Falls
+      back to one heap buffer + `ctui_gfx_kitty_display()` without `t=s`
+      or when `link()` fails; `ctui_gfx_kitty_shm_reap()` also unlinks
+      the live images' names. ctui-wm's visualizer on it: 0.75 -> 0.17 %
+      of a core while playing (kitty's side unchanged). Tested in
+      `kitty_protocol_test.c`, with the test playing the terminal
+      (reads by name, unlinks).
+
 - [x] **`ctui_log()` before `ctui_log_init()`** (2026-09-27, found by
       ctui-wm's `check`, which logged from a helper without a compositor
       before starting ctui): it called the logger's `log_entry` through a

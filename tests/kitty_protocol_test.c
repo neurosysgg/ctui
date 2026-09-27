@@ -14,6 +14,8 @@
 #include "ctui_test.h"
 
 #include <fcntl.h>
+#include <stdint.h>
+#include <sys/mman.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
@@ -57,6 +59,15 @@ extern size_t ctui_gfx_kitty_place_file_escape(char *out, size_t cap,
                                                unsigned int image_id,
                                                const char *path, int cols,
                                                int rows);
+
+/* same again: CTUI_GFX_KITTY_IMAGE's t=s escape (with its frame name
+ * linked), and switches no terminal can flip for a headless test */
+extern size_t ctui_gfx_kitty_image_commit_escape(CTUI_GFX_KITTY_IMAGE *img,
+                                                 int row, int col,
+                                                 int cell_cols, int cell_rows,
+                                                 int z, char *out, size_t cap);
+extern void ctui_gfx_kitty_shm_set_supported(int on);
+extern void ctui_gfx_kitty_image_set_stale_ms(int ms);
 
 static void noop_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   (void)self;
@@ -376,6 +387,148 @@ static void test_place_file_escape(void) {
       "in an RGB fg), an empty path, no cells, a buffer too small");
 }
 
+/* the shm name an image escape carries (its base64 payload) */
+static int escape_name(const char *esc, size_t n, char *name, size_t cap) {
+  const char *keys = memchr(esc, '_', n);
+  const char *semi = keys ? memchr(keys, ';', n - (size_t)(keys - esc)) : NULL;
+  if (semi == NULL || n < 2) {
+    return 0;
+  }
+  const char *b64 = semi + 1;
+  size_t len = (size_t)(esc + n - 2 - b64);
+  static const char tab[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t o = 0;
+  unsigned acc = 0;
+  int bits = 0;
+  for (size_t i = 0; i < len && b64[i] != '='; i++) {
+    const char *c = strchr(tab, b64[i]);
+    if (c == NULL) {
+      return 0;
+    }
+    acc = (acc << 6) | (unsigned)(c - tab);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      if (o + 1 >= cap) {
+        return 0;
+      }
+      name[o++] = (char)((acc >> bits) & 0xFF);
+    }
+  }
+  name[o] = '\0';
+  return 1;
+}
+
+/* what kitty does with a t=s name: read it all, then shm_unlink it; the
+ * first byte read, or -1 */
+static int terminal_reads(const char *name, size_t len) {
+  int fd = shm_open(name, O_RDONLY, 0);
+  if (fd < 0) {
+    return -1;
+  }
+  unsigned char *buf = malloc(len);
+  ssize_t got = buf ? pread(fd, buf, len, 0) : -1;
+  int first = got == (ssize_t)len ? buf[0] : -1;
+  free(buf);
+  close(fd);
+  shm_unlink(name);
+  return first;
+}
+
+static void test_kitty_image(void) {
+  ctui_gfx_kitty_shm_set_supported(1);
+  CTUI_GFX_KITTY_IMAGE *img = ctui_gfx_kitty_image_new(9);
+  const int w = 4, h = 2;
+  const size_t len = (size_t)w * h * 4;
+  char esc[256], name[3][64];
+
+  unsigned char *a = ctui_gfx_kitty_image_begin(img, w, h, 0);
+  CTUI_TEST_ASSERT(a != NULL && ((uintptr_t)a & 63) == 0,
+                   "image: begin gives a buffer, aligned");
+  memset(a, 0x11, len);
+  size_t n = ctui_gfx_kitty_image_commit_escape(img, 3, 5, 2, 1, 0, esc,
+                                                sizeof esc);
+  CTUI_TEST_ASSERT(n > 0 && memcmp(esc, "\x1b[3;5H\x1b_Ga=T,f=32,t=s,s=4,v=2,"
+                                        "S=32,c=2,r=1,i=9,z=0,q=2,C=1;",
+                                   45) == 0,
+                   "image: commit escape = CUP + raw t=s (no o=z), the size "
+                   "in S");
+  CTUI_TEST_ASSERT(escape_name(esc, n, name[0], sizeof name[0]) &&
+                       name[0][0] == '/',
+                   "image: the escape carries a shm name");
+
+  /* the terminal hasn't read frame 0: the next begin is another buffer,
+   * holding frame 0 (keep) */
+  unsigned char *b = ctui_gfx_kitty_image_begin(img, w, h, 1);
+  CTUI_TEST_ASSERT(b != NULL && b != a && b[0] == 0x11 && b[len - 1] == 0x11,
+                   "image: an unread buffer isn't handed out; keep copies "
+                   "the last frame into the next one");
+  memset(b, 0x22, len);
+  n = ctui_gfx_kitty_image_commit_escape(img, 1, 1, 2, 1, 0, esc, sizeof esc);
+  escape_name(esc, n, name[1], sizeof name[1]);
+  unsigned char *c = ctui_gfx_kitty_image_begin(img, w, h, 0);
+  CTUI_TEST_ASSERT(c != NULL && c != a && c != b, "image: a third buffer");
+  memset(c, 0x33, len);
+  n = ctui_gfx_kitty_image_commit_escape(img, 1, 1, 2, 1, 0, esc, sizeof esc);
+  escape_name(esc, n, name[2], sizeof name[2]);
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_image_begin(img, w, h, 0) == NULL,
+                   "image: every buffer unread -> NULL (skip the frame)");
+
+  CTUI_TEST_ASSERT(terminal_reads(name[0], len) == 0x11 &&
+                       terminal_reads(name[1], len) == 0x22,
+                   "image: the terminal reads each frame's pixels by name");
+  unsigned char *d = ctui_gfx_kitty_image_begin(img, w, h, 1);
+  CTUI_TEST_ASSERT((d == a || d == b) && d[0] == 0x33,
+                   "image: a buffer read (name unlinked) is free again; keep "
+                   "copies the last frame (still unread) into it");
+  ctui_gfx_kitty_image_commit_escape(img, 1, 1, 2, 1, 0, esc, sizeof esc);
+  CTUI_TEST_ASSERT(terminal_reads(name[2], len) == 0x33,
+                   "image: an unread frame's pixels stay as committed");
+
+  /* the last frame's own buffer, once read, comes back without a copy */
+  char last[64];
+  escape_name(esc, strlen(esc), last, sizeof last);
+  terminal_reads(last, len);
+  unsigned char *e = ctui_gfx_kitty_image_begin(img, w, h, 1);
+  CTUI_TEST_ASSERT(e == d, "image: keep reuses the last frame's own buffer "
+                           "once the terminal has read it");
+
+  /* a terminal that never reads: the buffers come back after the stale
+   * time, their frame names removed */
+  ctui_gfx_kitty_image_commit_escape(img, 1, 1, 2, 1, 0, esc, sizeof esc);
+  char lost[64];
+  escape_name(esc, strlen(esc), lost, sizeof lost);
+  ctui_gfx_kitty_image_set_stale_ms(0);
+  unsigned char *f = ctui_gfx_kitty_image_begin(img, w, h, 0);
+  int gone = shm_open(lost, O_RDONLY, 0);
+  CTUI_TEST_ASSERT(f == e && gone < 0,
+                   "image: an unread buffer past the stale time is taken "
+                   "back and its frame name unlinked");
+  if (gone >= 0) {
+    close(gone);
+  }
+  ctui_gfx_kitty_image_set_stale_ms(CTUI_GFX_KITTY_IMAGE_STALE_MS);
+
+  /* a size change: a bigger mapping */
+  unsigned char *g = ctui_gfx_kitty_image_begin(img, 64, 64, 1);
+  CTUI_TEST_ASSERT(g != NULL, "image: a bigger size maps a bigger buffer");
+  if (g) {
+    memset(g, 0x44, 64 * 64 * 4);
+  }
+  ctui_gfx_kitty_image_free(img);
+
+  /* no t=s: one heap buffer, never busy */
+  ctui_gfx_kitty_shm_set_supported(0);
+  img = ctui_gfx_kitty_image_new(10);
+  unsigned char *p = ctui_gfx_kitty_image_begin(img, w, h, 0);
+  CTUI_TEST_ASSERT(p != NULL && ((uintptr_t)p & 63) == 0 &&
+                       ctui_gfx_kitty_image_begin(img, w, h, 1) == p,
+                   "image: without t=s one heap buffer, handed out again");
+  ctui_gfx_kitty_image_free(img);
+  ctui_gfx_kitty_shm_set_supported(-1);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -387,6 +540,7 @@ int main(void) {
   test_kitty_apc_complete();
   test_kitty_probe_timing();
   test_place_file_escape();
+  test_kitty_image();
 
   return ctui_test_summary();
 }

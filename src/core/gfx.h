@@ -94,6 +94,54 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
                             const unsigned char *rgba, int width, int height,
                             unsigned int image_id, int z);
 
+/* a Kitty image the caller paints straight into: its pixel buffers are
+ * POSIX shm objects mapped once, so a frame costs no copy, no deflate and
+ * no shm_open()/ftruncate()/mmap() -- only a link(2) of the buffer's shm
+ * object under a fresh name, which the terminal reads (t=s) and unlinks.
+ * Kitty unlinks a t=s name only after it has read the whole object
+ * (kitty/graphics.c: pread, close, shm_unlink), so a buffer whose frame
+ * name is gone is free to paint again: up to CTUI_GFX_KITTY_IMAGE_BUFS
+ * buffers rotate, and a terminal that falls behind shows as begin()
+ * returning NULL (skip the frame) instead of frames queueing up.
+ *
+ * Where t=s isn't available (no kitty shm, link() fails) the same calls
+ * work through one plain buffer and ctui_gfx_kitty_display() -- the
+ * caller has one path either way. */
+typedef struct CTUI_GFX_KITTY_IMAGE CTUI_GFX_KITTY_IMAGE;
+
+#define CTUI_GFX_KITTY_IMAGE_BUFS 3
+
+/* a buffer still unread after this long is taken back (the terminal
+ * dropped it: an error under q=2, a detached window) */
+#define CTUI_GFX_KITTY_IMAGE_STALE_MS 2000
+
+/* image_id as in ctui_gfx_kitty_display(); NULL if out of memory */
+CTUI_GFX_KITTY_IMAGE *ctui_gfx_kitty_image_new(unsigned int image_id);
+
+/* the RGBA buffer (width*height*4 bytes, row-major, no padding, 64-byte
+ * aligned) to paint the next frame into, or NULL when every buffer is
+ * still waiting for the terminal (or on a local failure): skip this frame
+ * and try again on the next. keep != 0 fills it with the last committed
+ * frame (free when that buffer is itself free again, a copy otherwise),
+ * for painters that only touch what changed; keep == 0 leaves whatever
+ * the buffer held (repaint everything). Contents after a size change are
+ * undefined either way. A begin() without a commit() sends nothing; the
+ * next begin() may return the same buffer. */
+unsigned char *ctui_gfx_kitty_image_begin(CTUI_GFX_KITTY_IMAGE *img, int width,
+                                          int height, int keep);
+
+/* transmits the buffer the last begin() returned, placed like
+ * ctui_gfx_kitty_display() (same row/col/cells/z meaning, same rule:
+ * only from a gfx_render, batched until ctui_gfx_kitty_flush()). Never
+ * compressed on the t=s path: the terminal reads raw pixels out of the
+ * shm object. No-op without an open begin(). */
+void ctui_gfx_kitty_image_commit(CTUI_GFX_KITTY_IMAGE *img, int row, int col,
+                                 int cell_cols, int cell_rows, int z);
+
+/* unmaps and unlinks the buffers (the terminal's image stays: see
+ * ctui_gfx_kitty_delete()); NULL is a no-op */
+void ctui_gfx_kitty_image_free(CTUI_GFX_KITTY_IMAGE *img);
+
 /* removes an image previously placed by ctui_gfx_kitty_display() under
  * image_id -- unlike a colored character cell, a Kitty-placed image is a
  * raster overlay independent of the text grid, so it stays on screen even
@@ -164,7 +212,8 @@ void ctui_gfx_kitty_flush(void);
  * ctui_gfx_kitty_flush(). */
 void ctui_gfx_kitty_probe_shm(void);
 
-/* Phase 6: unlinks any t=s shared-memory segment still outstanding --
+/* Phase 6: unlinks any t=s shared-memory segment still outstanding (and
+ * the buffers of every CTUI_GFX_KITTY_IMAGE not freed yet) --
  * i.e. one the terminal accepted the name of but never read (and
  * therefore never unlinked itself, as the spec makes it responsible for
  * doing). Called by ctui_shutdown() (core/term.c); a no-op on every

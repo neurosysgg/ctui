@@ -193,6 +193,8 @@ static void kitty_shm_track(const char *name) {
   g_kitty_shm_live_next = (g_kitty_shm_live_next + 1) % CTUI_KITTY_SHM_TRACKED;
 }
 
+static void kitty_images_reap(void);
+
 void ctui_gfx_kitty_shm_reap(void) {
   for (int i = 0; i < CTUI_KITTY_SHM_TRACKED; i++) {
     if (g_kitty_shm_live[i][0] != '\0') {
@@ -200,6 +202,7 @@ void ctui_gfx_kitty_shm_reap(void) {
       g_kitty_shm_live[i][0] = '\0';
     }
   }
+  kitty_images_reap();
 }
 
 /* true if buf (len bytes, a raw APC reply captured off stdin) contains a
@@ -665,6 +668,310 @@ void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
                      width, height, image_id, z, use_compression);
   }
   free(compressed);
+}
+
+/* --- CTUI_GFX_KITTY_IMAGE: painted in place, sent by link(2) --- */
+
+/* where shm_open() keeps its objects (glibc and musl alike): a frame name
+ * is a hard link made here, since shm_open() can't name an object twice */
+#define CTUI_KITTY_SHM_DIR "/dev/shm"
+
+typedef struct {
+  unsigned char *px;
+  size_t cap; /* bytes mapped (or allocated) */
+  int w, h;
+  int fd;          /* the shm object, -1 for a heap buffer */
+  char base[64];   /* its shm name, kept while the buffer lives */
+  char frame[64];  /* the name the last commit linked, "" once read */
+  struct timespec sent;
+} KITTY_BUF;
+
+struct CTUI_GFX_KITTY_IMAGE {
+  unsigned int id;
+  int shm; /* buffers are shm objects sent by link(2), else heap + copy */
+  KITTY_BUF bufs[CTUI_GFX_KITTY_IMAGE_BUFS];
+  int open; /* what begin() returned, -1 */
+  int last; /* what commit() sent last, -1 */
+  CTUI_GFX_KITTY_IMAGE *next;
+};
+
+/* every live image, for ctui_gfx_kitty_shm_reap() */
+static CTUI_GFX_KITTY_IMAGE *g_kitty_images = NULL;
+
+static int g_kitty_image_stale_ms = CTUI_GFX_KITTY_IMAGE_STALE_MS;
+
+/* gray-box hooks for tests/kitty_protocol_test.c (no terminal to probe,
+ * no two seconds to wait); not in gfx.h */
+void ctui_gfx_kitty_shm_set_supported(int on) { g_kitty_shm_supported = on; }
+void ctui_gfx_kitty_image_set_stale_ms(int ms) { g_kitty_image_stale_ms = ms; }
+
+static void kitty_shm_path(char *buf, size_t cap, const char *name) {
+  snprintf(buf, cap, CTUI_KITTY_SHM_DIR "%s", name);
+}
+
+static long kitty_ms_since(const struct timespec *t) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (long)(now.tv_sec - t->tv_sec) * 1000 +
+         (now.tv_nsec - t->tv_nsec) / 1000000;
+}
+
+/* may this buffer be painted: never sent, or the terminal unlinked its
+ * frame name (read in full, see gfx.h), or it's stale and taken back */
+static int kitty_buf_free(KITTY_BUF *b) {
+  if (b->frame[0] == '\0') {
+    return 1;
+  }
+  struct stat st;
+  if (fstat(b->fd, &st) == 0 && st.st_nlink <= 1) {
+    b->frame[0] = '\0';
+    return 1;
+  }
+  if (kitty_ms_since(&b->sent) >= g_kitty_image_stale_ms) {
+    char path[80];
+    kitty_shm_path(path, sizeof path, b->frame);
+    unlink(path); /* ENOENT if the terminal got there meanwhile */
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty image buffer %s unread for %d ms, taken "
+              "back @ tick %d\n",
+              b->frame, g_kitty_image_stale_ms, ctui_tick_advance());
+    b->frame[0] = '\0';
+    return 1;
+  }
+  return 0;
+}
+
+static void kitty_buf_release(KITTY_BUF *b) {
+  if (b->fd >= 0) {
+    if (b->px) {
+      munmap(b->px, b->cap);
+    }
+    close(b->fd);
+    shm_unlink(b->base);
+    if (b->frame[0] != '\0') {
+      char path[80];
+      kitty_shm_path(path, sizeof path, b->frame);
+      unlink(path);
+    }
+  } else {
+    free(b->px);
+  }
+  *b = (KITTY_BUF){.fd = -1};
+}
+
+/* room for len bytes: a heap buffer, or the shm object grown and mapped
+ * again (only ever on a free buffer: the terminal isn't reading it) */
+static int kitty_buf_reserve(CTUI_GFX_KITTY_IMAGE *img, KITTY_BUF *b,
+                             size_t len) {
+  if (len <= b->cap) {
+    return 1;
+  }
+  if (!img->shm) {
+    if (b->fd >= 0) {
+      kitty_buf_release(b); /* an shm buffer from before the switch */
+    }
+    size_t cap = (len + 63) & ~(size_t)63;
+    unsigned char *px = aligned_alloc(64, cap);
+    if (px == NULL) {
+      return 0;
+    }
+    free(b->px);
+    b->px = px;
+    b->cap = cap;
+    return 1;
+  }
+  if (b->fd < 0) {
+    kitty_shm_name(b->base, sizeof b->base, g_kitty_shm_seq++);
+    b->fd = shm_open(b->base, O_CREAT | O_RDWR | O_EXCL, 0600);
+    if (b->fd < 0) {
+      ctui_logf(E_WRN,
+                "[CTUI:GFX] - kitty image shm_open(%s) failed (%s) @ tick "
+                "%d\n",
+                b->base, strerror(errno), ctui_tick_advance());
+      b->base[0] = '\0';
+      return 0;
+    }
+  }
+  if (b->px) {
+    munmap(b->px, b->cap);
+    b->px = NULL;
+    b->cap = 0;
+  }
+  void *map = MAP_FAILED;
+  if (ftruncate(b->fd, (off_t)len) == 0) {
+    map = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, b->fd, 0);
+  }
+  if (map == MAP_FAILED) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty image ftruncate/mmap(%s, %zu) failed (%s) "
+              "@ tick %d\n",
+              b->base, len, strerror(errno), ctui_tick_advance());
+    return 0;
+  }
+  b->px = map;
+  b->cap = len;
+  return 1;
+}
+
+/* the names of every live image's buffers (the mappings stay: an app
+ * may still paint after ctui_shutdown(), its commits then copy) */
+static void kitty_images_reap(void) {
+  for (CTUI_GFX_KITTY_IMAGE *img = g_kitty_images; img; img = img->next) {
+    for (int i = 0; i < CTUI_GFX_KITTY_IMAGE_BUFS; i++) {
+      KITTY_BUF *b = &img->bufs[i];
+      if (b->fd < 0) {
+        continue;
+      }
+      shm_unlink(b->base);
+      if (b->frame[0] != '\0') {
+        char path[80];
+        kitty_shm_path(path, sizeof path, b->frame);
+        unlink(path);
+        b->frame[0] = '\0';
+      }
+    }
+  }
+}
+
+CTUI_GFX_KITTY_IMAGE *ctui_gfx_kitty_image_new(unsigned int image_id) {
+  CTUI_GFX_KITTY_IMAGE *img = calloc(1, sizeof *img);
+  if (img == NULL) {
+    return NULL;
+  }
+  img->id = image_id;
+  img->shm = g_kitty_shm_supported == 1;
+  img->open = img->last = -1;
+  for (int i = 0; i < CTUI_GFX_KITTY_IMAGE_BUFS; i++) {
+    img->bufs[i].fd = -1;
+  }
+  img->next = g_kitty_images;
+  g_kitty_images = img;
+  return img;
+}
+
+unsigned char *ctui_gfx_kitty_image_begin(CTUI_GFX_KITTY_IMAGE *img, int width,
+                                          int height, int keep) {
+  if (img == NULL || width <= 0 || height <= 0) {
+    return NULL;
+  }
+  size_t len = (size_t)width * (size_t)height * 4;
+  /* heap buffers are never busy: one does */
+  int nbufs = img->shm ? CTUI_GFX_KITTY_IMAGE_BUFS : 1;
+  KITTY_BUF *last = img->last >= 0 ? &img->bufs[img->last] : NULL;
+  int same = last && last->w == width && last->h == height;
+  int pick = -1;
+  /* the last frame's own buffer when it's free: kept for nothing, and
+   * warm in the cache */
+  if (last && kitty_buf_free(last)) {
+    pick = img->last;
+  } else {
+    for (int i = 0; i < nbufs; i++) {
+      if (i != img->last && kitty_buf_free(&img->bufs[i])) {
+        pick = i;
+        break;
+      }
+    }
+  }
+  if (pick < 0) {
+    return NULL;
+  }
+  KITTY_BUF *b = &img->bufs[pick];
+  if (!kitty_buf_reserve(img, b, len)) {
+    return NULL;
+  }
+  if (keep && same && pick != img->last) {
+    memcpy(b->px, last->px, len);
+  }
+  b->w = width;
+  b->h = height;
+  img->open = pick;
+  return b->px;
+}
+
+/* the t=s escape for the open buffer, its frame name linked, the buffer
+ * now the last one sent; the length, or 0 if the link failed (the caller
+ * copies instead, the buffer still open). Non-static only
+ * for tests/kitty_protocol_test.c, like
+ * ctui_gfx_kitty_place_file_escape(); not in gfx.h. */
+size_t ctui_gfx_kitty_image_commit_escape(CTUI_GFX_KITTY_IMAGE *img, int row,
+                                          int col, int cell_cols,
+                                          int cell_rows, int z, char *out,
+                                          size_t cap) {
+  KITTY_BUF *b = &img->bufs[img->open];
+  char name[64], from[80], to[80];
+  kitty_shm_name(name, sizeof name, g_kitty_shm_seq++);
+  kitty_shm_path(from, sizeof from, b->base);
+  kitty_shm_path(to, sizeof to, name);
+  if (link(from, to) != 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty image link(%s, %s) failed (%s) @ tick %d, "
+              "copying from now on\n",
+              from, to, strerror(errno), ctui_tick_advance());
+    return 0;
+  }
+  snprintf(b->frame, sizeof b->frame, "%s", name);
+  clock_gettime(CLOCK_MONOTONIC, &b->sent);
+  img->last = img->open;
+  img->open = -1;
+
+  char b64[96];
+  size_t b64_len = ctui_util_base64_encode((const unsigned char *)name,
+                                           strlen(name), b64, sizeof b64);
+  int n = snprintf(out, cap,
+                   "\x1b[%d;%dH\x1b_Ga=T,f=32,t=s,s=%d,v=%d,S=%zu,c=%d,r=%d,"
+                   "i=%u,z=%d,q=2,C=1;%.*s\x1b\\",
+                   row, col, b->w, b->h, (size_t)b->w * (size_t)b->h * 4,
+                   cell_cols, cell_rows, img->id, z, (int)b64_len, b64);
+  return clamp_snprintf_len(n, cap);
+}
+
+void ctui_gfx_kitty_image_commit(CTUI_GFX_KITTY_IMAGE *img, int row, int col,
+                                 int cell_cols, int cell_rows, int z) {
+  if (img == NULL || img->open < 0) {
+    return;
+  }
+  KITTY_BUF *b = &img->bufs[img->open];
+  if (img->shm) {
+    if (!isatty(STDOUT_FILENO)) {
+      ctui_logf(E_WRN,
+                "[CTUI:GFX] - kitty_image_commit rejected @ tick %d, stdout "
+                "isn't a real terminal\n",
+                ctui_tick_advance());
+      img->open = -1;
+      return;
+    }
+    char out[256];
+    size_t n = ctui_gfx_kitty_image_commit_escape(img, row, col, cell_cols,
+                                                  cell_rows, z, out,
+                                                  sizeof out);
+    if (n > 0) {
+      kitty_batch_append(out, n);
+      return;
+    }
+    /* no linking here: the buffers stay (they're memory like any other),
+     * frames go the copying way */
+    img->shm = 0;
+  }
+  ctui_gfx_kitty_display(row, col, cell_cols, cell_rows, b->px, b->w, b->h,
+                         img->id, z);
+  img->last = img->open;
+  img->open = -1;
+}
+
+void ctui_gfx_kitty_image_free(CTUI_GFX_KITTY_IMAGE *img) {
+  if (img == NULL) {
+    return;
+  }
+  for (CTUI_GFX_KITTY_IMAGE **p = &g_kitty_images; *p; p = &(*p)->next) {
+    if (*p == img) {
+      *p = img->next;
+      break;
+    }
+  }
+  for (int i = 0; i < CTUI_GFX_KITTY_IMAGE_BUFS; i++) {
+    kitty_buf_release(&img->bufs[i]);
+  }
+  free(img);
 }
 
 void ctui_gfx_kitty_delete(unsigned int image_id) {

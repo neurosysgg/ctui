@@ -113,6 +113,21 @@ their base glyphs.
   remove a Kitty pixel-graphics image directly to stdout, bypassing
   `CTUI_CELL` entirely. Only called from a widget's `gfx_render`
   (see `widget.h` below) — never call these from an ordinary `render()`.
+- `ctui_gfx_kitty_image_new(image_id)` / `_begin(img, w, h, keep)` /
+  `_commit(img, row, col, cell_cols, cell_rows, z)` / `_free(img)` — a
+  Kitty image painted in place: `begin()` hands out an RGBA buffer that
+  *is* a mapped shm object (64-byte aligned), `commit()` hard-links it
+  under a fresh name and sends that name (`t=s`, raw, never deflated):
+  no copy, no per-frame `shm_open`/`ftruncate`/`mmap`. Up to
+  `CTUI_GFX_KITTY_IMAGE_BUFS` (3) buffers rotate; one is free again once
+  the terminal has unlinked its frame name (kitty does that after reading
+  it all), or after `CTUI_GFX_KITTY_IMAGE_STALE_MS`. `begin()` returns
+  NULL while all are unread: skip the frame. `keep` gives the last
+  committed frame back (its own buffer when free, else a copy) for
+  painters that only redraw what changed. Without `t=s` (or when
+  `link()` fails) it's one heap buffer sent through
+  `ctui_gfx_kitty_display()`. `commit()` only from a `gfx_render`, like
+  `ctui_gfx_kitty_display()`.
 - `ctui_gfx_kitty_place_file(image_id, path, cols, rows)` — the other
   way to show a Kitty image: the terminal loads a PNG from `path` itself
   (`f=100,t=f`) as a *virtual placement* (`U=1`), shown wherever cells
