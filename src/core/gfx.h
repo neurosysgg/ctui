@@ -50,9 +50,10 @@ void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
  * row-major, no padding). image_id lets a caller re-transmit under the
  * same id on a later frame to replace the previous one in place, instead
  * of layering a new image on top each time -- pass any nonzero value
- * that's stable across a widget's redraws. The payload is always sent
- * with q=2 (quiet): ctui never reads the terminal's APC replies, success
- * or error, so there's nothing to parse them into.
+ * that's stable across a widget's redraws. Sent with q=1: no OK replies,
+ * but kitty's refusals come back through the input loop, which logs them
+ * ("[CTUI:GFX] - kitty refused a command"; ctui_input_loop() reads APC
+ * replies instead of taking them for keys).
  *
  * z is the Kitty protocol's own placement z-index (spec: "Z-stacking of
  * images"): z>=0 draws above all text (the protocol's default, and what
@@ -112,7 +113,7 @@ typedef struct CTUI_GFX_KITTY_IMAGE CTUI_GFX_KITTY_IMAGE;
 #define CTUI_GFX_KITTY_IMAGE_BUFS 3
 
 /* a buffer still unread after this long is taken back (the terminal
- * dropped it: an error under q=2, a detached window) */
+ * dropped it: a refusal, a detached window) */
 #define CTUI_GFX_KITTY_IMAGE_STALE_MS 2000
 
 /* image_id as in ctui_gfx_kitty_display(); NULL if out of memory */

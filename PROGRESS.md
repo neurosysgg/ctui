@@ -237,6 +237,15 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **kitty's replies are read, not typed** (2026-09-28): the input
+      parser had no APC branch, so a kitty graphics reply (ESC _ G ...
+      ST) would have arrived as Alt+_ and then its text as keys; only
+      q=2 everywhere kept replies away, which also hid every refusal.
+      `ctui_input_loop()` now reads an APC to its ST and hands a G reply
+      to gfx.c, which logs a refusal at E_WRN (the same one repeated only
+      as the count doubles) and an OK at E_DBG; the graphics commands go
+      out with q=1 (errors only), so kitty's state-dependent refusals (an
+      unknown id, a file it may not read, a full cache) show in ctui.log.
 - [x] **Kitty escapes from a builder that knows kitty's rules**
       (2026-09-28, ctui-wm's "kitty as the spec"): every graphics escape
       was a hand-written snprintf, and nothing stopped a command kitty

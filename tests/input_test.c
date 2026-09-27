@@ -206,6 +206,16 @@ static void test_osc(void) {
   feed("z");
   kp = next_key(&ev);
   CTUI_TEST_ASSERT(kp && kp->ch == 'z', "the rest was read and dropped");
+
+  /* a kitty graphics reply (APC): logged, never keys */
+  feed("\x1b_Gi=7;ENOENT:Put command refers to non-existent image\x1b\\q");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_NONE,
+                   "a kitty reply (ESC _ G ... ST) is no key (it was "
+                   "Alt+_ and then its text as keys)");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_CHAR && kp->ch == 'q',
+                   "... and the key after it is one again");
 }
 
 static void test_csi_u(void) {

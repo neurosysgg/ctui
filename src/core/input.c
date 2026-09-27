@@ -415,6 +415,40 @@ static int resolve_osc(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp) {
   return 1;
 }
 
+/* an APC (ESC _ ... ST): the terminal's reply to a kitty graphics
+ * command (G...), handed to gfx.c's log; never a key. Anything else in
+ * APC form is dropped. */
+static int resolve_apc(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp) {
+  char body[512];
+  size_t n = 0;
+  unsigned char c;
+  for (;;) {
+    if (!read_byte_timeout(&c, CTUI_INPUT_SEQ_TIMEOUT_MS)) {
+      ctui_logf(E_WRN, "[CTUI:INPUT] - unfinished APC (%zu bytes) @ tick %d\n",
+                n, ctui_tick_advance());
+      return resolve_key(ev, kp, CTUI_KEY_NONE, 0, 0);
+    }
+    if (c == 0x07) {
+      break;
+    }
+    if (c == 0x1b) {
+      read_byte_timeout(&c, CTUI_INPUT_SEQ_TIMEOUT_MS); /* ST's \ */
+      break;
+    }
+    if (n < sizeof body - 1) {
+      body[n++] = (char)c;
+    }
+  }
+  body[n] = '\0';
+  if (body[0] == 'G') {
+    ctui_gfx_kitty_reply(body + 1);
+  } else {
+    ctui_logf(E_DBG, "[CTUI:INPUT] - dropped an APC (%zu bytes) @ tick %d\n", n,
+              ctui_tick_advance());
+  }
+  return resolve_key(ev, kp, CTUI_KEY_NONE, 0, 0);
+}
+
 static int resolve_escape(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
                           CTUI_MOUSE_EVENT_DATA *md) {
   unsigned char c;
@@ -426,6 +460,9 @@ static int resolve_escape(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   }
   if (c == ']') {
     return resolve_osc(ev, kp);
+  }
+  if (c == '_') {
+    return resolve_apc(ev, kp);
   }
   if (c == 'O') {
     /* SS3: arrows/home/end in application cursor mode, F1-F4 */

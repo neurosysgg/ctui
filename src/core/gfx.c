@@ -168,8 +168,8 @@ static size_t clamp_snprintf_len(int n, size_t cap) {
  * segment once it has read it, which is why kitty_display_shm() doesn't
  * -- unlinking from this side would race a terminal that hasn't opened
  * the name yet. But that leaves nothing responsible for a segment the
- * terminal never reads: an image rejected under q=2 (errors suppressed,
- * so we never hear about it), a terminal that crashes or detaches, or
+ * terminal never reads: an image kitty refuses before opening it (the
+ * refusal is only logged), a terminal that crashes or detaches, or
  * this process exiting between the write and the terminal's read. Each
  * orphan is a whole frame's payload sitting in /dev/shm, i.e. in RAM, and
  * at 50fps across several widgets that accumulates fast.
@@ -308,7 +308,7 @@ int ctui_gfx_kitty_apc_complete(const char *buf, size_t len) {
 /* Phase 6: one-shot startup probe for Kitty's t=s (shared-memory)
  * transmission medium, called by ctui_init() (term.c) only once
  * CTUI_GFX_KITTY has actually been negotiated. ctui's Kitty path
- * otherwise runs entirely with q=2 (all APC replies suppressed) --
+ * otherwise runs with q=1 (errors only, logged by the input loop) --
  * there's no other signal available for whether t=s specifically works
  * on this terminal, so this temporarily asks for replies (q=0) on one
  * disposable a=q (query -- doesn't display or persist anything) probe
@@ -479,9 +479,9 @@ static void kitty_display_td(int row, int col, int cell_cols, int cell_rows,
    * pixel format the far end reconstructs after decompressing. s/v: pixel
    * dimensions, required for raw formats since there's no container
    * header to read them from. c/r: scale the image to cover this many
-   * character cells. q=2: suppress both success and error responses --
-   * ctui has no code path that reads stdin for an APC reply. C=1: don't
-   * move the cursor after displaying -- the protocol default (C=0) moves
+   * character cells. q=1: no OK replies; a refusal comes back as APC input,
+   * which ctui_input_loop() hands to ctui_gfx_kitty_reply() (logged). C=1:
+   * don't move the cursor after displaying -- the protocol default (C=0) moves
    * it to just past the image, as if it had been printed as text, which
    * for an image tall/low enough to reach the terminal's last row forces
    * the terminal to scroll the whole screen to keep the cursor visible.
@@ -500,7 +500,7 @@ static void kitty_display_td(int row, int col, int cell_cols, int cell_rows,
                       .r = (uint32_t)cell_rows,
                       .i = image_id,
                       .z = z,
-                      .q = 2,
+                      .q = 1,
                       .C = 1};
   const char *err = ctui_kitty_gfx_check(&g, NULL, payload_len);
   if (err) {
@@ -603,7 +603,7 @@ static void kitty_display_shm(int row, int col, int cell_cols, int cell_rows,
                       .r = (uint32_t)cell_rows,
                       .i = image_id,
                       .z = z,
-                      .q = 2,
+                      .q = 1,
                       .C = 1};
   char out[256];
   int n = snprintf(out, sizeof out, "\x1b[%d;%dH", row, col);
@@ -932,7 +932,7 @@ size_t ctui_gfx_kitty_image_commit_escape(CTUI_GFX_KITTY_IMAGE *img, int row,
                       .r = (uint32_t)cell_rows,
                       .i = img->id,
                       .z = z,
-                      .q = 2,
+                      .q = 1,
                       .C = 1};
   int n = snprintf(out, cap, "\x1b[%d;%dH", row, col);
   size_t pos = clamp_snprintf_len(n, cap);
@@ -1001,6 +1001,30 @@ void ctui_gfx_kitty_image_free(CTUI_GFX_KITTY_IMAGE *img) {
   free(img);
 }
 
+void ctui_gfx_kitty_reply(const char *body) {
+  const char *msg = strchr(body, ';');
+  msg = msg ? msg + 1 : body;
+  if (strcmp(msg, "OK") == 0) {
+    ctui_logf(E_DBG, "[CTUI:GFX] - kitty: %s\n", body);
+    return;
+  }
+  /* the same refusal every frame would fill the log: the first, then
+   * each time the count doubles */
+  static char last[128];
+  static unsigned long repeats;
+  if (strncmp(last, body, sizeof last - 1) == 0) {
+    repeats++;
+    if (repeats & (repeats - 1)) {
+      return;
+    }
+  } else {
+    snprintf(last, sizeof last, "%s", body);
+    repeats = 0;
+  }
+  ctui_logf(E_WRN, "[CTUI:GFX] - kitty refused a command: %s (%lu before)\n",
+            body, repeats);
+}
+
 void ctui_gfx_kitty_delete(unsigned int image_id) {
   if (!isatty(STDOUT_FILENO)) {
     ctui_logf(E_WRN,
@@ -1010,7 +1034,7 @@ void ctui_gfx_kitty_delete(unsigned int image_id) {
     return;
   }
 
-  CTUI_KITTY_GFX g = {.a = 'd', .d = 'I', .i = image_id, .q = 2};
+  CTUI_KITTY_GFX g = {.a = 'd', .d = 'I', .i = image_id, .q = 1};
   char out[48];
   const char *err = NULL;
   size_t n = ctui_kitty_gfx_build(&g, NULL, 0, out, sizeof out, &err);
@@ -1082,7 +1106,7 @@ size_t ctui_gfx_kitty_place_file_escape(char *out, size_t cap,
                       .i = image_id,
                       .c = (uint32_t)cols,
                       .r = (uint32_t)rows,
-                      .q = 2};
+                      .q = 1};
   const char *err = NULL;
   size_t n = ctui_kitty_gfx_build(&g, path, strlen(path), out, cap, &err);
   if (n == 0) {

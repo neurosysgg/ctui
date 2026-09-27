@@ -33,4 +33,9 @@ extern unsigned int ctui_g_gfx_mode;
  * still unread on the fd. */
 void ctui_input_pushback(const char *bytes, size_t len);
 
+/* a kitty graphics reply the input loop read ("i=5;ENOENT:..." -- the APC
+ * body after its G): logged by gfx.c, an error at E_WRN (repeats of the
+ * same one only now and then), OK at E_DBG */
+void ctui_gfx_kitty_reply(const char *body);
+
 #endif
