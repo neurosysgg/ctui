@@ -219,8 +219,8 @@ addEventListener()-style: widgets register interest in one
 
 - `CTUI_EVENTTYPE` — `CTUI_KEYPRESS_EVENT`, `CTUI_MOUSE_EVENT`,
   `CTUI_RESIZE_EVENT`, `CTUI_TICK_EVENT`, `CTUI_TIMER_EVENT`,
-  `CTUI_IO_EVENT`, `CTUI_VALUE_CHANGED_EVENT`, `CTUI_FOCUS_EVENT`, plus
-  unused `CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
+  `CTUI_IO_EVENT`, `CTUI_VALUE_CHANGED_EVENT`, `CTUI_FOCUS_EVENT`,
+  `CTUI_OSC_EVENT`, plus unused `CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
 - `CTUI_KEYPRESS_EVENT_DATA` — `type` (arrows, ENTER/ESC/TAB, HOME/END/
   PGUP/PGDN/INSERT/DELETE/BACKTAB, F1-F12 (`CTUI_KEY_F1 + n - 1`), CHAR, or NONE for an unrecognised
   sequence), `ch` (a codepoint for CHAR) and `mods`
@@ -233,6 +233,13 @@ addEventListener()-style: widgets register interest in one
 - `CTUI_FOCUS_EVENT_DATA` — `focused` (1 = the terminal window gained
   keyboard focus, 0 = lost it). Only produced after
   `ctui_focus_enable()` (`term.h`), source `"input"`.
+- `CTUI_OSC_EVENT_DATA` — an OSC sequence the terminal sent (`ESC ]
+  ... ESC \` or BEL), source `"input"`: `code` (the number before the
+  first `;`, `-1` if none), `text` (the body after it, NUL-terminated;
+  static, valid until the next input event), `len`, `truncated` (longer
+  than `CTUI_OSC_MAX`, 16 KiB: `text` is its start). Terminals send them
+  as answers (an OSC 52 read, kitty's OSC 72 drag and drop); the app
+  writes its own requests to stdout.
 - `CTUI_EVENT_SCOPE` — `CTUI_EVENT_SCOPE_GLOBAL` (default; every
   matching `(source, type)` handler runs, `origin` ignored) or
   `CTUI_EVENT_SCOPE_BUBBLE` (only handlers registered on `ev->origin`

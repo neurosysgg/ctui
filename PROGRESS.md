@@ -234,6 +234,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **OSC input** (2026-09-27, for ctui-wm's file manager, which takes
+      and starts drags through kitty's drag and drop protocol, OSC 72):
+      `CTUI_OSC_EVENT` (source `"input"`, appended before `DUMMY`) with
+      `CTUI_OSC_EVENT_DATA`: the number before the first `;` (`-1` when
+      there is none), the body after it (NUL-terminated, static until the
+      next input event), its length, and `truncated` past `CTUI_OSC_MAX`
+      (16 KiB; the rest is read and dropped). ESC `\` or BEL end one; a
+      body that stops arriving within the sequence timeout comes back as
+      `CTUI_KEY_NONE`. Before, `ESC ]` decoded as alt+`]` and the body as
+      keypresses. Apps write their OSC requests themselves (`write()` to
+      stdout, as the kitty graphics code does). Tested in `input_test.c`.
+
 - [x] **Function keys** (2026-09-26, for ctui-wm's file manager: F2
       renames, F7 makes a folder, the keys GUI file managers taught):
       `CTUI_KEY_F1`-`CTUI_KEY_F12`, contiguous (`CTUI_KEY_F1 + n - 1`),

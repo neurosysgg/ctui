@@ -155,6 +155,59 @@ static void test_focus(void) {
 }
 
 /* kitty keyboard protocol reports (ctui_kitty_keys_enable()) */
+static CTUI_OSC_EVENT_DATA *next_osc(CTUI_EVENT *ev) {
+  if (!ctui_input_loop(ev, 0) || ev->type != CTUI_OSC_EVENT) {
+    return NULL;
+  }
+  return ev->event_data;
+}
+
+static void test_osc(void) {
+  CTUI_EVENT ev;
+  CTUI_OSC_EVENT_DATA *o;
+
+  feed("\x1b]72;t=M:x=3:y=1;text/uri-list text/plain\x1b\\");
+  o = next_osc(&ev);
+  CTUI_TEST_ASSERT(o && o->code == 72 &&
+                       !strcmp(o->text, "t=M:x=3:y=1;text/uri-list text/plain") &&
+                       o->len == strlen(o->text) && !o->truncated &&
+                       !strcmp(ev.ev_source, "input"),
+                   "OSC ... ST: its number and the body after the first ';'");
+
+  feed("\x1b]52;c;aGk=\x07x");
+  o = next_osc(&ev);
+  CTUI_TEST_ASSERT(o && o->code == 52 && !strcmp(o->text, "c;aGk="),
+                   "BEL ends one too");
+  CTUI_KEYPRESS_EVENT_DATA *kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_CHAR && kp->ch == 'x',
+                   "... and the next byte is a key again, not part of it");
+
+  feed("\x1b]72\x1b\\");
+  o = next_osc(&ev);
+  CTUI_TEST_ASSERT(o && o->code == 72 && !o->text[0],
+                   "a number and nothing else: an empty body");
+
+  feed("\x1b]x;y\x07");
+  o = next_osc(&ev);
+  CTUI_TEST_ASSERT(o && o->code == -1 && !strcmp(o->text, "x;y"),
+                   "no number: code -1, the whole body");
+
+  static char big[CTUI_OSC_MAX + 200];
+  memcpy(big, "\x1b]72;", 5);
+  memset(big + 5, 'A', CTUI_OSC_MAX + 100);
+  memcpy(big + 5 + CTUI_OSC_MAX + 100, "\x1b\\", 3);
+  feed(big);
+  o = next_osc(&ev);
+  CTUI_TEST_ASSERT(o && o->code == 72 && o->truncated &&
+                       o->len == CTUI_OSC_MAX - 3,
+                   "longer than CTUI_OSC_MAX: its start, marked truncated "
+                   "(len %zu)",
+                   o ? o->len : 0);
+  feed("z");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 'z', "the rest was read and dropped");
+}
+
 static void test_csi_u(void) {
   CTUI_EVENT ev;
   CTUI_KEYPRESS_EVENT_DATA *kp;
@@ -443,6 +496,7 @@ int main(void) {
   test_mouse_modes();
   test_focus();
   test_csi_u();
+  test_osc();
   test_io_watch();
   test_timer_wake_and_tick();
   test_quit(&app, &w);

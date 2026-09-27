@@ -364,6 +364,57 @@ static int resolve_byte(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   return resolve_key(ev, kp, CTUI_KEY_CHAR, c, mods);
 }
 
+/* everything after "\x1b]" up to BEL or ESC \ -> CTUI_OSC_EVENT. A body
+ * that stops arriving mid-way (no terminator within the sequence timeout)
+ * is dropped as CTUI_KEY_NONE, like an unfinished CSI. */
+static int resolve_osc(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp) {
+  static char body[CTUI_OSC_MAX + 1];
+  static CTUI_OSC_EVENT_DATA osc;
+  size_t n = 0;
+  int truncated = 0;
+  unsigned char c;
+  for (;;) {
+    if (!read_byte_timeout(&c, CTUI_INPUT_SEQ_TIMEOUT_MS)) {
+      ctui_logf(E_WRN, "[CTUI:INPUT] - unfinished OSC (%zu bytes) @ tick %d\n",
+                n, ctui_tick_advance());
+      return resolve_key(ev, kp, CTUI_KEY_NONE, 0, 0);
+    }
+    if (c == 0x07) {
+      break;
+    }
+    if (c == 0x1b) {
+      /* ST is ESC \; anything else after an ESC ends it too */
+      read_byte_timeout(&c, CTUI_INPUT_SEQ_TIMEOUT_MS);
+      break;
+    }
+    if (n < CTUI_OSC_MAX) {
+      body[n++] = (char)c;
+    } else {
+      truncated = 1;
+    }
+  }
+  body[n] = '\0';
+  size_t digits = 0;
+  while (digits < n && body[digits] >= '0' && body[digits] <= '9') {
+    digits++;
+  }
+  osc.code = -1;
+  osc.text = body;
+  if (digits && digits < 10 && (digits == n || body[digits] == ';')) {
+    osc.code = atoi(body);
+    osc.text = body + digits + (digits < n);
+  }
+  osc.len = strlen(osc.text);
+  osc.truncated = truncated;
+  ev->type = CTUI_OSC_EVENT;
+  ev->ev_source = "input";
+  ev->event_data = &osc;
+  ctui_logf(E_INF, "[CTUI:INPUT] - resolved OSC %d (%zu bytes%s) @ tick %d\n",
+            osc.code, osc.len, truncated ? ", truncated" : "",
+            ctui_tick_advance());
+  return 1;
+}
+
 static int resolve_escape(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
                           CTUI_MOUSE_EVENT_DATA *md) {
   unsigned char c;
@@ -372,6 +423,9 @@ static int resolve_escape(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   }
   if (c == '[') {
     return resolve_csi(ev, kp, md);
+  }
+  if (c == ']') {
+    return resolve_osc(ev, kp);
   }
   if (c == 'O') {
     /* SS3: arrows/home/end in application cursor mode, F1-F4 */

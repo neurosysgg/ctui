@@ -81,6 +81,8 @@ const char *ctui_eventtype_name(CTUI_EVENTTYPE type) {
     return "MOUSE";
   case CTUI_IO_EVENT:
     return "IO";
+  case CTUI_OSC_EVENT:
+    return "OSC";
   case CTUI_DUMMY_EVENT:
     return "DUMMY";
   }

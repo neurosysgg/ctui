@@ -79,6 +79,21 @@ typedef struct {
   int focused; /* 1 = the terminal window gained keyboard focus, 0 = lost it */
 } CTUI_FOCUS_EVENT_DATA;
 
+/* the longest OSC body CTUI_OSC_EVENT carries whole (kitty's drag and
+ * drop chunks are at most 4096 bytes of payload plus their metadata) */
+#define CTUI_OSC_MAX 16384
+
+typedef struct {
+  int code;         /* the number before the first ';' (52 clipboard, 72
+                     * kitty's drag and drop, ...), -1 if there is none */
+  const char *text; /* everything after that ';', NUL-terminated (the
+                     * whole body when there's no code). Static storage:
+                     * valid until the next input event */
+  size_t len;       /* strlen(text) */
+  int truncated;    /* the body was longer than CTUI_OSC_MAX: text holds
+                     * its start, the rest was read and dropped */
+} CTUI_OSC_EVENT_DATA;
+
 /* readiness bits for ctui_io_watch() (core/io.h) */
 enum {
   CTUI_IO_READ = 1 << 0,
@@ -143,6 +158,13 @@ typedef enum {
                      * CTUI_IO_EVENT_DATA. Like CTUI_TIMER_EVENT, dispatched
                      * directly to the watch's own (widget, handler), not
                      * through the registry. */
+  CTUI_OSC_EVENT,   /* an OSC sequence from the terminal (ESC ] ... BEL or
+                     * ESC \), ev_source "input" -- see CTUI_OSC_EVENT_DATA.
+                     * Terminals only send these as answers to something
+                     * the app asked for (an OSC 52 read, kitty's OSC 72
+                     * drag and drop once enabled); before, an ESC ] came
+                     * in as alt+] and the body as keypresses. Dispatched
+                     * through the registry to every listener. */
   CTUI_DUMMY_EVENT,
 } CTUI_EVENTTYPE;
 
