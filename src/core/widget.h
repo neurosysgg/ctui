@@ -65,7 +65,7 @@ struct CTUI_WIDGET {
 
   /* alternate render callback, used by ctui_widget_dispatch_render()
    * instead of render above when gfx_render_mode matches the negotiated
-   * g_gfx_mode. NULL (the ctui_widget_make() default) means "no
+   * ctui_g_gfx_mode. NULL (the ctui_widget_make() default) means "no
    * alternate renderer" -- every widget just uses render. */
   void (*gfx_render)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
 

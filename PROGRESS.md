@@ -234,6 +234,17 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Internal globals prefixed** (2026-09-27, found by ctui-wm's
+      apps): the three statics `src/core/` shares across its files
+      (`ctui_internal.h`) were plain `g_app`, `g_gfx_mode` and
+      `g_resize_pending` -- external symbols in every binary linking
+      ctui, so an app's own global of the same name (ctui-files had a
+      `g_app`) failed to link with a duplicate definition. Now
+      `ctui_g_app`, `ctui_g_gfx_mode`, `ctui_g_resize_pending`; no API
+      change (nothing outside `src/core/` and the tests names them).
+      The old logger functions (`init_logger`, `shutdown_logger`,
+      `logger_set_buffered`, `logger.h`) stay unprefixed: public API.
+
 - [x] **OSC input** (2026-09-27, for ctui-wm's file manager, which takes
       and starts drags through kitty's drag and drop protocol, OSC 72):
       `CTUI_OSC_EVENT` (source `"input"`, appended before `DUMMY`) with

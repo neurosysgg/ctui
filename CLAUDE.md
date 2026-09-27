@@ -117,9 +117,9 @@ rather than just the pattern.)
     order, so adding a public declaration means adding it to the right
     `core/*.h`, not to `ctui.h` directly.
   - A few statics genuinely need to cross `src/core/`'s own internal
-    file boundaries — `g_app` (set by `ctui_app_init()` in `app.c`,
+    file boundaries — `ctui_g_app` (set by `ctui_app_init()` in `app.c`,
     read by `ctui_event_register()`/`ctui_handle_event()` in
-    `event.c`) and `g_resize_pending` (set by `term.c`'s `SIGWINCH`
+    `event.c`) and `ctui_g_resize_pending` (set by `term.c`'s `SIGWINCH`
     handler, polled by `input.c`). These live in
     `src/core/ctui_internal.h`, a header included only by `core/*.c`
     files, never by `ctui.h` — keep it that way; it's not part of the

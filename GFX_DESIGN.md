@@ -66,11 +66,11 @@ only surface once you try to actually write the code:
   index 2 = green in `BASIC` vs. index 2 = a totally different color in
   `256`) would otherwise be wrongly treated as "unchanged" and never
   get their new escape emitted.
-- **`g_gfx_mode` (the negotiated mode from `ctui_init()`) is not
+- **`ctui_g_gfx_mode` (the negotiated mode from `ctui_init()`) is not
   consulted by `ctui_screen_flush()` at all.** Per-cell emission is
   driven purely by each cell's own `color_mode` — that's what "widget
   just says 'this cell is yellow'; the flush layer decides how to
-  encode that" means in Phase 3. `g_gfx_mode` exists for startup
+  encode that" means in Phase 3. `ctui_g_gfx_mode` exists for startup
   negotiation (this pass) and for Phase 4's widget-support validation
   (deferred); nothing today stops a widget from calling
   `ctui_widget_putc_256()` even under a session negotiated at
@@ -95,20 +95,20 @@ only surface once you try to actually write the code:
   what was requested, only down, so the result is always either exactly
   the request or the floor it got downgraded to.
 - **Phase 4's validation check needed to mask out the text tiers, not
-  compare `supported_gfx_modes` against `g_gfx_mode` directly.**
-  `g_gfx_mode` is always exactly *one* `CTUI_GFX_MODE` bit (the single
+  compare `supported_gfx_modes` against `ctui_g_gfx_mode` directly.**
+  `ctui_g_gfx_mode` is always exactly *one* `CTUI_GFX_MODE` bit (the single
   tier `ctui_init()` negotiated — see the bullet above), never a
   bitmask of everything the terminal supports. An ordinary widget's
   `supported_gfx_modes` is `ANSI16 | ANSI256 | TRUECOLOR` (bits 0-2). If
-  `g_gfx_mode` were `CTUI_GFX_KITTY` (bit 3) — an app that asked for and
-  got Kitty — a plain `supported_gfx_modes & g_gfx_mode` test would be
+  `ctui_g_gfx_mode` were `CTUI_GFX_KITTY` (bit 3) — an app that asked for and
+  got Kitty — a plain `supported_gfx_modes & ctui_g_gfx_mode` test would be
   `0` for *every ordinary text widget in the app*, since none of them
   carry bit 3, and `ctui_app_init()` would hard-fail an app for having
   a border widget. Fixed by masking `CTUI_GFX_ANSI16 | CTUI_GFX_ANSI256
   | CTUI_GFX_TRUECOLOR` out of a widget's `supported_gfx_modes` before
   the check: those three bits are unconditionally satisfiable no matter
   what got negotiated (text rendering goes through each cell's own
-  `color_mode`, never `g_gfx_mode` — see the very first bullet in this
+  `color_mode`, never `ctui_g_gfx_mode` — see the very first bullet in this
   section), so what's left (`required`) is only ever nonzero for a
   widget that actually opted into a specific non-text protocol via
   `ctui_widget_set_gfx_renderer()`. `kitty_demo`'s own border/label
@@ -278,8 +278,8 @@ proving ground). Negotiation inside `ctui_init()`:
    `CTUI_GFX_ANSI256` afterward — see `PROGRESS.md`).
 
 Negotiated mode is stored as a new cross-file static in
-`ctui_internal.h` (`g_gfx_mode`), same pattern as `g_app`/
-`g_resize_pending` — reserved for Phase 4's future widget-support
+`ctui_internal.h` (`ctui_g_gfx_mode`), same pattern as `ctui_g_app`/
+`ctui_g_resize_pending` — reserved for Phase 4's future widget-support
 validation, not read by `ctui_screen_flush()` itself (see "Resolved
 open questions").
 
@@ -315,12 +315,12 @@ need *anything* — stayed a no-op for all of them:
   misleading).
 - `ctui_app_init()` (now returning `int`, not `void` — same `0`/`-1`
   convention `ctui_init()` already used) validates every *top-level*
-  widget's declared `supported_gfx_modes` against `g_gfx_mode` at
+  widget's declared `supported_gfx_modes` against `ctui_g_gfx_mode` at
   startup: mismatch → `ctui_log(E_ERR, ...)` + hard fail (`-1`). This
   only ever fires for a top-level widget that opted into a protocol it
   doesn't actually support — never for ordinary text widgets, but *not*
   because their baseline bitmask "always covers whatever text tier got
-  negotiated" (that's false whenever `g_gfx_mode` is `CTUI_GFX_KITTY`
+  negotiated" (that's false whenever `ctui_g_gfx_mode` is `CTUI_GFX_KITTY`
   itself, see below) — because the check masks the three text-tier bits
   out of a widget's `supported_gfx_modes` before comparing, so text
   widgets are unconditionally exempt regardless of what got negotiated.
@@ -645,7 +645,7 @@ Phase 6 is therefore two pieces landing together, not one:
 1. A one-shot startup probe (temporarily un-suppress responses, send a
    minimal `t=s` test image, parse the terminal's APC reply, cache the
    result in a new `g_kitty_shm_supported` alongside the existing
-   `g_gfx_mode`) — falls back to today's `t=d` path permanently for the
+   `ctui_g_gfx_mode`) — falls back to today's `t=d` path permanently for the
    session on any failure (unsupported terminal, `shm_open()` failing
    locally, no reply within some bound).
 2. `ctui_gfx_kitty_display()` branches on that cached result: `t=s` path
@@ -678,7 +678,7 @@ up front.
 - **Where the probe lives**: inside `ctui_init()` (`term.c`), right
   after raw-mode `tcsetattr()` (unbuffered byte-level stdin reads are a
   prerequisite for reading a bounded reply) and before the
-  alternate-screen switch, gated on `g_gfx_mode == CTUI_GFX_KITTY` —
+  alternate-screen switch, gated on `ctui_g_gfx_mode == CTUI_GFX_KITTY` —
   every other negotiated tier never calls
   `ctui_gfx_kitty_probe_shm()` at all, verified directly
   (`TERM=xterm-256color` under `pty_harness.py` shows no probe log line;

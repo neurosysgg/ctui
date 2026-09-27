@@ -161,8 +161,8 @@ else.
   buffer, compositor, widget lifecycle, groups, splits, event registry,
   terminal I/O, fd watches, UTF-8, string-layout utilities, logging)
   plus a private
-  `ctui_internal.h` for the handful of statics (`g_app`,
-  `g_resize_pending`) shared only between core translation units. Has no
+  `ctui_internal.h` for the handful of statics (`ctui_g_app`,
+  `ctui_g_resize_pending`) shared only between core translation units. Has no
   knowledge of any specific widget.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
   `menu`, `status`, `debug_info`, `dump_palette`, `grid`, `list`,

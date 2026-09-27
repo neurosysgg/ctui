@@ -69,7 +69,7 @@ void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
  *
  * Caller (ctui_app_render()'s Phase 4 dispatch, see widget.h's
  * ctui_widget_set_gfx_renderer()) is responsible for only calling this
- * once CTUI_GFX_KITTY is actually the negotiated g_gfx_mode -- this
+ * once CTUI_GFX_KITTY is actually the negotiated ctui_g_gfx_mode -- this
  * function itself doesn't check. No-ops (logs E_WRN) if stdout isn't a
  * real terminal or the image is degenerate (non-positive dimensions or a
  * NULL buffer).

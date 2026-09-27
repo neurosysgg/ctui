@@ -23,12 +23,12 @@ static int g_mouse_enabled = 0;
 static int g_focus_enabled = 0;
 static int g_kitty_keys_enabled = 0;
 
-volatile sig_atomic_t g_resize_pending = 0;
-unsigned int g_gfx_mode = 0;
+volatile sig_atomic_t ctui_g_resize_pending = 0;
+unsigned int ctui_g_gfx_mode = 0;
 
 static void handle_sigwinch(int sig) {
   (void)sig;
-  g_resize_pending = 1;
+  ctui_g_resize_pending = 1;
 }
 
 /* highest single CTUI_GFX_MODE tier actually present in caps -- used to
@@ -68,9 +68,9 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
               (unsigned int)negotiated);
     *mode = negotiated;
   }
-  g_gfx_mode = (unsigned int)*mode;
+  ctui_g_gfx_mode = (unsigned int)*mode;
   ctui_logf(E_INF, "[CTUI:GFX] - negotiated mode 0x%x @ tick %d\n",
-            g_gfx_mode, ctui_tick_advance());
+            ctui_g_gfx_mode, ctui_tick_advance());
 
   ctui_tick_advance();
   if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) {
@@ -115,7 +115,7 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
    * somehow printed anything visible (it shouldn't -- a=q never
    * displays) would land on the normal screen, not linger into the
    * app's own alt-screen frame. */
-  if (g_gfx_mode == CTUI_GFX_KITTY) {
+  if (ctui_g_gfx_mode == CTUI_GFX_KITTY) {
     ctui_gfx_kitty_probe_shm();
   }
 
@@ -170,7 +170,7 @@ void ctui_resume(void) {
     printf("\x1b[>1u");
   }
   fflush(stdout);
-  g_resize_pending = 1; /* a full redraw, at whatever size it is now */
+  ctui_g_resize_pending = 1; /* a full redraw, at whatever size it is now */
   ctui_logf(E_INF, "[CTUI:TERM] - resumed @ tick %d\n", ctui_tick_advance());
 }
 

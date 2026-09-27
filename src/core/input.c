@@ -479,8 +479,8 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
   char c;
 
   for (;;) {
-    if (g_resize_pending) {
-      g_resize_pending = 0;
+    if (ctui_g_resize_pending) {
+      ctui_g_resize_pending = 0;
       ctui_get_termsize(&resize_data.rows, &resize_data.cols);
       ev->type = CTUI_RESIZE_EVENT;
       ev->ev_source = "terminal";

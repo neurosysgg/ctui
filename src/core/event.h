@@ -213,7 +213,7 @@ typedef struct CTUI_EVENT_HANDLER CTUI_EVENT_HANDLER;
  * incoming event; instead, register a handler for exactly the (source,
  * type) pair you want, and ctui_handle_event() only ever calls handlers
  * that match. Requires ctui_app_init() to have run first (registrations are
- * stored on the current app, tracked the same way g_app is). */
+ * stored on the current app, tracked the same way ctui_g_app is). */
 
 /* registers handler to run against widget whenever ctui_handle_event() sees
  * an event with ev->ev_source equal to source (compared with strcmp) and

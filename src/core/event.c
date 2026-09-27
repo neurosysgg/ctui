@@ -106,28 +106,28 @@ static int g_tombstones = 0;
 
 static void compact_handlers(void) {
   int kept = 0;
-  for (int i = 0; i < g_app->handler_count; i++) {
-    if (g_app->handlers[i].handler) {
-      g_app->handlers[kept++] = g_app->handlers[i];
+  for (int i = 0; i < ctui_g_app->handler_count; i++) {
+    if (ctui_g_app->handlers[i].handler) {
+      ctui_g_app->handlers[kept++] = ctui_g_app->handlers[i];
     }
   }
   ctui_logf(E_INF,
             "[CTUI:EVENT] - compacted registry @ tick %d (%d -> %d "
             "handlers)\n",
-            ctui_tick_advance(), g_app->handler_count, kept);
-  g_app->handler_count = kept;
+            ctui_tick_advance(), ctui_g_app->handler_count, kept);
+  ctui_g_app->handler_count = kept;
   g_tombstones = 0;
 }
 
 void ctui_event_unregister(CTUI_WIDGET *widget) {
-  if (!g_app) {
+  if (!ctui_g_app) {
     ctui_log(E_WRN, "[CTUI:EVENT] - no app registered, nothing to "
                     "unregister\n");
     return;
   }
   int removed = 0;
-  for (int i = 0; i < g_app->handler_count; i++) {
-    CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
+  for (int i = 0; i < ctui_g_app->handler_count; i++) {
+    CTUI_EVENT_HANDLER *h = &ctui_g_app->handlers[i];
     if (h->handler && h->widget == widget) {
       h->handler = NULL;
       removed++;
@@ -146,20 +146,21 @@ void ctui_event_unregister(CTUI_WIDGET *widget) {
 void ctui_event_register(const char *source, CTUI_EVENTTYPE type,
                          CTUI_WIDGET *widget,
                          int (*handler)(CTUI_WIDGET *self, CTUI_EVENT *ev)) {
-  if (!g_app) {
+  if (!ctui_g_app) {
     ctui_log(E_WRN,
              "[CTUI:EVENT] - no app registered, dropping registration\n");
     return;
   }
 
-  if (g_app->handler_count == g_app->handler_cap) {
-    int new_cap = g_app->handler_cap == 0 ? 4 : g_app->handler_cap * 2;
-    g_app->handlers = realloc(g_app->handlers,
-                              (size_t)new_cap * sizeof(CTUI_EVENT_HANDLER));
-    g_app->handler_cap = new_cap;
+  if (ctui_g_app->handler_count == ctui_g_app->handler_cap) {
+    int new_cap =
+        ctui_g_app->handler_cap == 0 ? 4 : ctui_g_app->handler_cap * 2;
+    ctui_g_app->handlers = realloc(
+        ctui_g_app->handlers, (size_t)new_cap * sizeof(CTUI_EVENT_HANDLER));
+    ctui_g_app->handler_cap = new_cap;
   }
 
-  g_app->handlers[g_app->handler_count++] = (CTUI_EVENT_HANDLER){
+  ctui_g_app->handlers[ctui_g_app->handler_count++] = (CTUI_EVENT_HANDLER){
       .source = source, .type = type, .widget = widget, .handler = handler};
 
   ctui_logf(E_INF,
@@ -178,8 +179,8 @@ void ctui_event_register(const char *source, CTUI_EVENTTYPE type,
 static int ctui_event_dispatch_to_widget(CTUI_EVENT *ev,
                                          CTUI_WIDGET *widget) {
   int changed = 0;
-  for (int i = 0; i < g_app->handler_count; i++) {
-    CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
+  for (int i = 0; i < ctui_g_app->handler_count; i++) {
+    CTUI_EVENT_HANDLER *h = &ctui_g_app->handlers[i];
     if (!h->handler || h->type != ev->type || h->widget != widget)
       continue;
     if (h->source == NULL || ev->ev_source == NULL ||
@@ -233,7 +234,7 @@ int ctui_handle_event(CTUI_EVENT *ev) {
             "[CTUI:EVENT] - dispatching %s event @ tick %d (source=\"%s\")\n",
             ctui_eventtype_name(ev->type), ctui_tick_advance(),
             ev->ev_source ? ev->ev_source : "(null)");
-  if (!g_app) {
+  if (!ctui_g_app) {
     ctui_log(E_WRN, "[CTUI:EVENT] - no app registered, dropping event\n");
     return 0;
   }
@@ -241,8 +242,8 @@ int ctui_handle_event(CTUI_EVENT *ev) {
   if (ev->scope == CTUI_EVENT_SCOPE_BUBBLE) {
     changed = ctui_event_dispatch_bubble(ev);
   } else {
-    for (int i = 0; i < g_app->handler_count; i++) {
-      CTUI_EVENT_HANDLER *h = &g_app->handlers[i];
+    for (int i = 0; i < ctui_g_app->handler_count; i++) {
+      CTUI_EVENT_HANDLER *h = &ctui_g_app->handlers[i];
       if (!h->handler || h->type != ev->type)
         continue;
       if (h->source == NULL || ev->ev_source == NULL ||

@@ -49,7 +49,7 @@ asked).
 
 **Truecolor (v1)**: request `CTUI_GFX_TRUECOLOR` instead of `demo`'s
 `CTUI_GFX_KITTY` in `ctui_init()`. Confirmed in `term.c` that this pins
-`g_gfx_mode` to truecolor on any truecolor-capable terminal (including a
+`ctui_g_gfx_mode` to truecolor on any truecolor-capable terminal (including a
 Kitty one), rather than leaving it to whatever the terminal happens to
 support — the literal reading of "truecolor (v1)" as the tier this app
 proves out, the way `demo` proves out Kitty.

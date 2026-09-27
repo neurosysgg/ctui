@@ -318,7 +318,8 @@ static int gfx_pending_count = 0;
 static int gfx_pending_cap = 0;
 
 void ctui_widget_dispatch_render(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp) {
-  if (widget->gfx_render_mode == 0 || widget->gfx_render_mode != g_gfx_mode) {
+  if (widget->gfx_render_mode == 0 ||
+      widget->gfx_render_mode != ctui_g_gfx_mode) {
     widget->render(widget, comp);
     return;
   }

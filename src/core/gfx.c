@@ -207,7 +207,7 @@ void ctui_gfx_kitty_shm_reap(void) {
  * out of ctui_gfx_kitty_probe_shm() purely so the parsing itself is
  * unit-testable without a real terminal (tests/kitty_protocol_test.c
  * forward-declares this the same way it already gray-box-declares
- * g_gfx_mode; not part of the public gfx.h surface, same reasoning).
+ * ctui_g_gfx_mode; not part of the public gfx.h surface, same reasoning).
  * Deliberately loose -- scans for "i=<id>" then requires "OK" right
  * after the next ';', rather than a strict grammar parse, since a real
  * terminal's reply is one short trusted line, not adversarial input. */

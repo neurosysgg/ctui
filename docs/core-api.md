@@ -253,7 +253,7 @@ addEventListener()-style: widgets register interest in one
   identity — two instances of the same widget kind can't be told apart
   by source alone under `GLOBAL` scope (`CTUI_EVENT_SCOPE_BUBBLE` +
   `.origin = self` fixes this per-registration, opt-in). Requires
-  `ctui_app_init()` to have run first (registrations live on `g_app`).
+  `ctui_app_init()` to have run first (registrations live on `ctui_g_app`).
 - `ctui_event_unregister(widget)` — drops every registration made
   against `widget`; safe mid-dispatch (tombstoned, compacted after the
   outermost `ctui_handle_event()` returns).
@@ -474,7 +474,7 @@ Not tied to any specific widget:
 ## `ctui_internal.h` — not public
 
 Three `extern` statics shared only between `core/*.c` translation
-units (`g_app`, `g_resize_pending`, `g_gfx_mode`). Never included by
+units (`ctui_g_app`, `ctui_g_resize_pending`, `ctui_g_gfx_mode`). Never included by
 `ctui.h`; nothing outside `src/core/` should reference these. Listed
 here only so you know they exist and aren't a reason to reach into
 `src/core/` from a widget — if you find yourself wanting one of these

@@ -143,7 +143,7 @@ One more case the original phases didn't call out: `ctui_handle_event()`
 called with `scope == CTUI_EVENT_SCOPE_BUBBLE` and `ev->origin == NULL`
 (a caller opted into bubbling but forgot to set the one field it needs)
 logs `E_WRN` and drops the event — same reject-and-log convention as
-`g_app == NULL`, not a crash.
+`ctui_g_app == NULL`, not a crash.
 
 (Small doc fix along the way: the Blast-radius section originally said
 "~6 emit sites"; the actual count in this repo is 4 —

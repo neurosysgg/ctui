@@ -6,7 +6,7 @@
  * the registry mechanics that test doesn't exercise. Also covers the
  * enum-to-string helpers and the "no app yet" rejection paths in
  * ctui_event_register()/ctui_handle_event() -- only reachable before any
- * ctui_app_init() call has run in this process, since g_app has no public
+ * ctui_app_init() call has run in this process, since ctui_g_app has no public
  * way to be unset afterward.
  *
  * test_bubble() covers EVENT_DESIGN.md's CTUI_EVENT_SCOPE_BUBBLE: a
@@ -56,7 +56,7 @@ static int should_not_fire_before_init(CTUI_WIDGET *self, CTUI_EVENT *ev) {
 static void test_no_app_yet(void) {
   CTUI_WIDGET w = ctui_widget_make(0, 0, 1, 1, NULL, noop_render, NULL);
 
-  /* no ctui_app_init() has run yet in this process -- g_app is still NULL,
+  /* no ctui_app_init() has run yet in this process -- ctui_g_app is still NULL,
    * so both of these must reject-and-log rather than crash or silently
    * succeed */
   ctui_event_register("src", CTUI_VALUE_CHANGED_EVENT, &w,

@@ -37,7 +37,7 @@ typedef struct {
  * logged E_ERR) rather than a silent degrade -- the only failure case,
  * same 0/-1 convention as ctui_init(). Ordinary text widgets (the
  * ctui_widget_make() default) always pass regardless of what was
- * negotiated, since text rendering never depends on g_gfx_mode -- see
+ * negotiated, since text rendering never depends on ctui_g_gfx_mode -- see
  * GFX_DESIGN.md's Phase 4. */
 int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
                   int cols);

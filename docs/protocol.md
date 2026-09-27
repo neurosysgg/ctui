@@ -140,10 +140,10 @@ non-degradable protocol (Sixel, iTerm2 inline images) to reuse as-is:
   exactly that one bit -- there's no text tier left to fall back to.
 - `ctui_app_init()` (now returning `int`, `0`/`-1` same convention as
   `ctui_init()`) validates every *top-level* widget's declared
-  `supported_gfx_modes` against the negotiated `g_gfx_mode` at startup:
+  `supported_gfx_modes` against the negotiated `ctui_g_gfx_mode` at startup:
   the three text-tier bits are masked out of the check first (always
-  satisfiable, since text rendering doesn't depend on `g_gfx_mode` at
-  all -- see Step 4's `g_gfx_mode`-isn't-consulted-by-flush note above),
+  satisfiable, since text rendering doesn't depend on `ctui_g_gfx_mode` at
+  all -- see Step 4's `ctui_g_gfx_mode`-isn't-consulted-by-flush note above),
   so this only ever actually fires for a top-level widget that opted
   into a specific non-text protocol and didn't get it. Hard fail (`-1`,
   logged) on mismatch, since there's no text fallback to degrade to for

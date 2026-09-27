@@ -10,14 +10,14 @@
 
 #include <stdlib.h>
 
-CTUI_APP *g_app = NULL;
+CTUI_APP *ctui_g_app = NULL;
 
 /* the three tiers every widget supports by default (ctui_widget_make()) --
- * always satisfiable regardless of g_gfx_mode, since ctui_screen_flush()
+ * always satisfiable regardless of ctui_g_gfx_mode, since ctui_screen_flush()
  * degrades a cell's own color_mode to whatever ANSI codes fit, independent
  * of what got negotiated (see GFX_DESIGN.md's "Resolved open questions").
  * Masking these out of a widget's declared supported_gfx_modes before
- * checking against g_gfx_mode is what makes the ctui_app_init() gfx check
+ * checking against ctui_g_gfx_mode is what makes the ctui_app_init() gfx check
  * below a no-op for ordinary text widgets -- it only ever actually fires
  * for a widget that opted into a specific non-degradable protocol (e.g.
  * CTUI_GFX_KITTY) via ctui_widget_set_gfx_renderer(). */
@@ -34,7 +34,7 @@ int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
   app->handler_cap = 0;
   app->quit_on_esc = 1;
   app->quit_requested = 0;
-  g_app = app;
+  ctui_g_app = app;
   ctui_timer_reset();
   ctui_io_reset();
   ctui_widget_gfx_reset();
@@ -61,12 +61,12 @@ int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
 
     unsigned int required =
         widgets[i]->supported_gfx_modes & ~CTUI_GFX_TEXT_TIERS;
-    if (required && !(required & g_gfx_mode)) {
+    if (required && !(required & ctui_g_gfx_mode)) {
       ctui_logf(E_ERR,
                 "[CTUI:APP] - widget %p requires gfx mode 0x%x, but 0x%x "
                 "was negotiated @ tick %d; no text fallback to degrade to, "
                 "aborting init\n",
-                (void *)widgets[i], required, g_gfx_mode,
+                (void *)widgets[i], required, ctui_g_gfx_mode,
                 ctui_tick_advance());
       return -1;
     }
@@ -161,13 +161,13 @@ static void run_frame(CTUI_APP *app, CTUI_SCREEN *screen) {
 }
 
 void ctui_app_quit(void) {
-  if (!g_app) {
+  if (!ctui_g_app) {
     ctui_log(E_WRN, "[CTUI:APP] - quit requested with no app registered\n");
     return;
   }
   ctui_logf(E_INF, "[CTUI:APP] - quit requested @ tick %d\n",
             ctui_tick_advance());
-  g_app->quit_requested = 1;
+  ctui_g_app->quit_requested = 1;
 }
 
 void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {

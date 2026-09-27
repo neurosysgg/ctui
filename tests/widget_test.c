@@ -9,10 +9,10 @@
 
 #include "ctui_test.h"
 
-/* g_gfx_mode is intentionally private -- see kitty_protocol_test.c's
+/* ctui_g_gfx_mode is intentionally private -- see kitty_protocol_test.c's
  * identical extern for why redeclaring it here is the accepted gray-box
  * trick for a headless test that never calls ctui_init(). */
-extern unsigned int g_gfx_mode;
+extern unsigned int ctui_g_gfx_mode;
 
 static void noop_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   (void)self;
@@ -222,20 +222,20 @@ static void test_gfx_dispatch(void) {
   ctui_widget_init(&text_w, comp);
   ctui_widget_init(&gfx_w, comp);
 
-  g_gfx_mode = 0;
+  ctui_g_gfx_mode = 0;
   ctui_widget_dispatch_render(&text_w, comp);
   ctui_widget_dispatch_render(&gfx_w, comp);
   CTUI_TEST_ASSERT(gfx_fire_count == 0,
                    "dispatch_render() defers to plain render() (not "
                    "gfx_render) when gfx_render_mode doesn't match the "
-                   "negotiated g_gfx_mode");
+                   "negotiated ctui_g_gfx_mode");
 
   ctui_widget_flush_gfx(comp);
   CTUI_TEST_ASSERT(gfx_fire_count == 0,
                    "flush_gfx() fires nothing when nothing was queued this "
                    "frame");
 
-  g_gfx_mode = CTUI_GFX_KITTY;
+  ctui_g_gfx_mode = CTUI_GFX_KITTY;
   ctui_widget_dispatch_render(&gfx_w, comp);
   CTUI_TEST_ASSERT(gfx_fire_count == 0,
                    "dispatch_render() queues a matching gfx widget instead "
@@ -252,7 +252,7 @@ static void test_gfx_dispatch(void) {
                    "second call without a new dispatch fires nothing more");
 
   ctui_widget_gfx_reset();
-  g_gfx_mode = 0;
+  ctui_g_gfx_mode = 0;
   ctui_compositor_free(comp);
 }
 
