@@ -92,19 +92,24 @@ static inline uint32_t ctui_test_cell(CTUI_SCREEN *screen, int row, int col) {
 }
 
 /* true if UTF-8 needle's glyphs occupy line[start..] exactly -- a wide
- * glyph matches its lead cell plus the CTUI_CELL_CONT after it, i.e. how
- * ctui_widget_puts() would have laid it out */
+ * glyph matches its lead cell plus the CTUI_CELL_CONT after it, a
+ * grapheme cluster its one cell, i.e. how ctui_widget_puts() would have
+ * laid it out */
 static inline int ctui_test_match_at(const CTUI_CELL *line, int cols,
                                      int start, const char *needle) {
   int col = start;
   while (*needle) {
-    uint32_t cp;
-    needle += ctui_utf8_decode(needle, &cp);
-    if (col >= cols || line[col].ch != cp) {
+    uint32_t ch;
+    int w;
+    needle += ctui_utf8_cluster(needle, (size_t)-1, &ch, &w);
+    if (w == 0) {
+      continue; /* puts drops it too */
+    }
+    if (col >= cols || line[col].ch != ch) {
       return 0;
     }
     col++;
-    if (ctui_utf8_cpwidth(cp) == 2) {
+    if (w == 2) {
       if (col >= cols || line[col].ch != CTUI_CELL_CONT) {
         return 0;
       }
