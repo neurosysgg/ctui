@@ -441,6 +441,8 @@ above into the loop described in "Life of a frame".
   exactly one of `E_DBG`/`E_WRN`/`E_INF`/`E_ERR` (`src/logger.h`).
   Every non-trivial core operation logs through these — grep
   `ctui.log` (gitignored) when debugging rather than guessing.
+  Before `ctui_log_init()` both drop the line and return 0 (a helper
+  that logs may run before an app starts ctui).
 - `ctui_tick_advance()` — the global tick counter used as the
   timestamp in most `ctui_logf()` calls.
 

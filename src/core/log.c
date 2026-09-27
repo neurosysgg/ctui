@@ -10,6 +10,11 @@ static int _ctui_ticks;
 int ctui_tick_advance(void) { return ++_ctui_ticks; }
 
 int ctui_log(int level, const char *log_str) {
+  /* before ctui_log_init() there is no logger yet: dropped, as
+   * ctui_logf() drops it (its verbosity reads 0 then) */
+  if (logger.log_entry == NULL) {
+    return 0;
+  }
   return logger.log_entry(&logger, level, log_str);
 }
 

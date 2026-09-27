@@ -17,6 +17,12 @@
 #include <unistd.h>
 
 int main(void) {
+  /* before ctui_log_init(): dropped, not a call through a NULL logger */
+  CTUI_TEST_ASSERT(ctui_log(E_ERR, "before init\n") == 0,
+                   "ctui_log before ctui_log_init drops the line");
+  CTUI_TEST_ASSERT(ctui_logf(E_ERR, "before init %d\n", 1) == 0,
+                   "ctui_logf before ctui_log_init drops the line");
+
   ctui_log_init(E_ERR); /* only E_ERR passes -- everything else is masked */
 
   int r = ctui_logf(E_DBG, "this should be filtered out\n");

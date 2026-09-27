@@ -234,6 +234,13 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`ctui_log()` before `ctui_log_init()`** (2026-09-27, found by
+      ctui-wm's `check`, which logged from a helper without a compositor
+      before starting ctui): it called the logger's `log_entry` through a
+      NULL pointer. Now it drops the line and returns 0, as `ctui_logf()`
+      already did (its verbosity check reads 0 then). Tested in
+      `log_test.c`.
+
 - [x] **Internal globals prefixed** (2026-09-27, found by ctui-wm's
       apps): the three statics `src/core/` shares across its files
       (`ctui_internal.h`) were plain `g_app`, `g_gfx_mode` and
