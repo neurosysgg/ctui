@@ -53,6 +53,23 @@ static void test_widths(void) {
                    "CJK and emoji are 2 columns");
   CTUI_TEST_ASSERT(ctui_utf8_cpwidth(0x0301) == 0,
                    "a combining mark is 0 columns");
+  /* where libc wcwidth() and kitty disagree (tools/check_widths.py
+   * compares every codepoint): kitty is the reference */
+  CTUI_TEST_ASSERT(ctui_utf8_cpwidth(0xFA6E) == 2 &&
+                       ctui_utf8_cpwidth(0x1FAE8) == 2 &&
+                       ctui_utf8_cpwidth(0x261D) == 2,
+                   "newer CJK, newer emoji and emoji-presentation bases are "
+                   "2 columns, as kitty draws them");
+  CTUI_TEST_ASSERT(ctui_utf8_cpwidth(0xAD) == 0 &&
+                       ctui_utf8_cpwidth(0x0600) == 0 &&
+                       ctui_utf8_cpwidth(0x200B) == 0,
+                   "soft hyphen, format characters and zero width space "
+                   "are 0 columns");
+  CTUI_TEST_ASSERT(
+      ctui_utf8_cpwidth(0x1161) == 1 && ctui_utf8_cpwidth(0xE000) == 1 &&
+          ctui_utf8_cpwidth(0xFFFE) == 1 && ctui_utf8_cpwidth(0x0378) == 1,
+      "Hangul vowel jamo, private use, noncharacters (sent as "
+      "U+FFFD) and unassigned codepoints are 1 column");
   CTUI_TEST_ASSERT(ctui_utf8_width("a\xe4\xbd\xa0" "b") == 4,
                    "string width sums per-glyph widths, not bytes (5 bytes, "
                    "4 columns)");

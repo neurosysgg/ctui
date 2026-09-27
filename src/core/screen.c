@@ -229,9 +229,11 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
 
       /* never let a raw control byte reach the terminal -- a stray \n or
        * ESC in cell content would corrupt the whole frame, not just one
-       * cell */
+       * cell. Noncharacters too: kitty draws nothing for them, so the
+       * row would shift left by a cell. */
       uint32_t ch = cur->ch;
-      if (ch < 0x20 || ch == 0x7F || (ch >= 0x80 && ch < 0xA0)) {
+      if (ch < 0x20 || ch == 0x7F || (ch >= 0x80 && ch < 0xA0) ||
+          (ch >= 0xFDD0 && ch < 0xFDF0) || (ch & 0xFFFE) == 0xFFFE) {
         ch = 0xFFFD;
       }
       len += (size_t)ctui_utf8_encode(ch, out + len);

@@ -1,14 +1,7 @@
-/* wcwidth() is XSI, not C11 -- same "before the first system header"
- * requirement as term.c's _POSIX_C_SOURCE */
-#define _XOPEN_SOURCE 700
-
 #include "utf8.h"
 
 #include "log.h"
-
-#include <locale.h>
-#include <stdlib.h>
-#include <wchar.h>
+#include "utf8_width.h"
 
 #define CTUI_UTF8_REPLACEMENT 0xFFFDu
 
@@ -79,34 +72,24 @@ int ctui_utf8_encode(uint32_t cp, char *out) {
   return 4;
 }
 
-/* wcwidth() answers per LC_CTYPE, and in the default "C" locale every
- * non-ASCII codepoint is unprintable (-1). Only switch when the app left
- * the locale at "C" (MB_CUR_MAX == 1) -- an app that already picked a
- * UTF-8 locale keeps it. Lazy rather than in ctui_init() so headless
- * callers (tools/ctui_test.h never calls ctui_init()) get the same
- * widths a real run does. */
-static void ensure_utf8_ctype(void) {
-  static int done = 0;
-  if (done) {
-    return;
-  }
-  done = 1;
-  if (MB_CUR_MAX == 1 && setlocale(LC_CTYPE, "C.UTF-8") == NULL) {
-    ctui_log(E_WRN, "[CTUI:UTF8] - C.UTF-8 locale unavailable, non-ASCII "
-                    "widths will fall back to 1\n");
-  }
-}
-
 int ctui_utf8_cpwidth(uint32_t cp) {
-  if (cp < 0x7F) {
+  /* U+00AD is the table's first entry */
+  if (cp < 0xAD) {
     return 1;
   }
-  ensure_utf8_ctype();
-  int w = wcwidth((wchar_t)cp);
-  if (w < 0) {
-    return 1;
+  size_t lo = 0;
+  size_t hi = sizeof ctui_utf8_width_table / sizeof ctui_utf8_width_table[0];
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (cp < ctui_utf8_width_table[mid].first) {
+      hi = mid;
+    } else if (cp > ctui_utf8_width_table[mid].last) {
+      lo = mid + 1;
+    } else {
+      return ctui_utf8_width_table[mid].width;
+    }
   }
-  return w > 2 ? 2 : w;
+  return 1;
 }
 
 int ctui_utf8_width(const char *s) {

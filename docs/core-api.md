@@ -88,9 +88,10 @@ just the type and the `CTUI_COLOR_*` basic-color enum.
   codepoint at a time; malformed input decodes as U+FFFD consuming one
   byte, so a walk always progresses.
 - `ctui_utf8_cpwidth(cp)` / `ctui_utf8_width(s)` — terminal columns
-  (0, 1, 2) via libc `wcwidth()`, i.e. the same answer the terminal
-  uses. ctui switches `LC_CTYPE` to `C.UTF-8` on first use only if the
-  app left it at `"C"`. Measure strings with `ctui_utf8_width()`, never
+  (0, 1, 2) as kitty draws them: a table generated from the Unicode
+  data with kitty's rules (`core/utf8_width.h`, `tools/gen_widths.py`;
+  `tools/check_widths.py` compares every codepoint with a running
+  kitty), independent of libc and locale. Measure strings with `ctui_utf8_width()`, never
   `strlen()`, before laying them out.
 - `ctui_utf8_prefix(s, cols, &width)` — longest byte prefix fitting in
   `cols` columns without splitting a glyph.

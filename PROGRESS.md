@@ -208,11 +208,13 @@ terminal resize.
   its cell plus a `CTUI_CELL_CONT` marker cell to its right, and
   `ctui_cell_set_ch()` is the one place that keeps lead/CONT pairs
   consistent when something overwrites half of one. Widths come from
-  libc `wcwidth()` (ctui flips `LC_CTYPE` to `C.UTF-8` lazily, and only
-  if the app left it at `"C"`), so they agree with the terminal rather
-  than a hand-maintained table going stale. `ctui_screen_flush()`
+  `core/utf8_width.h`, generated from the Unicode data with kitty's
+  rules (`tools/gen_widths.py`, `--check` for drift) and compared with
+  kitty's own `wcwidth` for every codepoint (`tools/check_widths.py`,
+  dev-time) -- libc `wcwidth()` disagreed with kitty on ~57k
+  codepoints (see Fixed). `ctui_screen_flush()`
   encodes UTF-8, skips CONT cells, tracks the cursor by glyph width,
-  and never emits a raw control byte (U+FFFD instead). Deliberately no
+  and never emits a raw control byte or noncharacter (U+FFFD instead). Deliberately no
   grapheme clustering: zero-width codepoints are dropped.
 - **One `select()` for everything** (`core/input.c`, `core/io.c`).
   `ctui_input_loop()` waits on stdin, every `ctui_io_watch()`ed fd, the
@@ -234,6 +236,21 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Column widths from kitty's rules, not libc** (2026-09-28, found
+      from ctui-wm): `ctui_utf8_cpwidth()` asked libc `wcwidth()`, which
+      disagreed with kitty on ~57k codepoints (glibc 2.42: newer CJK and
+      emoji unprintable, emoji-presentation bases like U+261D narrow,
+      soft hyphen and format characters 1, Hangul vowel jamo 0; musl's
+      tables are older still), each shifting the rest of its row. Now a
+      range table generated from the Unicode 17.0.0 data with kitty's
+      rules (`core/utf8_width.h`, 461 ranges, binary search;
+      `tools/gen_widths.py`, `--check` for drift), checked against
+      kitty 0.49.1's own `wcwidth` for all 1,114,112 codepoints by
+      `tools/check_widths.py` (the only special case: NUL, which kitty's
+      table calls 0 but its draw path skips; ctui sends U+FFFD). The
+      lazy `setlocale(LC_CTYPE, "C.UTF-8")` went with it. The flush now
+      also sends noncharacters (U+FDD0..FDEF, U+xFFFE/xFFFF) as U+FFFD:
+      kitty draws nothing for them.
 - [x] **Kitty images painted in place** (2026-09-27, for ctui-wm's
       visualizer and ctui-audio's lanes): `CTUI_GFX_KITTY_IMAGE`
       (`ctui_gfx_kitty_image_new/begin/commit/free`, gfx.h). Every

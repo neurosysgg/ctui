@@ -23,10 +23,11 @@ int ctui_utf8_encode(uint32_t cp, char *out);
 
 /* terminal column width of cp: 0 (combining/zero-width -- ctui has no
  * grapheme clustering, so callers drop these), 1, or 2 (East Asian wide,
- * emoji). Backed by libc wcwidth() so it agrees with what the terminal
- * itself decides. Control characters and anything wcwidth() rejects
- * report 1, since ctui_screen_flush() substitutes them with U+FFFD rather
- * than emitting them raw. */
+ * emoji). From a table generated out of the Unicode data with kitty's
+ * rules (core/utf8_width.h, tools/gen_widths.py), so it agrees with kitty
+ * whatever libc and locale the app runs under. Control characters,
+ * surrogates and noncharacters report 1, since ctui_screen_flush()
+ * substitutes them with U+FFFD rather than emitting them raw. */
 int ctui_utf8_cpwidth(uint32_t cp);
 
 /* total column width of the NUL-terminated UTF-8 string s -- the sum of
