@@ -369,7 +369,7 @@ static void test_place_file_escape(void) {
   char out[256];
   size_t n = ctui_gfx_kitty_place_file_escape(out, sizeof out, 7, "/i.png", 2,
                                               1);
-  const char *want = "\x1b_Ga=T,U=1,f=100,t=f,i=7,c=2,r=1,q=2;L2kucG5n\x1b\\";
+  const char *want = "\x1b_Ga=T,t=f,f=100,i=7,q=2,c=2,r=1,U=1;L2kucG5n\x1b\\";
   CTUI_TEST_ASSERT(n == strlen(want) && memcmp(out, want, n) == 0,
                    "place_file: transmit + virtual placement (U=1) of a PNG "
                    "by path (f=100,t=f), the path base64'd");
@@ -449,8 +449,9 @@ static void test_kitty_image(void) {
   memset(a, 0x11, len);
   size_t n = ctui_gfx_kitty_image_commit_escape(img, 3, 5, 2, 1, 0, esc,
                                                 sizeof esc);
-  CTUI_TEST_ASSERT(n > 0 && memcmp(esc, "\x1b[3;5H\x1b_Ga=T,f=32,t=s,s=4,v=2,"
-                                        "S=32,c=2,r=1,i=9,z=0,q=2,C=1;",
+  CTUI_TEST_ASSERT(n > 0 && memcmp(esc,
+                                   "\x1b[3;5H\x1b_Ga=T,t=s,f=32,i=9,q=2,"
+                                   "v=2,s=4,S=32,c=2,r=1,C=1;",
                                    45) == 0,
                    "image: commit escape = CUP + raw t=s (no o=z), the size "
                    "in S");

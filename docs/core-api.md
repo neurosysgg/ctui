@@ -145,7 +145,40 @@ just the type and the `CTUI_COLOR_*` basic-color enum.
   `ctui_gfx_kitty_display()` this is safe from a plain `render()`: the
   image *is* text cells, so it moves, clips and clears with the rest of
   the widget, and one widget can mix icons and text. Batched like every
-  Kitty escape; ids up to 24 bits.
+  Kitty escape; ids up to 24 bits, paths up to 2048 bytes (kitty's
+  limit).
+
+Every kitty escape these send is built by `kitty.h` below.
+
+## `kitty.h` — kitty's escape codes, built so they parse
+
+- `CTUI_KITTY_GFX` — one field per key of kitty's graphics command
+  (`a`, `t`, `f`, `i`, `s`, `v`, `z`, ...: the field is named after its
+  key); 0 = not sent, which is kitty's default for every key.
+- `ctui_kitty_gfx_check(g, payload, n)` — NULL when kitty accepts the
+  command with that payload (pixels or compressed data for `t=d`, the
+  file/shm name for `t=f/t/s`; `payload` may be NULL where only the total
+  size matters), else kitty's own refusal as it would reply, code first:
+  `"EINVAL: Filename too long"`, `"ENODATA: Insufficient image data"`, an
+  id and a number together, a side past 10000 px, a shm name without
+  `/`, a virtual placement with a parent, ... What only the terminal's
+  state decides (an unknown id, a full cache, file permissions) passes.
+- `ctui_kitty_gfx_build(g, payload, n, out, cap, &err)` — the whole
+  escape (checked, keys in kitty's order, the payload base64'd), or 0
+  with the refusal in `err` (`ENOBUFS`/`E2BIG` when it doesn't fit the
+  buffer / kitty's 256 KiB escape limit).
+- `ctui_kitty_gfx_head(g, has_payload, out, cap)` — just `ESC _ G` and
+  the keys (plus `;`), for a chunked transmission that slices one base64
+  string: check the whole command first, then the first chunk carries
+  every key and `m=1`, the rest only `m`.
+- `CTUI_KITTY_DND` / `ctui_kitty_dnd_check()` / `ctui_kitty_dnd_build()`
+  — the same for drag and drop (OSC 72): its keys, `:`-separated, the
+  payload sent as is (no ESC or BEL in it), the thumbnail rules.
+- `tools/check_kitty_protocol.py` (dev-time) diffs the key tables in
+  `core/kitty.c` against kitty's `gen/apc_parsers.py` (a protocol change
+  in a new kitty shows as a diff) and runs builder output -- random valid
+  commands and every refusal -- through kitty's own parser: accepted ones
+  answer OK, refused ones fail in kitty with the same code.
 
 ## `screen.h` — `CTUI_SCREEN`
 

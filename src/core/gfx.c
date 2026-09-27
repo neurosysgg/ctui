@@ -6,6 +6,8 @@
 
 #include "gfx.h"
 
+#include "kitty.h"
+
 #include "cell.h"
 #include "ctui_internal.h"
 #include "deflate.h"
@@ -356,17 +358,16 @@ void ctui_gfx_kitty_probe_shm(void) {
   munmap(map, sizeof pixel);
   close(fd);
 
-  char b64[64];
-  size_t b64_len =
-      ctui_util_base64_encode((const unsigned char *)name, strlen(name), b64,
-                              sizeof b64);
-
+  /* q=0 (the default): the reply is the point */
+  CTUI_KITTY_GFX g = {.a = 'q', .i = 1, .s = 1, .v = 1, .f = 32, .t = 's'};
   char out[160];
-  int n = snprintf(out, sizeof out,
-                   "\x1b_Ga=q,i=1,s=1,v=1,f=32,t=s,q=0;%.*s\x1b\\",
-                   (int)b64_len, b64);
-  ssize_t written =
-      write(STDOUT_FILENO, out, clamp_snprintf_len(n, sizeof out));
+  const char *err = NULL;
+  size_t n =
+      ctui_kitty_gfx_build(&g, name, strlen(name), out, sizeof out, &err);
+  if (n == 0) {
+    ctui_logf(E_ERR, "[CTUI:GFX] - kitty shm probe not sent: %s\n", err);
+  }
+  ssize_t written = n ? write(STDOUT_FILENO, out, n) : -1;
   (void)written; /* best-effort: a failed write here just means the probe
                    * times out below and falls back to t=d, same as any
                    * other silent-terminal outcome */
@@ -471,7 +472,44 @@ static void kitty_display_td(int row, int col, int cell_cols, int cell_rows,
   size_t b64_len = ctui_util_base64_encode(payload, payload_len, b64, b64_cap);
   ctui_profile_end(encode_span, "gfx.kitty_encode");
 
-  char out[128];
+  /* a=T: transmit + display immediately. f=32: raw RGBA pixels (as
+   * opposed to f=100, PNG-encoded). o=z: payload is zlib-wrapped DEFLATE
+   * instead of raw bytes (only when use_compression actually won the size
+   * comparison above) -- orthogonal to f=32, which still describes the
+   * pixel format the far end reconstructs after decompressing. s/v: pixel
+   * dimensions, required for raw formats since there's no container
+   * header to read them from. c/r: scale the image to cover this many
+   * character cells. q=2: suppress both success and error responses --
+   * ctui has no code path that reads stdin for an APC reply. C=1: don't
+   * move the cursor after displaying -- the protocol default (C=0) moves
+   * it to just past the image, as if it had been printed as text, which
+   * for an image tall/low enough to reach the terminal's last row forces
+   * the terminal to scroll the whole screen to keep the cursor visible.
+   * ctui always repositions the cursor explicitly (the CUP escape right
+   * below, and again before every ctui_screen_flush() write) rather than
+   * relying on wherever a previous write left it, so a side-effect cursor
+   * move here only ever fights that -- this surfaced as the whole screen
+   * drifting upward on every redraw once a Kitty image (ctui-mus's footer
+   * border) first reached the last row. */
+  CTUI_KITTY_GFX g = {.a = 'T',
+                      .f = 32,
+                      .o = use_compression ? 'z' : 0,
+                      .s = (uint32_t)width,
+                      .v = (uint32_t)height,
+                      .c = (uint32_t)cell_cols,
+                      .r = (uint32_t)cell_rows,
+                      .i = image_id,
+                      .z = z,
+                      .q = 2,
+                      .C = 1};
+  const char *err = ctui_kitty_gfx_check(&g, NULL, payload_len);
+  if (err) {
+    ctui_logf(E_ERR, "[CTUI:GFX] - kitty_display not sent (kitty: %s)\n", err);
+    free(b64);
+    return;
+  }
+
+  char out[160];
   int n = snprintf(out, sizeof out, "\x1b[%d;%dH", row, col);
   kitty_batch_append(out, (size_t)n);
 
@@ -483,44 +521,11 @@ static void kitty_display_td(int row, int col, int cell_cols, int cell_rows,
       chunk = CTUI_KITTY_CHUNK;
     }
     int more = (sent + chunk) < b64_len;
-    if (sent == 0) {
-      /* a=T: transmit + display immediately. f=32: raw RGBA pixels (as
-       * opposed to f=100, PNG-encoded). o=z: payload is zlib-wrapped
-       * DEFLATE instead of raw bytes (only when use_compression actually
-       * won the size comparison above) -- orthogonal to f=32, which still
-       * describes the pixel format the far end reconstructs after
-       * decompressing. s/v: pixel dimensions, required for raw formats
-       * since there's no container header to read them from. c/r: scale
-       * the image to cover this many character cells. q=2: suppress both
-       * success and error responses -- ctui has no code path that reads
-       * stdin for an APC reply. C=1: don't move the cursor after
-       * displaying -- the protocol default (C=0) moves it to just past
-       * the image, as if it had been printed as text, which for an image
-       * tall/low enough to reach the terminal's last row forces the
-       * terminal to scroll the whole screen to keep the cursor visible.
-       * ctui always repositions the cursor explicitly (the CUP escape
-       * right above, and again before every ctui_screen_flush() write)
-       * rather than relying on wherever a previous write left it, so a
-       * side-effect cursor move here only ever fights that -- this
-       * surfaced as the whole screen drifting upward on every redraw once
-       * a Kitty image (ctui-mus's footer border) first reached the last
-       * row. */
-      if (use_compression) {
-        n = snprintf(
-            out, sizeof out,
-            "\x1b_Ga=T,f=32,o=z,s=%d,v=%d,c=%d,r=%d,i=%u,z=%d,q=2,C=1,m=%d;",
-            width, height, cell_cols, cell_rows, image_id, z, more);
-      } else {
-        n = snprintf(
-            out, sizeof out,
-            "\x1b_Ga=T,f=32,s=%d,v=%d,c=%d,r=%d,i=%u,z=%d,q=2,C=1,m=%d;",
-            width, height, cell_cols, cell_rows, image_id, z, more);
-      }
-    } else {
-      /* continuation chunks repeat only m -- every other key was already
-       * established by the first chunk */
-      n = snprintf(out, sizeof out, "\x1b_Gm=%d;", more);
-    }
+    /* continuation chunks repeat only m -- every other key was already
+     * established by the first chunk */
+    CTUI_KITTY_GFX cont = {.m = (uint32_t)more};
+    g.m = (uint32_t)more;
+    n = (int)ctui_kitty_gfx_head(sent == 0 ? &g : &cont, 1, out, sizeof out);
     kitty_batch_append(out, (size_t)n);
     kitty_batch_append(b64 + sent, chunk);
     kitty_batch_append("\x1b\\", 2);
@@ -588,26 +593,28 @@ static void kitty_display_shm(int row, int col, int cell_cols, int cell_rows,
    * terminal never reads it at all -- see its own doc comment. */
   kitty_shm_track(name);
 
-  char b64[96];
-  size_t b64_len = ctui_util_base64_encode((const unsigned char *)name,
-                                           strlen(name), b64, sizeof b64);
-
+  CTUI_KITTY_GFX g = {.a = 'T',
+                      .f = 32,
+                      .o = use_compression ? 'z' : 0,
+                      .t = 's',
+                      .s = (uint32_t)width,
+                      .v = (uint32_t)height,
+                      .c = (uint32_t)cell_cols,
+                      .r = (uint32_t)cell_rows,
+                      .i = image_id,
+                      .z = z,
+                      .q = 2,
+                      .C = 1};
   char out[256];
-  int n;
-  if (use_compression) {
-    n = snprintf(out, sizeof out,
-                 "\x1b[%d;%dH\x1b_Ga=T,f=32,o=z,t=s,s=%d,v=%d,c=%d,r=%d,i=%u,"
-                 "z=%d,q=2,C=1;%.*s\x1b\\",
-                 row, col, width, height, cell_cols, cell_rows, image_id, z,
-                 (int)b64_len, b64);
-  } else {
-    n = snprintf(out, sizeof out,
-                 "\x1b[%d;%dH\x1b_Ga=T,f=32,t=s,s=%d,v=%d,c=%d,r=%d,i=%u,z=%d,"
-                 "q=2,C=1;%.*s\x1b\\",
-                 row, col, width, height, cell_cols, cell_rows, image_id, z,
-                 (int)b64_len, b64);
+  int n = snprintf(out, sizeof out, "\x1b[%d;%dH", row, col);
+  const char *err = NULL;
+  size_t k = ctui_kitty_gfx_build(&g, name, strlen(name), out + n,
+                                  sizeof out - (size_t)n, &err);
+  if (k == 0) {
+    ctui_logf(E_ERR, "[CTUI:GFX] - kitty_display not sent (kitty: %s)\n", err);
+    return;
   }
-  kitty_batch_append(out, clamp_snprintf_len(n, sizeof out));
+  kitty_batch_append(out, (size_t)n + k);
 
   ctui_logf(E_INF,
             "[CTUI:GFX] - kitty_display (t=s) @ tick %d (%dx%d px @ row=%d, "
@@ -890,7 +897,8 @@ unsigned char *ctui_gfx_kitty_image_begin(CTUI_GFX_KITTY_IMAGE *img, int width,
 
 /* the t=s escape for the open buffer, its frame name linked, the buffer
  * now the last one sent; the length, or 0 if the link failed (the caller
- * copies instead, the buffer still open). Non-static only
+ * copies instead, the buffer still open), or (size_t)-1 when kitty would
+ * refuse the command (logged; the frame is dropped). Non-static only
  * for tests/kitty_protocol_test.c, like
  * ctui_gfx_kitty_place_file_escape(); not in gfx.h. */
 size_t ctui_gfx_kitty_image_commit_escape(CTUI_GFX_KITTY_IMAGE *img, int row,
@@ -914,15 +922,31 @@ size_t ctui_gfx_kitty_image_commit_escape(CTUI_GFX_KITTY_IMAGE *img, int row,
   img->last = img->open;
   img->open = -1;
 
-  char b64[96];
-  size_t b64_len = ctui_util_base64_encode((const unsigned char *)name,
-                                           strlen(name), b64, sizeof b64);
-  int n = snprintf(out, cap,
-                   "\x1b[%d;%dH\x1b_Ga=T,f=32,t=s,s=%d,v=%d,S=%zu,c=%d,r=%d,"
-                   "i=%u,z=%d,q=2,C=1;%.*s\x1b\\",
-                   row, col, b->w, b->h, (size_t)b->w * (size_t)b->h * 4,
-                   cell_cols, cell_rows, img->id, z, (int)b64_len, b64);
-  return clamp_snprintf_len(n, cap);
+  CTUI_KITTY_GFX g = {.a = 'T',
+                      .f = 32,
+                      .t = 's',
+                      .s = (uint32_t)b->w,
+                      .v = (uint32_t)b->h,
+                      .S = (uint32_t)b->w * (uint32_t)b->h * 4,
+                      .c = (uint32_t)cell_cols,
+                      .r = (uint32_t)cell_rows,
+                      .i = img->id,
+                      .z = z,
+                      .q = 2,
+                      .C = 1};
+  int n = snprintf(out, cap, "\x1b[%d;%dH", row, col);
+  size_t pos = clamp_snprintf_len(n, cap);
+  const char *err = NULL;
+  size_t k =
+      ctui_kitty_gfx_build(&g, name, strlen(name), out + pos, cap - pos, &err);
+  if (k == 0) {
+    /* the frame is linked and counts as sent: kitty never unlinks it, the
+     * stale sweep takes it back */
+    ctui_logf(E_ERR, "[CTUI:GFX] - kitty image frame not sent (kitty: %s)\n",
+              err);
+    return (size_t)-1;
+  }
+  return pos + k;
 }
 
 void ctui_gfx_kitty_image_commit(CTUI_GFX_KITTY_IMAGE *img, int row, int col,
@@ -944,6 +968,9 @@ void ctui_gfx_kitty_image_commit(CTUI_GFX_KITTY_IMAGE *img, int row, int col,
     size_t n = ctui_gfx_kitty_image_commit_escape(img, row, col, cell_cols,
                                                   cell_rows, z, out,
                                                   sizeof out);
+    if (n == (size_t)-1) {
+      return;
+    }
     if (n > 0) {
       kitty_batch_append(out, n);
       return;
@@ -983,9 +1010,15 @@ void ctui_gfx_kitty_delete(unsigned int image_id) {
     return;
   }
 
-  char out[32];
-  int n = snprintf(out, sizeof out, "\x1b_Ga=d,d=I,i=%u,q=2\x1b\\", image_id);
-  kitty_batch_append(out, (size_t)n);
+  CTUI_KITTY_GFX g = {.a = 'd', .d = 'I', .i = image_id, .q = 2};
+  char out[48];
+  const char *err = NULL;
+  size_t n = ctui_kitty_gfx_build(&g, NULL, 0, out, sizeof out, &err);
+  if (n == 0) {
+    ctui_logf(E_ERR, "[CTUI:GFX] - kitty_delete not sent (kitty: %s)\n", err);
+    return;
+  }
+  kitty_batch_append(out, n);
 
   ctui_logf(E_INF, "[CTUI:GFX] - kitty_delete @ tick %d (id=%u)\n",
             ctui_tick_advance(), image_id);
@@ -1029,10 +1062,6 @@ static const uint32_t g_kitty_diacritics[CTUI_GFX_KITTY_MAX_ROWS] = {
 
 uint32_t ctui_gfx_kitty_diacritic(int n) { return g_kitty_diacritics[n]; }
 
-/* longest path ctui_gfx_kitty_place_file() takes: PATH_MAX-ish, and kitty
- * reads t=f paths from a single escape */
-#define CTUI_KITTY_PATH_MAX 4096
-
 /* the escape ctui_gfx_kitty_place_file() batches, into out (cap bytes);
  * its length, or 0 if it doesn't fit or the arguments are unusable.
  * Non-static only so tests/kitty_protocol_test.c can check the wire format
@@ -1041,21 +1070,25 @@ uint32_t ctui_gfx_kitty_diacritic(int n) { return g_kitty_diacritics[n]; }
 size_t ctui_gfx_kitty_place_file_escape(char *out, size_t cap,
                                         unsigned int image_id, const char *path,
                                         int cols, int rows) {
-  size_t path_len = path ? strlen(path) : 0;
-  if (image_id == 0 || image_id > 0xFFFFFFu || path_len == 0 ||
-      path_len > CTUI_KITTY_PATH_MAX || cols < 1 || rows < 1) {
+  /* the placeholders carry the id in a 24-bit colour */
+  if (image_id == 0 || image_id > 0xFFFFFFu || path == NULL || cols < 1 ||
+      rows < 1) {
     return 0;
   }
-  int n = snprintf(out, cap, "\x1b_Ga=T,U=1,f=100,t=f,i=%u,c=%d,r=%d,q=2;",
-                   image_id, cols, rows);
-  if (n < 0 || (size_t)n + ctui_util_base64_len(path_len) + 3 > cap) {
-    return 0;
+  CTUI_KITTY_GFX g = {.a = 'T',
+                      .U = 1,
+                      .f = 100,
+                      .t = 'f',
+                      .i = image_id,
+                      .c = (uint32_t)cols,
+                      .r = (uint32_t)rows,
+                      .q = 2};
+  const char *err = NULL;
+  size_t n = ctui_kitty_gfx_build(&g, path, strlen(path), out, cap, &err);
+  if (n == 0) {
+    ctui_logf(E_WRN, "[CTUI:GFX] - kitty place_file: %s (%s)\n", err, path);
   }
-  size_t len = (size_t)n;
-  len += ctui_util_base64_encode((const unsigned char *)path, path_len,
-                                 out + len, cap - len);
-  memcpy(out + len, "\x1b\\", 2);
-  return len + 2;
+  return n;
 }
 
 void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
@@ -1067,7 +1100,7 @@ void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
               ctui_tick_advance());
     return;
   }
-  char out[64 + (CTUI_KITTY_PATH_MAX + 2) / 3 * 4];
+  char out[64 + (CTUI_KITTY_MAX_NAME + 2) / 3 * 4];
   size_t n = ctui_gfx_kitty_place_file_escape(out, sizeof out, image_id, path,
                                               cols, rows);
   if (n == 0) {

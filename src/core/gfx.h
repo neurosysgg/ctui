@@ -180,7 +180,8 @@ uint32_t ctui_gfx_kitty_diacritic(int n);
  * Re-placing the same id replaces the image. Batched like every Kitty
  * escape (ctui_gfx_kitty_flush()); only call it once CTUI_GFX_KITTY was
  * negotiated. No-op (logs E_WRN) if stdout isn't a real terminal, the id
- * doesn't fit 24 bits or the path is too long. */
+ * doesn't fit 24 bits or kitty would refuse the command (a path over
+ * CTUI_KITTY_MAX_NAME, 2048 bytes: kitty.h). */
 void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
                                int cols, int rows);
 

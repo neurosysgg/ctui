@@ -237,6 +237,24 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Kitty escapes from a builder that knows kitty's rules**
+      (2026-09-28, ctui-wm's "kitty as the spec"): every graphics escape
+      was a hand-written snprintf, and nothing stopped a command kitty
+      refuses -- silently, under q=2. `core/kitty.h` has a typed command
+      (`CTUI_KITTY_GFX`, a field per key; `CTUI_KITTY_DND` for OSC 72)
+      and an encoder that names kitty's refusal instead of emitting:
+      flags outside their set, an id and a number together, raw data of
+      the wrong size (with kitty's 10/1024 spare bytes), a side past
+      10000, a t=f/s name past 2048 bytes (`ctui_gfx_kitty_place_file()`
+      allowed 4096) or a shm name without `/`, a virtual placement with a
+      parent, a self-parent, INT32_MIN (kitty negates it). gfx.c's probe,
+      display (both transports), painted image, delete and place_file go
+      through it; keys come out in kitty's order, zeros omitted.
+      `tools/check_kitty_protocol.py`: the key tables match kitty's
+      `gen/apc_parsers.py`, and 3000 random commands plus every refusal
+      through kitty 0.49.1's own parser agree (it found kitty never
+      replies to "Image too large": the reply is keyed to a load that
+      hasn't started).
 - [x] **Column widths from kitty's rules, not libc** (2026-09-28, found
       from ctui-wm): `ctui_utf8_cpwidth()` asked libc `wcwidth()`, which
       disagreed with kitty on ~57k codepoints (glibc 2.42: newer CJK and
