@@ -25,19 +25,18 @@ void ctui_entry_clear(CTUI_ENTRY *e) {
   e->scroll = 0;
 }
 
+/* the cursor steps by grapheme cluster: é, a flag or 👍🏽 is one glyph */
 static size_t prev_char(const char *s, size_t at) {
-  while (at > 0 && ((unsigned char)s[--at] & 0xc0) == 0x80) {
+  size_t i = 0, start = 0;
+  while (i < at && s[i]) {
+    start = i;
+    i += ctui_utf8_cluster(s + i, (size_t)-1, NULL, NULL);
   }
-  return at;
+  return start;
 }
 
 static size_t next_char(const char *s, size_t at) {
-  if (!s[at]) {
-    return at;
-  }
-  while (s[++at] && ((unsigned char)s[at] & 0xc0) == 0x80) {
-  }
-  return at;
+  return at + ctui_utf8_cluster(s + at, (size_t)-1, NULL, NULL);
 }
 
 static int word_sep(char c) { return c == ' ' || c == '/'; }
@@ -159,22 +158,25 @@ int ctui_entry_key(CTUI_ENTRY *e, const CTUI_KEYPRESS_EVENT_DATA *kp) {
   return 1;
 }
 
-/* a glyph's width as drawn: a dot for a secret */
-static int glyph_width(const CTUI_ENTRY *e, uint32_t cp) {
+/* the next glyph (cluster) at s: its bytes, its width as drawn (a dot
+ * for a secret) in *w, its cell value in *ch when ch is non-NULL */
+static size_t glyph(const CTUI_ENTRY *e, const char *s, int *w, uint32_t *ch) {
+  size_t k = ctui_utf8_cluster(s, (size_t)-1, e->secret ? NULL : ch, w);
   if (e->secret) {
-    return 1;
+    *w = 1;
+    if (ch) {
+      *ch = 0x2022;
+    }
   }
-  int w = ctui_utf8_cpwidth(cp);
-  return w > 0 ? w : 0;
+  return k;
 }
 
 static int columns(const CTUI_ENTRY *e, size_t bytes) {
   int col = 0;
   for (size_t i = 0; i < bytes && e->buf[i];) {
-    uint32_t cp;
-    int k = ctui_utf8_decode(e->buf + i, &cp);
-    i += (size_t)(k > 0 ? k : 1);
-    col += glyph_width(e, cp);
+    int w;
+    i += glyph(e, e->buf + i, &w, NULL);
+    col += w;
   }
   return col;
 }
@@ -183,14 +185,13 @@ void ctui_entry_click(CTUI_ENTRY *e, int col) {
   int target = e->scroll + (col > 0 ? col : 0), c = 0;
   size_t i = 0;
   while (e->buf[i]) {
-    uint32_t cp;
-    int k = ctui_utf8_decode(e->buf + i, &cp);
-    int w = glyph_width(e, cp);
+    int w;
+    size_t k = glyph(e, e->buf + i, &w, NULL);
     if (c + w > target) {
       break;
     }
     c += w;
-    i += (size_t)(k > 0 ? k : 1);
+    i += k;
   }
   e->cursor = i;
 }
@@ -217,20 +218,20 @@ void ctui_entry_draw(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
   }
   int c = 0;
   for (size_t i = 0; e->buf[i];) {
-    uint32_t cp;
-    int k = ctui_utf8_decode(e->buf + i, &cp);
-    int w = glyph_width(e, cp);
+    uint32_t ch;
+    int w;
+    size_t k = glyph(e, e->buf + i, &w, &ch);
     int x = c - e->scroll;
     if (x + w > width) {
       break;
     }
     if (x >= 0 && w > 0) {
       int here = focused && i == e->cursor;
-      ctui_widget_putc(self, comp, row, col + x, e->secret ? 0x2022 : cp,
-                       here ? st->sel_fg : st->fg, here ? st->sel_bg : st->bg);
+      ctui_widget_putc(self, comp, row, col + x, ch, here ? st->sel_fg : st->fg,
+                       here ? st->sel_bg : st->bg);
     }
     c += w;
-    i += (size_t)(k > 0 ? k : 1);
+    i += k;
   }
   if (focused && !e->buf[e->cursor] && cur - e->scroll < width) {
     ctui_widget_putc(self, comp, row, col + cur - e->scroll, ' ', st->sel_fg,

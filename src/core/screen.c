@@ -83,7 +83,7 @@ static int screen_put(CTUI_SCREEN *s, int row, int col, uint32_t ch,
               "[CTUI:SCREEN] - putc out of bounds @ tick %d (row=%d, col=%d, "
               "size=%dx%d)\n",
               ctui_tick_advance(), row, col, s->cols, s->rows);
-    return ctui_utf8_cpwidth(ch);
+    return ctui_cell_width(ch);
   }
   ctui_logf(E_DBG,
             "[CTUI:SCREEN] - putc @ tick %d (row=%d, col=%d, ch=U+%04X)\n",
@@ -110,9 +110,9 @@ void ctui_screen_puts(CTUI_SCREEN *s, int row, int col, const char *str,
             "\"%s\"\n",
             ctui_tick_advance(), row, col, strlen(str), str);
   while (*str) {
-    uint32_t cp;
-    str += ctui_utf8_decode(str, &cp);
-    col += screen_put(s, row, col, cp, fg, bg);
+    uint32_t ch;
+    str += ctui_utf8_cluster(str, (size_t)-1, &ch, NULL);
+    col += screen_put(s, row, col, ch, fg, bg);
   }
 }
 
@@ -217,6 +217,22 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
       if (cur->ch == CTUI_CELL_CONT)
         continue;
 
+      /* the per-cell budget (screen_alloc()) covers a codepoint with the
+       * longest escapes; clusters can take more */
+      if (cap - len < 128 + CTUI_CLUSTER_MAX * 4) {
+        size_t ncap = cap + cap / 4 + 4096;
+        char *p = realloc(out, ncap);
+        if (p == NULL) {
+          /* send what fits; the shadow buffer stays, so the next flush
+           * repeats the rest */
+          ctui_log(E_ERR, "[CTUI:SCREEN] - flush buffer: out of memory\n");
+          write(STDOUT_FILENO, out, len);
+          return;
+        }
+        s->out = out = p;
+        s->out_cap = cap = ncap;
+      }
+
       if (r != last_row || c != last_col) {
         len +=
             (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dH", r + 1, c + 1);
@@ -227,22 +243,18 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
         last_color = *cur;
       }
 
-      /* never let a raw control byte reach the terminal -- a stray \n or
-       * ESC in cell content would corrupt the whole frame, not just one
-       * cell. Noncharacters too: kitty draws nothing for them, so the
-       * row would shift left by a cell. */
+      /* ctui_cell_encode() never lets a raw control byte reach the
+       * terminal -- a stray \n or ESC in cell content would corrupt the
+       * whole frame, not just one cell -- nor a noncharacter (kitty draws
+       * nothing for it, the row would shift left by a cell): U+FFFD */
       uint32_t ch = cur->ch;
-      if (ch < 0x20 || ch == 0x7F || (ch >= 0x80 && ch < 0xA0) ||
-          (ch >= 0xFDD0 && ch < 0xFDF0) || (ch & 0xFFFE) == 0xFFFE) {
-        ch = 0xFFFD;
-      }
-      len += (size_t)ctui_utf8_encode(ch, out + len);
+      len += (size_t)ctui_cell_encode(ch, out + len);
       if (ch == CTUI_GFX_KITTY_PLACEHOLDER && cur->kitty_row) {
         len += (size_t)ctui_utf8_encode(
             ctui_gfx_kitty_diacritic(cur->kitty_row - 1), out + len);
       }
       last_row = r;
-      last_col = c + ctui_utf8_cpwidth(ch);
+      last_col = c + ctui_cell_width(ch);
     }
   }
 

@@ -11,8 +11,16 @@
  * core/utf8.c's ctui_cell_set_ch() keeps lead and CONT paired. */
 #define CTUI_CELL_CONT ((uint32_t)0x80000000u)
 
+/* set in a cell's ch that holds a grapheme cluster (several codepoints
+ * the terminal draws in one cell: é as e + U+0301, a flag, 👍🏽, a ZWJ
+ * sequence) rather than one codepoint: the rest is an index into
+ * core/utf8.c's interned clusters (ctui_cell_cluster()). Interned, so
+ * equal clusters are equal ch values and cell compares stay plain. */
+#define CTUI_CELL_CLUSTER ((uint32_t)0x40000000u)
+
 typedef struct {
-  uint32_t ch; /* one Unicode codepoint, or CTUI_CELL_CONT */
+  uint32_t ch; /* one Unicode codepoint, a CTUI_CELL_CLUSTER, or
+                * CTUI_CELL_CONT */
   unsigned char fg;
   unsigned char bg;
 

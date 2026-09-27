@@ -130,11 +130,13 @@ int ctui_widget_contains(const CTUI_WIDGET *widget, int row, int col);
  * = widget's top left). Rejects (logs + no-op) writes outside the widget's
  * declared w/h, writes past comp's bounds, or widgets never bound via
  * ctui_widget_init(). ch is a Unicode codepoint (plain char literals work
- * as-is for ASCII); a width-2 glyph also claims the cell to its right
- * (see CTUI_CELL_CONT in cell.h) and is clipped to a space if that cell
- * would fall outside the widget. Zero-width codepoints are dropped. puts
- * takes UTF-8 and advances by each glyph's column width, not its byte
- * count -- use ctui_utf8_width() to measure a string first. */
+ * as-is for ASCII) or a cluster from ctui_utf8_cluster(); a width-2 glyph
+ * also claims the cell to its right (see CTUI_CELL_CONT in cell.h) and is
+ * clipped to a space if that cell would fall outside the widget. A lone
+ * zero-width codepoint is dropped. puts takes UTF-8, one grapheme cluster
+ * per cell (e + U+0301 is one glyph), and advances by each glyph's column
+ * width, not its byte count -- use ctui_utf8_width() to measure a string
+ * first. */
 void ctui_widget_putc(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                       int col, uint32_t ch, unsigned char fg, unsigned char bg);
 void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,

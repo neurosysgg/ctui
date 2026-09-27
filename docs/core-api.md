@@ -87,22 +87,30 @@ just the type and the `CTUI_COLOR_*` basic-color enum.
 - `ctui_utf8_decode(s, &cp)` / `ctui_utf8_encode(cp, out)` — one
   codepoint at a time; malformed input decodes as U+FFFD consuming one
   byte, so a walk always progresses.
-- `ctui_utf8_cpwidth(cp)` / `ctui_utf8_width(s)` — terminal columns
-  (0, 1, 2) as kitty draws them: a table generated from the Unicode
-  data with kitty's rules (`core/utf8_width.h`, `tools/gen_widths.py`;
-  `tools/check_widths.py` compares every codepoint with a running
-  kitty), independent of libc and locale. Measure strings with `ctui_utf8_width()`, never
-  `strlen()`, before laying them out.
+- `ctui_utf8_cpwidth(cp)` — one codepoint's terminal columns (0, 1,
+  2) as kitty draws it: a table generated from the Unicode data with
+  kitty's rules (`core/utf8_props.h`, `tools/gen_utf8_props.py`),
+  independent of libc and locale.
+- `ctui_utf8_cluster(s, n, &ch, &width)` — one grapheme cluster (UAX
+  #29, the way kitty segments: é as e + U+0301, a flag, 👍🏽, a ZWJ
+  sequence, Hangul jamo) and the columns kitty gives it (VS16 widens a
+  text-style emoji, VS15 narrows, Thai SARA AM widens). `ch` is the
+  cell value: the codepoint itself, or an interned `CTUI_CELL_CLUSTER`
+  (`cell.h`; `ctui_cell_cluster()` gives its codepoints back,
+  `ctui_cell_width()` / `ctui_cell_encode()` work on either). puts,
+  `ctui_utf8_width(s)` and `ctui_utf8_prefix()` go cluster by cluster;
+  zero-width codepoints with nothing to join are dropped (a leading
+  mark, a ZWSP), control characters are clusters of their own.
+  `tools/check_widths.py` compares all of it with a running kitty
+  (every codepoint, GraphemeBreakTest.txt, random mixes; dev-time).
+  Measure strings with `ctui_utf8_width()`, never `strlen()` or a sum of
+  `ctui_utf8_cpwidth()`, before laying them out.
 - `ctui_utf8_prefix(s, cols, &width)` — longest byte prefix fitting in
   `cols` columns without splitting a glyph.
 - `ctui_cell_set_ch(...)` — core-internal: writes a glyph while
   keeping wide lead/`CTUI_CELL_CONT` pairs consistent (overwriting
   either half blanks the other). Widgets go through
   `ctui_widget_putc/puts()` instead.
-
-No grapheme clustering: zero-width codepoints (combining marks, ZWJ)
-are dropped, so decomposed accents and ZWJ emoji sequences render as
-their base glyphs.
 
 ## `gfx.h` — graphics capability negotiation
 

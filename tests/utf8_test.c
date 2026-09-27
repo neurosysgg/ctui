@@ -81,6 +81,60 @@ static void test_widths(void) {
                    "the column limit, reporting the narrower width");
 }
 
+static void test_clusters(void) {
+  CTUI_TEST_ASSERT(ctui_utf8_width("\xf0\x9f\x87\xa9\xf0\x9f\x87\xaa") == 2 &&
+                       ctui_utf8_width("\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd") == 2,
+                   "a flag and a skin-toned emoji are one 2-column glyph each "
+                   "(4 columns summed per codepoint: the row drifted)");
+  CTUI_TEST_ASSERT(ctui_utf8_width("e\xcc\x81x") == 2 &&
+                       ctui_utf8_width("\xf0\x9f\x91\xa8\xe2\x80\x8d"
+                                       "\xf0\x9f\x91\xa9\xe2\x80\x8d"
+                                       "\xf0\x9f\x91\xa7") == 2 &&
+                       ctui_utf8_width("\xe1\x84\x80\xe1\x85\xa1") == 2,
+                   "a decomposed e + acute, a ZWJ family and Hangul L+V jamo "
+                   "are one glyph each");
+  CTUI_TEST_ASSERT(ctui_utf8_width("\xe2\x9d\xa4") == 1 &&
+                       ctui_utf8_width("\xe2\x9d\xa4\xef\xb8\x8f") == 2 &&
+                       ctui_utf8_width("\xe2\x8c\x9a\xef\xb8\x8e") == 1 &&
+                       ctui_utf8_width("\xe0\xb8\x81\xe0\xb8\xb3") == 2,
+                   "VS16 widens a text-style emoji, VS15 narrows a wide one, "
+                   "Thai SARA AM widens its base: as kitty draws them");
+
+  uint32_t a, b;
+  int w;
+  size_t n = ctui_utf8_cluster("e\xcc\x81!", (size_t)-1, &a, &w);
+  ctui_utf8_cluster("e\xcc\x81", (size_t)-1, &b, NULL);
+  int m;
+  const uint32_t *cps = ctui_cell_cluster(a, &m);
+  CTUI_TEST_ASSERT(n == 3 && w == 1 && (a & CTUI_CELL_CLUSTER) && a == b &&
+                       cps != NULL && m == 2 && cps[0] == 'e' &&
+                       cps[1] == 0x301,
+                   "a cluster is one interned cell value: the same text gives "
+                   "the same value, and it keeps its codepoints");
+  CTUI_TEST_ASSERT(
+      ctui_utf8_cluster("x\xe2\x80\x8b\xcc\x81y", (size_t)-1, &a, &w) == 6 &&
+          ctui_cell_cluster(a, &m) != NULL && m == 2 && w == 1,
+      "a zero width space inside a word is dropped, the mark "
+      "after it still joins the x");
+  CTUI_TEST_ASSERT(ctui_utf8_cluster("\xcc\x81x", (size_t)-1, &a, &w) == 2 &&
+                       w == 0,
+                   "a leading combining mark has nothing to join: width 0, "
+                   "the caller drops it");
+  CTUI_TEST_ASSERT(
+      ctui_utf8_cluster("a\n\xcc\x81", (size_t)-1, NULL, &w) == 1 &&
+          ctui_utf8_cluster("\n\xcc\x81", (size_t)-1, &a, &w) == 3 && w == 1,
+      "a control character never joins the glyph before it "
+      "(layout looks for \\n at glyph starts)");
+  a = 1;
+  CTUI_TEST_ASSERT(ctui_utf8_cluster("", (size_t)-1, &a, &w) == 0 && a == 0 &&
+                       w == 0,
+                   "the end of the string: 0 bytes, width 0, cell value 0");
+  size_t p = ctui_utf8_prefix("ab\xf0\x9f\x87\xa9\xf0\x9f\x87\xaa", 3, &w);
+  CTUI_TEST_ASSERT(p == 2 && w == 2,
+                   "prefix never splits a cluster (a flag straddling the "
+                   "limit stays whole, outside)");
+}
+
 static void test_widget_wide_glyphs(void) {
   CTUI_COMPOSITOR *comp = ctui_compositor_create(1, 8);
   CTUI_WIDGET w = ctui_widget_make(0, 0, 6, 1, NULL, noop_render, NULL);
@@ -120,6 +174,16 @@ static void test_widget_wide_glyphs(void) {
                    CTUI_COLOR_DEFAULT);
   CTUI_TEST_ASSERT(comp->cells[0].ch == 'a',
                    "a zero-width codepoint is dropped, leaving the cell alone");
+
+  ctui_widget_puts(&w, comp, 0, 0, "e\xcc\x81\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbdz",
+                   CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
+  int m1, m2;
+  CTUI_TEST_ASSERT(
+      ctui_cell_cluster(comp->cells[0].ch, &m1) != NULL && m1 == 2 &&
+          ctui_cell_cluster(comp->cells[1].ch, &m2) != NULL && m2 == 2 &&
+          comp->cells[2].ch == CTUI_CELL_CONT && comp->cells[3].ch == 'z',
+      "puts lays clusters out one per cell: e + acute, then the "
+      "skin-toned thumb as lead + CONT, then z");
 
   ctui_compositor_free(comp);
 }
@@ -195,6 +259,32 @@ static void test_flush_utf8(void) {
                    "a raw control byte in a cell is emitted as U+FFFD, never "
                    "as itself");
 
+  ctui_screen_puts(s, 0, 0, "e\xcc\x81", CTUI_COLOR_DEFAULT,
+                   CTUI_COLOR_DEFAULT);
+  capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(strcmp(out, "\x1b[1;1H\x1b[39;49me\xcc\x81 \x1b[0m") == 0,
+                   "flush emits every codepoint of a cluster cell (the space: "
+                   "the orphaned half of the wide glyph it replaced)");
+
+  ctui_screen_free(s);
+
+  /* a screen whose every cell is a long cluster outgrows the per-cell
+   * flush budget: the buffer grows instead of overflowing */
+  s = ctui_screen_create(1, 40);
+  capture_flush(s, out, sizeof out);
+  char lng[80] = "e"; /* e + 15 four-byte combining marks: 61 bytes */
+  for (int i = 0; i < CTUI_CLUSTER_MAX - 1; i++) {
+    strcat(lng, "\xf0\x9d\x85\xa7");
+  }
+  for (int c = 0; c < 40; c++) {
+    ctui_screen_puts(s, 0, c, lng, c % 2 ? CTUI_COLOR_RED : CTUI_COLOR_BLUE,
+                     CTUI_COLOR_DEFAULT);
+  }
+  static char big[16384];
+  size_t len = capture_flush(s, big, sizeof big);
+  CTUI_TEST_ASSERT(len > (size_t)40 * 64 + 64 && strstr(big, lng) != NULL,
+                   "40 cells of 61-byte clusters go out whole, past the "
+                   "flush's per-cell budget (the buffer grows)");
   ctui_screen_free(s);
 }
 
@@ -203,6 +293,7 @@ int main(void) {
 
   test_decode_encode();
   test_widths();
+  test_clusters();
   test_widget_wide_glyphs();
   test_util_widths();
   test_flush_utf8();

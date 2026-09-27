@@ -62,21 +62,16 @@ static const char *row(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int r,
                        const CTUI_STYLE *st) {
   int col = 0;
   while (s < e) {
-    uint32_t cp;
-    int k = ctui_utf8_decode(s, &cp);
-    k = k > 0 ? k : 1;
-    if (s + k > e) {
-      k = (int)(e - s);
-    }
+    uint32_t cp = 0;
     int gw;
-    if (cp == '\t') {
+    /* measuring (no self) needs no cell value, so interns nothing */
+    size_t k = ctui_utf8_cluster(s, (size_t)(e - s), self ? &cp : NULL, &gw);
+    if (*s == '\t') {
+      cp = '\t';
       gw = TAB - col % TAB;
-    } else if (cp < 0x20 || cp == 0x7f) {
+    } else if ((unsigned char)*s < 0x20 || *s == 0x7f) {
       cp = '?';
       gw = 1;
-    } else {
-      gw = ctui_utf8_cpwidth(cp);
-      gw = gw > 0 ? gw : 0;
     }
     if (col + gw > skip + width && col > skip) {
       break;

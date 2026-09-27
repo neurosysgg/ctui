@@ -58,6 +58,21 @@ int main(void) {
                    "backspace takes the glyph before the cursor");
   key(&e, CTUI_KEY_DELETE, 0, 0);
   CTUI_TEST_ASSERT(!strcmp(buf, "helo"), "delete takes the one under it");
+
+  /* --- grapheme clusters: one step each --- */
+  char save[16];
+  memcpy(save, buf, sizeof save);
+  ctui_entry_clear(&e);
+  type(&e, "a\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd"
+           "b"); /* a, thumb + tone, b */
+  key(&e, CTUI_KEY_LEFT, 0, 0);
+  key(&e, CTUI_KEY_LEFT, 0, 0);
+  CTUI_TEST_ASSERT(e.cursor == 1,
+                   "left steps over a skin-toned emoji as one glyph");
+  key(&e, CTUI_KEY_DELETE, 0, 0);
+  CTUI_TEST_ASSERT(!strcmp(buf, "ab"), "delete takes the whole cluster");
+  ctui_entry_set(&e, save);
+  e.cursor = 3;
   CTUI_TEST_ASSERT(buf[5] == 0 && buf[6] == 0, "freed bytes are zeroed");
   key(&e, CTUI_KEY_CHAR, 0x0b, 0);
   CTUI_TEST_ASSERT(!strcmp(buf, "hel"), "ctrl+k cuts after the cursor");

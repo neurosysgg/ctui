@@ -193,19 +193,16 @@ size_t ctui_util_wrap(const char *s, int width, const char **next) {
   size_t i = 0, brk = 0;
   int col = 0;
   while (s[i] && s[i] != '\n') {
-    uint32_t cp;
-    int k = ctui_utf8_decode(s + i, &cp);
-    k = k > 0 ? k : 1;
-    int cw = ctui_utf8_cpwidth(cp);
-    cw = cw > 0 ? cw : 0;
-    if (cp == ' ' && i > 0) {
+    int cw;
+    size_t k = ctui_utf8_cluster(s + i, (size_t)-1, NULL, &cw);
+    if (s[i] == ' ' && i > 0) {
       brk = i;
     }
     if (col + cw > width && i > 0) {
       break;
     }
     col += cw;
-    i += (size_t)k;
+    i += k;
   }
   size_t end = i;
   if (s[i] && s[i] != '\n' && brk > 0) { /* cut inside a word: at the blank */

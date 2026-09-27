@@ -115,8 +115,7 @@ static int widget_put(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                       int col, uint32_t ch, const CTUI_CELL *style) {
   CTUI_CELL *cell = widget_cell_at(widget, comp, row, col);
   if (cell == NULL) {
-    int w = ctui_utf8_cpwidth(ch);
-    return w == 0 ? 0 : w;
+    return ctui_cell_width(ch);
   }
   ctui_logf(E_DBG,
             "[CTUI:WIDGET] - putc @ tick %d (row=%d, col=%d, ch=U+%04X, "
@@ -144,9 +143,9 @@ static int widget_puts_styled(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
             ctui_tick_advance(), row, col, strlen(str), style->color_mode,
             str);
   while (*str) {
-    uint32_t cp;
-    str += ctui_utf8_decode(str, &cp);
-    col += widget_put(widget, comp, row, col, cp, style);
+    uint32_t ch;
+    str += ctui_utf8_cluster(str, (size_t)-1, &ch, NULL);
+    col += widget_put(widget, comp, row, col, ch, style);
   }
   return col;
 }
@@ -176,9 +175,9 @@ int ctui_widget_puts_n(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   const char *end = str + n;
   int c = col;
   while (str < end && *str) {
-    uint32_t cp;
-    str += ctui_utf8_decode(str, &cp);
-    c += widget_put(widget, comp, row, c, cp, &style);
+    uint32_t ch;
+    str += ctui_utf8_cluster(str, (size_t)(end - str), &ch, NULL);
+    c += widget_put(widget, comp, row, c, ch, &style);
   }
   return c - col;
 }
@@ -206,9 +205,9 @@ int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   const char *end = str + n;
   int c = col;
   while (str < end) {
-    uint32_t cp;
-    str += ctui_utf8_decode(str, &cp);
-    c += widget_put(widget, comp, row, c, cp, &style);
+    uint32_t ch;
+    str += ctui_utf8_cluster(str, (size_t)(end - str), &ch, NULL);
+    c += widget_put(widget, comp, row, c, ch, &style);
   }
   widget_put(widget, comp, row, col + w, 0x2026, &style);
   return w + 1;

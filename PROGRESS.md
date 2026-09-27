@@ -208,14 +208,15 @@ terminal resize.
   its cell plus a `CTUI_CELL_CONT` marker cell to its right, and
   `ctui_cell_set_ch()` is the one place that keeps lead/CONT pairs
   consistent when something overwrites half of one. Widths come from
-  `core/utf8_width.h`, generated from the Unicode data with kitty's
-  rules (`tools/gen_widths.py`, `--check` for drift) and compared with
-  kitty's own `wcwidth` for every codepoint (`tools/check_widths.py`,
-  dev-time) -- libc `wcwidth()` disagreed with kitty on ~57k
-  codepoints (see Fixed). `ctui_screen_flush()`
+  `core/utf8_props.h`, generated from the Unicode data with kitty's
+  rules (`tools/gen_utf8_props.py`, `--check` for drift) and compared
+  with a running kitty (`tools/check_widths.py`, dev-time) -- libc
+  `wcwidth()` disagreed with kitty on ~57k codepoints (see Fixed).
+  Strings are laid out by grapheme cluster (`ctui_utf8_cluster()`, UAX
+  #29 as kitty applies it): a multi-codepoint cluster is one cell whose
+  `ch` is an interned `CTUI_CELL_CLUSTER`. `ctui_screen_flush()`
   encodes UTF-8, skips CONT cells, tracks the cursor by glyph width,
-  and never emits a raw control byte or noncharacter (U+FFFD instead). Deliberately no
-  grapheme clustering: zero-width codepoints are dropped.
+  and never emits a raw control byte or noncharacter (U+FFFD instead).
 - **One `select()` for everything** (`core/input.c`, `core/io.c`).
   `ctui_input_loop()` waits on stdin, every `ctui_io_watch()`ed fd, the
   next timer deadline (`ctui_timer_ms_until_due()`) and the tick
@@ -243,14 +244,38 @@ terminal resize.
       soft hyphen and format characters 1, Hangul vowel jamo 0; musl's
       tables are older still), each shifting the rest of its row. Now a
       range table generated from the Unicode 17.0.0 data with kitty's
-      rules (`core/utf8_width.h`, 461 ranges, binary search;
-      `tools/gen_widths.py`, `--check` for drift), checked against
+      rules (`core/utf8_props.h`, binary search;
+      `tools/gen_utf8_props.py`, `--check` for drift), checked against
       kitty 0.49.1's own `wcwidth` for all 1,114,112 codepoints by
       `tools/check_widths.py` (the only special case: NUL, which kitty's
       table calls 0 but its draw path skips; ctui sends U+FFFD). The
       lazy `setlocale(LC_CTYPE, "C.UTF-8")` went with it. The flush now
       also sends noncharacters (U+FDD0..FDEF, U+xFFFE/xFFFF) as U+FFFD:
       kitty draws nothing for them.
+- [x] **Grapheme clusters** (2026-09-28, with the widths): ctui dropped
+      zero-width codepoints and laid out the rest one per cell, so a
+      flag (two regional indicators) or 👍🏽 (a skin tone modifier is
+      itself wide) took 4 columns where kitty draws 2, Hangul jamo and
+      Prepend sequences drifted too, and a decomposed é (NFD file names)
+      lost its accent. Now strings go through `ctui_utf8_cluster()`:
+      UAX #29 segmentation as kitty does it (its properties in the same
+      generated table, 980 ranges), the width rules of kitty's
+      `draw_combining_char()` (VS16/VS15 on the codepoint before them,
+      SARA AM, a cell once wide stays "multicell"), a multi-codepoint
+      cluster interned (hash table, never shrinks) and stored in
+      `CTUI_CELL.ch` as `CTUI_CELL_CLUSTER | index` -- no struct change,
+      equal clusters compare equal. Zero-width codepoints UAX #29 doesn't
+      join (ZWSP, soft hyphen, a mid-string Prepend) are dropped rather
+      than glued on as kitty would: kitty then pairs regional indicators
+      differently after them. Control characters are clusters of their
+      own. entry, textview and `ctui_util_wrap()` step by cluster; the
+      flush buffer grows when clusters outrun its per-cell budget.
+      `tools/check_widths.py` draws what ctui sends through kitty's own
+      Screen: all GraphemeBreakTest.txt sequences and 200k random mixes
+      of tricky codepoints give kitty's cells exactly ctui's clusters.
+      Known limit: clusters don't span separate puts calls (a lone
+      regional indicator written next to another is two cells to ctui,
+      one flag to kitty).
 - [x] **Kitty images painted in place** (2026-09-27, for ctui-wm's
       visualizer and ctui-audio's lanes): `CTUI_GFX_KITTY_IMAGE`
       (`ctui_gfx_kitty_image_new/begin/commit/free`, gfx.h). Every
