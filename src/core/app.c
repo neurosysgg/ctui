@@ -68,6 +68,8 @@ int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
                 "aborting init\n",
                 (void *)widgets[i], required, ctui_g_gfx_mode,
                 ctui_tick_advance());
+      ctui_app_free(app);
+      ctui_g_app = NULL;
       return -1;
     }
   }

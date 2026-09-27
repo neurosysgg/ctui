@@ -35,7 +35,8 @@ typedef struct {
  * CTUI_GFX_KITTY, via ctui_widget_set_gfx_renderer()) that wasn't actually
  * granted has nothing sensible to draw, so this is a hard fail (-1,
  * logged E_ERR) rather than a silent degrade -- the only failure case,
- * same 0/-1 convention as ctui_init(). Ordinary text widgets (the
+ * same 0/-1 convention as ctui_init(); a failed init leaves nothing to
+ * free (app is unusable). Ordinary text widgets (the
  * ctui_widget_make() default) always pass regardless of what was
  * negotiated, since text rendering never depends on ctui_g_gfx_mode -- see
  * GFX_DESIGN.md's Phase 4. */
