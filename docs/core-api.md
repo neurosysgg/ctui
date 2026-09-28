@@ -371,7 +371,8 @@ connection, a unix socket, a child's pipe, inotify.
   `CTUI_IO_EVENT` dispatched straight to `handler` (like timers, not
   through the registry), with a `CTUI_IO_EVENT_DATA` (`fd`, `ready`
   bits). Level-triggered, so drain what's there. The caller keeps
-  owning `fd`.
+  owning `fd`. A watch added from inside a handler first fires in the
+  next round (it may reuse an fd number a handler just closed).
 - `ctui_io_set_events(watch, events)` — change the mask (e.g. only
   ask for `CTUI_IO_WRITE` while output is queued; `0` pauses).
 - `ctui_io_unwatch(watch)` — stop and free; safe mid-dispatch. Close

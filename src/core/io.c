@@ -120,9 +120,12 @@ int ctui_io_dispatch(CTUI_EVENT *ev) {
   CTUI_IO_EVENT_DATA *data = ev->event_data;
   int changed = 0;
   g_dispatching = 1;
-  /* re-read g_watch_count each pass: a handler may add a watch, and the
-   * newcomer simply isn't ready this round (its fd wasn't in the set) */
-  for (int i = 0; i < g_watch_count; i++) {
+  /* only the watches there when select() ran: a handler may add one, and
+   * it may well get the fd number a handler just closed -- data->ready is
+   * the old fd's, so a newcomer waits for the next round (appended at the
+   * end, and nothing is swept until the dispatch is over) */
+  int count = g_watch_count;
+  for (int i = 0; i < count; i++) {
     CTUI_IO_WATCH *w = g_watches[i];
     if (!w->handler || w->fd != data->fd || !(w->events & data->ready)) {
       continue;

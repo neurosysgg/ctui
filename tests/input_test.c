@@ -396,6 +396,56 @@ static void test_io_watch(void) {
   close(p[1]);
 }
 
+/* a handler that ends its pipe and starts another: the new pipe gets the
+ * closed one's fd number, and its watch must not inherit the readiness
+ * select() reported for the old one (a blocking read there hangs) */
+static int g_reuse_fd = -1, g_reuse_new[2] = {-1, -1}, g_newcomer_calls = 0;
+static CTUI_IO_WATCH *g_reuse_watch, *g_newcomer_watch;
+
+static int on_newcomer(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  (void)self;
+  (void)ev;
+  g_newcomer_calls++;
+  return 1;
+}
+
+static int on_reuse(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  (void)self;
+  (void)ev;
+  ctui_io_unwatch(g_reuse_watch);
+  close(g_reuse_fd);
+  pipe(g_reuse_new);
+  g_newcomer_watch =
+      ctui_io_watch(g_reuse_new[0], CTUI_IO_READ, NULL, on_newcomer);
+  return 1;
+}
+
+static void test_io_fd_reuse(void) {
+  int p[2];
+  pipe(p);
+  g_reuse_fd = p[0];
+  g_reuse_watch = ctui_io_watch(p[0], CTUI_IO_READ, NULL, on_reuse);
+  close(p[1]); /* EOF: readable */
+
+  CTUI_EVENT ev;
+  int got = ctui_input_loop(&ev, 0);
+  CTUI_TEST_ASSERT(got && ev.type == CTUI_IO_EVENT &&
+                       ctui_io_dispatch(&ev) == 1,
+                   "the ending pipe's handler ran");
+  CTUI_TEST_ASSERT(g_reuse_new[0] == p[0] && g_newcomer_calls == 0,
+                   "a watch added during dispatch on the same fd number "
+                   "isn't dispatched with the old fd's readiness");
+
+  write(g_reuse_new[1], "z", 1);
+  got = ctui_input_loop(&ev, 0);
+  CTUI_TEST_ASSERT(got && ev.type == CTUI_IO_EVENT &&
+                       ctui_io_dispatch(&ev) == 1 && g_newcomer_calls == 1,
+                   "it fires on its own readiness in the next round");
+  ctui_io_unwatch(g_newcomer_watch);
+  close(g_reuse_new[0]);
+  close(g_reuse_new[1]);
+}
+
 static int g_timer_fires = 0;
 static int on_timer(CTUI_WIDGET *self, CTUI_EVENT *ev) {
   (void)self;
@@ -508,6 +558,7 @@ int main(void) {
   test_csi_u();
   test_osc();
   test_io_watch();
+  test_io_fd_reuse();
   test_timer_wake_and_tick();
   test_quit(&app, &w);
 

@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **An io watch added mid-dispatch got the old fd's readiness**
+      (2026-09-28, found by ctui-wm's ctui-git: a finished `git clone`'s
+      done-handler started `git log`, whose stderr pipe got the clone's
+      just-closed fd number; the new watch was dispatched in the same
+      round with `data->ready` meant for the old fd, and its blocking
+      `read()` hung the app -- git log was blocked writing stdout nobody
+      read). `ctui_io_dispatch()` now walks only the watches there when
+      `select()` ran (newcomers are appended, nothing is swept until the
+      dispatch ends), so a newcomer waits for its own readiness. Test:
+      input_test `test_io_fd_reuse`.
 - [x] **Text attributes** (2026-09-28, for ctui-wm's markdown view):
       `CTUI_CELL` had colours only. It now carries `attr`, bits
       `CTUI_ATTR_BOLD/DIM/ITALIC/UNDERLINE/STRIKE` (0 = plain; the byte
