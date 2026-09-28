@@ -217,12 +217,48 @@ static void test_resize_forces_redraw(void) {
   ctui_screen_free(s);
 }
 
+static void test_flush_attrs(void) {
+  CTUI_SCREEN *s = ctui_screen_create(1, 4);
+  char out[256];
+  capture_flush(s, out, sizeof out); /* prime, same as above */
+
+  s->cells[0] = (CTUI_CELL){.ch = 'B', .attr = CTUI_ATTR_BOLD};
+  s->cells[1] = (CTUI_CELL){.ch = 'I',
+                            .attr = CTUI_ATTR_ITALIC | CTUI_ATTR_UNDERLINE};
+  s->cells[2] = (CTUI_CELL){.ch = 'p'};
+  s->cells[3] = (CTUI_CELL){.ch = 'q'};
+  size_t n = capture_flush(s, out, sizeof out);
+  const char *want = "\x1b[1;1H\x1b[0;1;39;49mB\x1b[0;3;4;39;49mI"
+                     "\x1b[0;39;49mpq\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "flush resets and sets each run's attributes in the "
+                   "colour escape, back to plain with a reset only, and "
+                   "repeats nothing within a run (got %s)", out + 1);
+
+  s->cells[3].attr = CTUI_ATTR_STRIKE | CTUI_ATTR_DIM;
+  n = capture_flush(s, out, sizeof out);
+  want = "\x1b[1;4H\x1b[0;2;9;39;49mq\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "a cell whose attributes alone changed is redrawn "
+                   "(dim + strike)");
+
+  ctui_screen_putc(s, 0, 0, 'B', CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
+  CTUI_TEST_ASSERT(s->cells[0].attr == 0,
+                   "screen_putc writes a plain cell over a bold one");
+  s->cells[1].attr = CTUI_ATTR_BOLD;
+  ctui_screen_clear(s);
+  CTUI_TEST_ASSERT(s->cells[1].attr == 0, "screen_clear drops attributes");
+
+  ctui_screen_free(s);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
   test_putc_puts_clear();
   test_flush_diff_and_color_cache();
   test_flush_256_and_rgb();
+  test_flush_attrs();
   test_resize_forces_redraw();
 
   return ctui_test_summary();

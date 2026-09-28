@@ -271,6 +271,43 @@ static void test_puts_n(void) {
   ctui_compositor_free(comp);
 }
 
+static void test_puts_cell(void) {
+  CTUI_COMPOSITOR *comp = ctui_compositor_create(2, 10);
+  CTUI_WIDGET w = ctui_widget_make(0, 0, 10, 2, NULL, noop_render, NULL);
+  ctui_widget_init(&w, comp);
+  CTUI_CELL bold = {.fg = CTUI_COLOR_RED, .attr = CTUI_ATTR_BOLD};
+  int n = ctui_widget_puts_cell(&w, comp, 0, 0, "h\xc3\xa9llo", (size_t)-1,
+                                &bold);
+  CTUI_TEST_ASSERT(n == 5 && comp->cells[1].ch == 0xe9 &&
+                       comp->cells[4].attr == CTUI_ATTR_BOLD &&
+                       comp->cells[4].fg == CTUI_COLOR_RED,
+                   "puts_cell() draws the whole string with the cell's "
+                   "colour and attributes (%d)", n);
+  CTUI_CELL rgb = {.color_mode = CTUI_COLOR_MODE_RGB,
+                   .fg_r = 9,
+                   .attr = CTUI_ATTR_ITALIC | CTUI_ATTR_UNDERLINE};
+  n = ctui_widget_puts_cell(&w, comp, 0, 1, "abc", 2, &rgb);
+  CTUI_TEST_ASSERT(n == 2 && comp->cells[2].ch == 'b' &&
+                       comp->cells[2].color_mode == CTUI_COLOR_MODE_RGB &&
+                       comp->cells[2].fg_r == 9 &&
+                       comp->cells[2].attr ==
+                           (CTUI_ATTR_ITALIC | CTUI_ATTR_UNDERLINE) &&
+                       comp->cells[3].ch == 'l',
+                   "puts_cell() takes n bytes, any colour mode");
+  n = ctui_widget_putc_cell(&w, comp, 1, 0, 0x4e2d, &bold);
+  CTUI_TEST_ASSERT(n == 2 && comp->cells[11].ch == CTUI_CELL_CONT &&
+                       comp->cells[11].attr == CTUI_ATTR_BOLD,
+                   "putc_cell() styles both halves of a wide glyph");
+  ctui_widget_puts(&w, comp, 0, 0, "x", CTUI_COLOR_DEFAULT,
+                   CTUI_COLOR_DEFAULT);
+  CTUI_TEST_ASSERT(comp->cells[0].attr == 0,
+                   "plain puts() over a bold cell leaves it plain");
+  ctui_compositor_clear(comp);
+  CTUI_TEST_ASSERT(comp->cells[4].attr == 0,
+                   "compositor_clear drops attributes");
+  ctui_compositor_free(comp);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -278,6 +315,7 @@ int main(void) {
   test_puts_and_color_modes();
   test_puts_cut();
   test_puts_n();
+  test_puts_cell();
   test_widget_init_out_of_bounds();
   test_gfx_dispatch();
 

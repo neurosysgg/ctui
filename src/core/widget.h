@@ -158,6 +158,16 @@ int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                          int col, const char *str, int width,
                          unsigned char fg, unsigned char bg);
 
+/* putc()/puts_n() with a whole cell as the style: its colours in any
+ * color_mode and its attr (CTUI_ATTR_*: bold, italic, underline, ...);
+ * style->ch is ignored. n = (size_t)-1 for all of a NUL-terminated str.
+ * Return the columns written. */
+int ctui_widget_putc_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, uint32_t ch, const CTUI_CELL *style);
+int ctui_widget_puts_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, const char *str, size_t n,
+                          const CTUI_CELL *style);
+
 /* same as ctui_widget_putc()/puts() above, except fg/bg are read as a
  * 0-255 ANSI 256-color index (CTUI_COLOR_MODE_256) instead of a basic
  * CTUI_COLOR_* index -- opt-in for a widget that explicitly wants the

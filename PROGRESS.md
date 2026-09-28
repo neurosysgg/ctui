@@ -237,6 +237,20 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Text attributes** (2026-09-28, for ctui-wm's markdown view):
+      `CTUI_CELL` had colours only. It now carries `attr`, bits
+      `CTUI_ATTR_BOLD/DIM/ITALIC/UNDERLINE/STRIKE` (0 = plain; the byte
+      fits the struct's padding, still 16 bytes). The flush diffs it with
+      the colours and, where it changes, starts that run's SGR with a
+      reset and the new attributes (`\x1b[0;1;4;31;49m`), so a run costs
+      one escape as before; plain cells after styled ones get `0;` only.
+      `ctui_widget_putc_cell()`/`puts_cell()` draw with a whole cell as
+      the style (any colour mode + attributes); every other put, the
+      screen's putc and both clears write attr 0. Tests: screen_test
+      (the escapes, an attribute-only change redraws, putc/clear reset),
+      widget_test (puts_cell/putc_cell, wide glyphs, clears).
+      OSC 8 hyperlinks left for later (a per-cell link id).
+
 - [x] **kitty's replies are read, not typed** (2026-09-28): the input
       parser had no APC branch, so a kitty graphics reply (ESC _ G ...
       ST) would have arrived as Alt+_ and then its text as keys; only

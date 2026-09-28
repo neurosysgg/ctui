@@ -36,7 +36,19 @@ typedef struct {
    * diacritic (the column follows from the placeholder to its left); 0 =
    * no diacritic, i.e. row 0 */
   unsigned char kitty_row;
+
+  /* CTUI_ATTR_* bits; 0 = plain text (every zero-filled cell) */
+  unsigned char attr;
 } CTUI_CELL;
+
+/* a cell's text attributes, sent as SGR with its colours; they combine */
+enum {
+  CTUI_ATTR_BOLD = 1 << 0,
+  CTUI_ATTR_DIM = 1 << 1,
+  CTUI_ATTR_ITALIC = 1 << 2,
+  CTUI_ATTR_UNDERLINE = 1 << 3,
+  CTUI_ATTR_STRIKE = 1 << 4,
+};
 
 /* basic ANSI colors */
 enum {

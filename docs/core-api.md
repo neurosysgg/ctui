@@ -76,7 +76,10 @@ its own cell plus a `CTUI_CELL_CONT` cell to its right, which
 `ctui_screen_flush()` skips since the terminal already advanced past
 it.
 `CTUI_COLOR_MODE_BASIC/256/RGB/RGB_FG` says how `fg`/`bg` should be
-read (`RGB_FG`: a 24-bit fg over a basic `bg`); `kitty_row` is the
+read (`RGB_FG`: a 24-bit fg over a basic `bg`); `attr` holds
+`CTUI_ATTR_BOLD/DIM/ITALIC/UNDERLINE/STRIKE` bits (0 = plain, what every
+zero-filled cell is), sent by the flush as SGR in the same escape as the
+colours; `kitty_row` is the
 image row of a Kitty placeholder cell (see `widget.h`) —
 independent of `CTUI_GFX_MODE` (`gfx.h`), which is what the *terminal
 session* negotiated, not how one cell is encoded. No functions here,
@@ -243,6 +246,12 @@ ever set; every other widget leaves both `NULL`.
   `_256`/`_rgb` variants exist for richer color (see `cell.h`'s
   `CTUI_COLOR_MODE_*`) — opt-in per call site, not per widget.
   `ctui_widget_putc_rgb_fg()` is a truecolor fg over a basic bg.
+- `ctui_widget_putc_cell/puts_cell(widget, comp, row, col, ch|str[, n],
+  style)` — the same with a whole `CTUI_CELL` as the style: its colours
+  in any `color_mode` plus its `attr` (bold, italic, underline, ...);
+  `style->ch` is ignored, `n` = `(size_t)-1` for the whole string.
+  Return the columns written. The way to draw styled text (markdown,
+  a link); every other put writes plain cells (`attr` 0).
 - `ctui_widget_puts_cut(widget, comp, row, col, str, width, fg, bg)` —
   `puts` cut to `width` columns, a string that doesn't fit ending in "…"
   (U+2026) in the last one; returns the columns written. The way to draw

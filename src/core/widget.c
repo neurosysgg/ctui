@@ -213,6 +213,29 @@ int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   return w + 1;
 }
 
+int ctui_widget_putc_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, uint32_t ch, const CTUI_CELL *style) {
+  return widget_put(widget, comp, row, col, ch, style);
+}
+
+int ctui_widget_puts_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, const char *str, size_t n,
+                          const CTUI_CELL *style) {
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - puts_cell @ tick %d (row=%d, col=%d, n=%zu, "
+            "mode=%d, attr=%d)\n",
+            ctui_tick_advance(), row, col, n, style->color_mode, style->attr);
+  const char *end = n == (size_t)-1 ? NULL : str + n;
+  int c = col;
+  while ((end == NULL || str < end) && *str) {
+    uint32_t ch;
+    str += ctui_utf8_cluster(str, end ? (size_t)(end - str) : (size_t)-1,
+                             &ch, NULL);
+    c += widget_put(widget, comp, row, c, ch, style);
+  }
+  return c - col;
+}
+
 void ctui_widget_putc_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           int col, uint32_t ch, unsigned char fg256,
                           unsigned char bg256) {

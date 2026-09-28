@@ -20,10 +20,10 @@ static void screen_alloc(CTUI_SCREEN *s, int rows, int cols) {
     s->buffer[i].ch = '\0'; /* force buffer flush on next draw */
   }
 
-  /* worst case is an RGB cell's escape, "\x1b[38;2;255;255;255;48;2;255;
-   * 255;255m" (~38 bytes) plus a position escape (~11) plus the glyph
-   * itself -- 64/cell budget covers that with room to spare */
-  s->out_cap = (size_t)rows * (size_t)cols * 64 + 64;
+  /* worst case is an RGB cell's escape, "\x1b[0;1;2;3;4;9;38;2;255;255;
+   * 255;48;2;255;255;255m" (~50 bytes) plus a position escape (~11) plus
+   * the glyph itself -- 80/cell budget covers that with room to spare */
+  s->out_cap = (size_t)rows * (size_t)cols * 80 + 64;
   s->out = malloc(s->out_cap);
 }
 
@@ -73,6 +73,7 @@ void ctui_screen_clear(CTUI_SCREEN *s) {
     s->cells[i].bg = CTUI_COLOR_DEFAULT;
     s->cells[i].color_mode = CTUI_COLOR_MODE_BASIC;
     s->cells[i].kitty_row = 0;
+    s->cells[i].attr = 0;
   }
 }
 
@@ -94,6 +95,7 @@ static int screen_put(CTUI_SCREEN *s, int row, int col, uint32_t ch,
     line[i].fg = fg;
     line[i].bg = bg;
     line[i].color_mode = CTUI_COLOR_MODE_BASIC;
+    line[i].attr = 0;
   }
   return w;
 }
@@ -128,7 +130,7 @@ static int ansi_bg_code(unsigned char c) {
  * RGB_FG off fg_r.. and plain bg */
 static int ctui_compare_ctuicell(CTUI_CELL *lhs, CTUI_CELL *rhs) {
   if (lhs->ch != rhs->ch || lhs->color_mode != rhs->color_mode ||
-      lhs->kitty_row != rhs->kitty_row) {
+      lhs->kitty_row != rhs->kitty_row || lhs->attr != rhs->attr) {
     return 0;
   }
   if (lhs->color_mode == CTUI_COLOR_MODE_RGB_FG) {
@@ -147,7 +149,7 @@ static int ctui_compare_ctuicell(CTUI_CELL *lhs, CTUI_CELL *rhs) {
  * last cell actually emitted this flush (to decide whether a fresh SGR
  * escape is needed), not the previous frame's shadow buffer */
 static int color_changed(const CTUI_CELL *cur, const CTUI_CELL *last) {
-  if (cur->color_mode != last->color_mode) {
+  if (cur->color_mode != last->color_mode || cur->attr != last->attr) {
     return 1;
   }
   if (cur->color_mode == CTUI_COLOR_MODE_RGB_FG) {
@@ -162,26 +164,36 @@ static int color_changed(const CTUI_CELL *cur, const CTUI_CELL *last) {
   return cur->fg != last->fg || cur->bg != last->bg;
 }
 
+/* one SGR escape for cell's colours; when its attributes differ from
+ * last_attr (what the terminal has now) it starts with a reset and sets
+ * them again ("0;1;4;..."), since the colours follow in the same escape */
 static size_t emit_color(char *out, size_t cap, size_t len,
-                         const CTUI_CELL *cell) {
+                         const CTUI_CELL *cell, unsigned char last_attr) {
+  static const char *const sgr[] = {"1;", "2;", "3;", "4;", "9;"};
+  len += (size_t)snprintf(out + len, cap - len, "\x1b[");
+  if (cell->attr != last_attr) {
+    len += (size_t)snprintf(out + len, cap - len, "0;");
+    for (int i = 0; i < 5; i++) {
+      if (cell->attr & (1 << i)) {
+        len += (size_t)snprintf(out + len, cap - len, "%s", sgr[i]);
+      }
+    }
+  }
   switch (cell->color_mode) {
   case CTUI_COLOR_MODE_256:
-    return len + (size_t)snprintf(out + len, cap - len,
-                                  "\x1b[38;5;%d;48;5;%dm", cell->fg,
-                                  cell->bg);
+    return len + (size_t)snprintf(out + len, cap - len, "38;5;%d;48;5;%dm",
+                                  cell->fg, cell->bg);
   case CTUI_COLOR_MODE_RGB_FG:
-    return len + (size_t)snprintf(out + len, cap - len,
-                                  "\x1b[38;2;%d;%d;%d;%dm", cell->fg_r,
-                                  cell->fg_g, cell->fg_b,
+    return len + (size_t)snprintf(out + len, cap - len, "38;2;%d;%d;%d;%dm",
+                                  cell->fg_r, cell->fg_g, cell->fg_b,
                                   ansi_bg_code(cell->bg));
   case CTUI_COLOR_MODE_RGB:
-    return len +
-          (size_t)snprintf(out + len, cap - len,
-                            "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm", cell->fg_r,
-                            cell->fg_g, cell->fg_b, cell->bg_r, cell->bg_g,
-                            cell->bg_b);
+    return len + (size_t)snprintf(out + len, cap - len,
+                                  "38;2;%d;%d;%d;48;2;%d;%d;%dm", cell->fg_r,
+                                  cell->fg_g, cell->fg_b, cell->bg_r,
+                                  cell->bg_g, cell->bg_b);
   default:
-    return len + (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dm",
+    return len + (size_t)snprintf(out + len, cap - len, "%d;%dm",
                                   ansi_fg_code(cell->fg),
                                   ansi_bg_code(cell->bg));
   }
@@ -199,7 +211,8 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
 
   int last_row = -1, last_col = -1;
   /* 0xff isn't a real CTUI_COLOR_MODE_* value, so the first emitted cell
-   * always mismatches and gets its own color escape */
+   * always mismatches and gets its own color escape; attr 0 is what the
+   * last flush's closing reset left */
   CTUI_CELL last_color = {.color_mode = 0xff};
 
   // iterate over cells, compare to our buffer and rewrite accordingly
@@ -239,7 +252,7 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
       }
 
       if (color_changed(cur, &last_color)) {
-        len = emit_color(out, cap, len, cur);
+        len = emit_color(out, cap, len, cur, last_color.attr);
         last_color = *cur;
       }
 

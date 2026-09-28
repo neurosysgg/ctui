@@ -42,6 +42,7 @@ void ctui_compositor_clear(CTUI_COMPOSITOR *comp) {
      * putc() instead -- see GFX_DESIGN.md's "Resolved open questions" */
     comp->cells[i].color_mode = CTUI_COLOR_MODE_BASIC;
     comp->cells[i].kitty_row = 0;
+    comp->cells[i].attr = 0;
   }
 }
 
