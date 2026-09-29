@@ -31,6 +31,8 @@ CTUI_SCREEN *ctui_screen_create(int rows, int cols) {
   ctui_logf(E_INF, "[CTUI:SCREEN] - creating %dx%d screen @ tick %d\n", cols,
             rows, ctui_tick_advance());
   CTUI_SCREEN *screen = malloc(sizeof(CTUI_SCREEN));
+  screen->sink = NULL;
+  screen->sink_ctx = NULL;
   screen_alloc(screen, rows, cols);
   return screen;
 }
@@ -52,6 +54,9 @@ void ctui_screen_resize(CTUI_SCREEN *s, int rows, int cols) {
   free(s->buffer);
   free(s->out);
   screen_alloc(s, rows, cols);
+  if (s->sink) {
+    return;
+  }
 
   /* clear the real terminal too -- a shrink could otherwise leave stale
    * content from the old (larger) frame outside the new bounds. Guarded by
@@ -62,6 +67,21 @@ void ctui_screen_resize(CTUI_SCREEN *s, int rows, int cols) {
     printf("\x1b[2J");
     fflush(stdout);
   }
+}
+
+static void screen_invalidate(CTUI_SCREEN *s) {
+  for (int i = 0; i < s->rows * s->cols; i++) {
+    s->buffer[i].ch = '\0';
+  }
+}
+
+void ctui_screen_set_sink(CTUI_SCREEN *s, const CTUI_SCREEN_SINK *sink,
+                          void *ctx) {
+  ctui_logf(E_INF, "[CTUI:SCREEN] - frames go to %s @ tick %d\n",
+            sink ? "a sink" : "the terminal", ctui_tick_advance());
+  s->sink = sink;
+  s->sink_ctx = ctx;
+  screen_invalidate(s);
 }
 
 void ctui_screen_clear(CTUI_SCREEN *s) {
@@ -199,9 +219,33 @@ static size_t emit_color(char *out, size_t cap, size_t len,
   }
 }
 
+/* the sink gets whole frames, and only changed ones */
+static void flush_sink(CTUI_SCREEN *s) {
+  size_t n = (size_t)s->rows * (size_t)s->cols;
+  size_t i = 0;
+  while (i < n && ctui_compare_ctuicell(&s->cells[i], &s->buffer[i])) {
+    i++;
+  }
+  if (i == n) {
+    return;
+  }
+  if (s->sink->frame(s->sink_ctx, s) != 0) {
+    ctui_logf(E_WRN, "[CTUI:SCREEN] - sink refused a frame @ tick %d\n",
+              ctui_tick_advance());
+    return;
+  }
+  ctui_logf(E_INF, "[CTUI:SCREEN] - frame handed to the sink @ tick %d\n",
+            ctui_tick_advance());
+  memcpy(s->buffer, s->cells, sizeof(CTUI_CELL) * n);
+}
+
 void ctui_screen_flush(CTUI_SCREEN *s) {
   ctui_logf(E_INF, "[CTUI:SCREEN] - flush starting @ tick %d\n",
             ctui_tick_advance());
+  if (s->sink) {
+    flush_sink(s);
+    return;
+  }
   /* s->out is sized once (screen_alloc()) to the same worst-case-per-cell
    * budget this used to malloc() fresh on every call -- reused here rather
    * than allocated per flush */

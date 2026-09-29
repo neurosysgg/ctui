@@ -237,6 +237,20 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Frames and input without a terminal** (2026-09-29, for ctui-wm's
+      keyboard OLED: widgets drawn into a 128x40 display, later driven
+      from a socket): `screen.c` wrote escapes to stdout and `input.c`
+      read stdin, so an app could only live in a terminal.
+      `ctui_screen_set_sink()` hands a screen's frames to a callback
+      instead (cells + the frame it took before; only changed frames; -1
+      retries; no terminal writes on resize), and
+      `ctui_input_set_source()` swaps stdin for an fd + non-blocking
+      `next()` producing events (buffered ones before each wait; fd -1 =
+      timers/watches/ticks only; its end ends the loop). The terminal
+      stays the default and its path is unchanged. Tests: screen_test
+      (the sink: first/unchanged/refused frames, resize, back to the
+      terminal), input_test (the source, timers and ticks with it, and
+      `ctui_app_run()` with both: no stdout at all).
 - [x] **An io watch added mid-dispatch got the old fd's readiness**
       (2026-09-28, found by ctui-wm's ctui-git: a finished `git clone`'s
       done-handler started `git log`, whose stderr pipe got the clone's

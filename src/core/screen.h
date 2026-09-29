@@ -6,7 +6,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef struct CTUI_SCREEN CTUI_SCREEN;
+
+/* where a screen's frames go instead of the terminal (an OLED, a test, a
+ * remote viewer): ctui_screen_flush() calls frame() only when a cell
+ * changed, with s->cells the new frame and s->buffer the one this sink
+ * last took (all '\0' after a create or resize: redraw everything).
+ * Return 0 once taken, -1 to get the same change again next flush. A
+ * sink screen never writes the terminal; kitty graphics stay terminal-only
+ * (a gfx widget draws its text fallback without ctui_init()). */
 typedef struct {
+  int (*frame)(void *ctx, const CTUI_SCREEN *s);
+} CTUI_SCREEN_SINK;
+
+struct CTUI_SCREEN {
   int rows, cols;
   CTUI_CELL *cells;  /* frame being built */
   CTUI_CELL *buffer; /* buffer currently displayed on screen */
@@ -15,10 +28,16 @@ typedef struct {
    * instead of malloc/free per flush */
   char *out;
   size_t out_cap;
-} CTUI_SCREEN;
+  const CTUI_SCREEN_SINK *sink; /* NULL: the terminal */
+  void *sink_ctx;
+};
 
 CTUI_SCREEN *ctui_screen_create(int rows, int cols);
 void ctui_screen_free(CTUI_SCREEN *s);
+/* sends s's frames to sink (NULL: back to the terminal); the next flush
+ * redraws everything */
+void ctui_screen_set_sink(CTUI_SCREEN *s, const CTUI_SCREEN_SINK *sink,
+                          void *ctx);
 void ctui_screen_clear(CTUI_SCREEN *s);
 void ctui_screen_putc(CTUI_SCREEN *s, int row, int col, uint32_t ch,
                       unsigned char fg, unsigned char bg);

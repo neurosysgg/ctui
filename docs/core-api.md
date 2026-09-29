@@ -200,6 +200,14 @@ this directly except at the two ends of its lifecycle and
 - `ctui_screen_resize(s, rows, cols)` — reallocates in place, forces a
   full redraw next flush, clears the real terminal outright (a shrink
   could otherwise leave stale content outside the new bounds).
+- `ctui_screen_set_sink(s, sink, ctx)` — frames go to
+  `sink->frame(ctx, s)` instead of the terminal (an OLED, a remote
+  viewer): called only when a cell changed, with `s->cells` the new frame
+  and `s->buffer` the last one the sink took (all `'\0'` after a create,
+  resize or set: draw everything); `0` = taken, `-1` = hand it over again
+  next flush. A sink screen never writes the terminal (resize included);
+  kitty graphics stay terminal-only. `NULL` goes back to the terminal
+  with a full redraw.
 
 ## `compositor.h` — `CTUI_COMPOSITOR`
 
@@ -493,6 +501,14 @@ above into the loop described in "Life of a frame".
   (`CTUI_TICK_EVENT`). Returns `0` on EOF/error. Not usually called directly by app code — `ctui_app_run()`
   is the one caller; reach for this yourself only if you're building a
   custom run loop instead of using `ctui_app_run()`.
+- `ctui_input_set_source(src)` — events from `src` instead of the
+  terminal (`NULL`: back to it). `src->fd` is selected for reading (`-1`:
+  none, only timers/fd watches/ticks wake the loop); `src->next(ctx, ev,
+  readable)` never blocks: called with `0` before every wait (hand out an
+  event already buffered) and `1` once the fd is readable; it returns `1`
+  with `*ev` filled (its data in the source's own storage), `0` for none,
+  `-1` at the end (the loop returns `0`, ending `ctui_app_run()`). With a
+  sink screen this runs an app with no terminal at all.
 
 ## `log.h` — logging
 

@@ -252,6 +252,57 @@ static void test_flush_attrs(void) {
   ctui_screen_free(s);
 }
 
+static int g_frames = 0, g_refuse = 0;
+static uint32_t g_prev_ch = 0, g_new_ch = 0;
+
+static int count_frame(void *ctx, const CTUI_SCREEN *s) {
+  (void)ctx;
+  g_frames++;
+  g_prev_ch = s->buffer[0].ch;
+  g_new_ch = s->cells[0].ch;
+  return g_refuse ? -1 : 0;
+}
+
+static void test_sink(void) {
+  static const CTUI_SCREEN_SINK sink = {count_frame};
+  CTUI_SCREEN *s = ctui_screen_create(2, 4);
+  ctui_screen_set_sink(s, &sink, NULL);
+
+  char out[256];
+  ctui_screen_puts(s, 0, 0, "ab", CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
+  size_t n = capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(n == 0 && g_frames == 1 && g_prev_ch == '\0' &&
+                       g_new_ch == 'a',
+                   "a sink screen's flush hands the frame over (its previous "
+                   "one all '\\0': draw everything) and writes nothing to "
+                   "stdout");
+
+  capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(g_frames == 1, "an unchanged frame isn't handed over");
+
+  ctui_screen_putc(s, 1, 3, 'z', CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
+  g_refuse = 1;
+  capture_flush(s, out, sizeof out);
+  g_refuse = 0;
+  capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(g_frames == 3 && g_prev_ch == 'a',
+                   "a refused frame comes again on the next flush, against "
+                   "the last frame the sink took");
+
+  ctui_screen_resize(s, 3, 5);
+  ctui_screen_puts(s, 0, 0, "x", CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
+  n = capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(n == 0 && g_frames == 4 && g_prev_ch == '\0',
+                   "after a resize the sink's next frame is a full one");
+
+  ctui_screen_set_sink(s, NULL, NULL);
+  n = capture_flush(s, out, sizeof out);
+  out[n] = '\0';
+  CTUI_TEST_ASSERT(g_frames == 4 && strstr(out, "x") != NULL,
+                   "back on the terminal the whole frame is written again");
+  ctui_screen_free(s);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -260,6 +311,7 @@ int main(void) {
   test_flush_256_and_rgb();
   test_flush_attrs();
   test_resize_forces_redraw();
+  test_sink();
 
   return ctui_test_summary();
 }

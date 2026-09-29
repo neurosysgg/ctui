@@ -505,6 +505,26 @@ static int resolve_escape(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
  * input" holds no matter how often other sources wake the loop. */
 static long g_tick_due = 0;
 
+static const CTUI_INPUT_SOURCE *g_source = NULL;
+
+void ctui_input_set_source(const CTUI_INPUT_SOURCE *src) {
+  ctui_logf(E_INF, "[CTUI:INPUT] - events come from %s @ tick %d\n",
+            src ? "a source" : "the terminal", ctui_tick_advance());
+  g_source = src;
+}
+
+/* 1: *ev is the source's event, 0: none, -1: the source ended */
+static int source_next(CTUI_EVENT *ev, int readable) {
+  int r = g_source->next(g_source->ctx, ev, readable);
+  if (r > 0) {
+    g_tick_due = 0;
+  } else if (r < 0) {
+    ctui_logf(E_INF, "[CTUI:INPUT] - the source ended @ tick %d\n",
+              ctui_tick_advance());
+  }
+  return r;
+}
+
 int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
   /* owns its own event_data storage rather than relying on the caller to
    * pre-populate ev->event_data, since which struct shape is needed depends
@@ -527,14 +547,25 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
       return 1;
     }
 
+    if (g_source) {
+      int r = source_next(ev, 0);
+      if (r != 0) {
+        return r > 0;
+      }
+    }
+
     /* pushed-back bytes are already "readable"; select() would not see
      * them and would sit out the whole timeout before we ever looked */
-    if (!pushback_pending()) {
+    if (g_source || !pushback_pending()) {
+      int in_fd = g_source ? g_source->fd : STDIN_FILENO;
       fd_set rfds, wfds;
       FD_ZERO(&rfds);
       FD_ZERO(&wfds);
-      FD_SET(STDIN_FILENO, &rfds);
-      int maxfd = STDIN_FILENO;
+      int maxfd = -1;
+      if (in_fd >= 0) {
+        FD_SET(in_fd, &rfds);
+        maxfd = in_fd;
+      }
       ctui_io_fill(&rfds, &wfds, &maxfd);
 
       long now = mono_ms();
@@ -583,12 +614,19 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
         }
         return 1;
       }
-      if (!FD_ISSET(STDIN_FILENO, &rfds)) {
+      if (in_fd < 0 || !FD_ISSET(in_fd, &rfds)) {
         if (ctui_io_ready(&rfds, &wfds, &io_data)) {
           ev->type = CTUI_IO_EVENT;
           ev->ev_source = "io";
           ev->event_data = &io_data;
           return 1;
+        }
+        continue;
+      }
+      if (g_source) {
+        int sr = source_next(ev, 1);
+        if (sr != 0) {
+          return sr > 0;
         }
         continue;
       }

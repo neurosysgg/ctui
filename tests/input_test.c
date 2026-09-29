@@ -537,6 +537,135 @@ static void test_quit(CTUI_APP *app, CTUI_WIDGET *w) {
   ctui_screen_free(screen);
 }
 
+/* a source of decoded events: each byte in its pipe is one key; 'x' ends
+ * it; g_src_buffered keys wait inside it, handed out before any wait */
+static int g_src_pipe[2] = {-1, -1};
+static int g_src_buffered = 0, g_src_calls_unreadable = 0;
+
+static int src_next(void *ctx, CTUI_EVENT *ev, int readable) {
+  (void)ctx;
+  static CTUI_KEYPRESS_EVENT_DATA kp;
+  char c;
+  if (!readable) {
+    g_src_calls_unreadable++;
+    if (g_src_buffered == 0) {
+      return 0;
+    }
+    g_src_buffered--;
+    c = 'b';
+  } else if (read(g_src_pipe[0], &c, 1) != 1 || c == 'x') {
+    return -1;
+  }
+  kp = (CTUI_KEYPRESS_EVENT_DATA){.type = CTUI_KEY_CHAR, .ch = (uint32_t)c};
+  ev->type = CTUI_KEYPRESS_EVENT;
+  ev->ev_source = "input";
+  ev->event_data = &kp;
+  return 1;
+}
+
+static void test_source(void) {
+  pipe(g_src_pipe);
+  CTUI_INPUT_SOURCE src = {.fd = g_src_pipe[0], .next = src_next};
+  ctui_input_set_source(&src);
+  CTUI_EVENT ev;
+  CTUI_KEYPRESS_EVENT_DATA *kp;
+
+  feed("t");
+  write(g_src_pipe[1], "s", 1);
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 's',
+                   "with a source set, its event comes out and the "
+                   "terminal's byte waits");
+
+  g_src_buffered = 2;
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 'b' && g_src_buffered == 1,
+                   "an event the source holds comes out before any wait");
+  next_key(&ev);
+
+  CTUI_TIMER *t = ctui_timer_register(20, NULL, on_timer);
+  int fires = g_timer_fires;
+  CTUI_TEST_ASSERT(ctui_input_loop(&ev, 0) && ev.type == CTUI_TIMER_EVENT &&
+                       ctui_timer_tick() == 1 && g_timer_fires == fires + 1,
+                   "timers still wake the loop with a source set");
+  ctui_timer_cancel(t);
+
+  write(g_src_pipe[1], "x", 1);
+  CTUI_TEST_ASSERT(ctui_input_loop(&ev, 0) == 0,
+                   "a source's end ends the loop (returns 0)");
+
+  CTUI_INPUT_SOURCE none = {.fd = -1, .next = src_next};
+  ctui_input_set_source(&none);
+  CTUI_TEST_ASSERT(ctui_input_loop(&ev, 30) && ev.type == CTUI_TICK_EVENT,
+                   "a source with no fd still gets ticks");
+
+  ctui_input_set_source(NULL);
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 't',
+                   "back on the terminal its waiting byte comes out");
+  close(g_src_pipe[0]);
+  close(g_src_pipe[1]);
+}
+
+/* the whole headless path: frames to a sink, keys from a source, no
+ * terminal on either side */
+static int g_sink_frames = 0;
+static int sink_frame(void *ctx, const CTUI_SCREEN *s) {
+  (void)ctx;
+  if (s->cells[0].ch == 'q') {
+    g_sink_frames++;
+  }
+  return 0;
+}
+
+static uint32_t g_last_ch = ' ';
+static void last_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  ctui_widget_putc(self, comp, 0, 0, g_last_ch, CTUI_COLOR_DEFAULT,
+                   CTUI_COLOR_DEFAULT);
+}
+
+static int on_key_last(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  (void)self;
+  CTUI_KEYPRESS_EVENT_DATA *kp = ev->event_data;
+  g_last_ch = kp->ch;
+  return 1;
+}
+
+static void test_headless_run(void) {
+  CTUI_WIDGET w = ctui_widget_make(0, 0, 4, 2, NULL, last_render, NULL);
+  CTUI_WIDGET *widgets[] = {&w};
+  CTUI_APP app;
+  ctui_app_init(&app, widgets, 1, 2, 4);
+  ctui_event_register("input", CTUI_KEYPRESS_EVENT, &w, on_key_last);
+
+  static const CTUI_SCREEN_SINK sink = {sink_frame};
+  CTUI_SCREEN *screen = ctui_screen_create(2, 4);
+  ctui_screen_set_sink(screen, &sink, NULL);
+  pipe(g_src_pipe);
+  CTUI_INPUT_SOURCE src = {.fd = g_src_pipe[0], .next = src_next};
+  ctui_input_set_source(&src);
+  write(g_src_pipe[1], "qx", 2);
+
+  int saved = dup(STDOUT_FILENO);
+  int devnull = open("/dev/null", O_WRONLY);
+  dup2(devnull, STDOUT_FILENO);
+  ctui_app_run(&app, screen, 0);
+  off_t written = lseek(STDOUT_FILENO, 0, SEEK_CUR);
+  dup2(saved, STDOUT_FILENO);
+  close(saved);
+  close(devnull);
+
+  CTUI_TEST_ASSERT(g_sink_frames == 1 && written == 0,
+                   "ctui_app_run() with a sink and a source: the key "
+                   "reached the widget, its frame reached the sink, nothing "
+                   "went to stdout, and the source's end ended the run");
+  ctui_input_set_source(NULL);
+  close(g_src_pipe[0]);
+  close(g_src_pipe[1]);
+  ctui_screen_free(screen);
+  ctui_app_free(&app);
+}
+
 int main(void) {
   ctui_log_init(E_WRN | E_ERR);
 
@@ -561,8 +690,10 @@ int main(void) {
   test_io_fd_reuse();
   test_timer_wake_and_tick();
   test_quit(&app, &w);
+  test_source();
 
   ctui_app_free(&app);
+  test_headless_run();
   ctui_log_shutdown();
   return ctui_test_summary();
 }
