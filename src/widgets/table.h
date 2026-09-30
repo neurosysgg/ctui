@@ -67,6 +67,13 @@ int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
 
 void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
 
+/* column i's left edge and width in a table w columns wide, as the render
+ * lays them out: for an app drawing over a cell (a control of its own
+ * where the cell's text is). Row r is at line r - scroll (+ 1 with a
+ * header). */
+void ctui_table_column_span(const CTUI_TABLE *t, int w, int i, int *x,
+                            int *width);
+
 /* ("input", CTUI_KEYPRESS_EVENT) and ("input", CTUI_MOUSE_EVENT): each
  * result but NONE emits a CTUI_VALUE_CHANGED_EVENT (source "table", origin
  * self), value = "moved" | "activate" | "mark" | "sort" | "menu", enabled =

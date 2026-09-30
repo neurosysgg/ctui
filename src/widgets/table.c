@@ -77,9 +77,8 @@ int ctui_table_key(CTUI_TABLE *t, const CTUI_KEYPRESS_EVENT_DATA *kp) {
   return CTUI_TABLE_MARK;
 }
 
-/* column i's left edge and width at total width w */
-static void column_span(const CTUI_TABLE *t, int w, int i, int *x,
-                        int *width) {
+void ctui_table_column_span(const CTUI_TABLE *t, int w, int i, int *x,
+                            int *width) {
   int fixed = 0, flex = 0;
   for (int c = 0; c < t->column_count; c++) {
     if (t->columns[c].width > 0) {
@@ -132,7 +131,7 @@ int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
     }
     for (int c = 0; c < t->column_count; c++) {
       int x, w;
-      column_span(t, self->w, c, &x, &w);
+      ctui_table_column_span(t, self->w, c, &x, &w);
       if (col >= x && col < x + w) {
         t->sort_desc = t->sort_col == c ? !t->sort_desc : 0;
         t->sort_col = c;
@@ -180,7 +179,7 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   if (t->header && self->h > 0) {
     for (int c = 0; c < t->column_count; c++) {
       int x, w;
-      column_span(t, self->w, c, &x, &w);
+      ctui_table_column_span(t, self->w, c, &x, &w);
       char title[128];
       snprintf(title, sizeof title, "%s%s", t->columns[c].title,
                c != t->sort_col ? ""
@@ -206,7 +205,7 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     }
     for (int c = 0; c < t->column_count; c++) {
       int x, w;
-      column_span(t, self->w, c, &x, &w);
+      ctui_table_column_span(t, self->w, c, &x, &w);
       scratch[0] = '\0';
       const char *s = t->cell(t->ctx, r, c, scratch, sizeof scratch);
       draw_cell(self, comp, row, x, w, s, t->columns[c].align_right, fg, bg);

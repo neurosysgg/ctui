@@ -249,6 +249,9 @@ terminal resize.
       before. Tested in `form_test.c` (what is asked, that a drawn
       slider takes clicks alike, declining per control) and
       `dialog_test.c`.
+      Then `ctui_table_column_span()` (table.h, the render's own column
+      layout made public): an app drawing a control of its own over a
+      cell -- a volume bar in a row -- needs where the cell is.
 
 - [x] **Frames and input without a terminal** (2026-09-29, for ctui-wm's
       keyboard OLED: widgets drawn into a 128x40 display, later driven

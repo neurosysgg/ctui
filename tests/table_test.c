@@ -79,6 +79,12 @@ int main(void) {
                       ctui_table_handle_keypress);
   ctui_event_register("input", CTUI_MOUSE_EVENT, &w, ctui_table_handle_mouse);
   ctui_event_register("table", CTUI_VALUE_CHANGED_EVENT, &w, on_value);
+  int sx[2], sw[2];
+  ctui_table_column_span(&t, 20, 0, &sx[0], &sw[0]);
+  ctui_table_column_span(&t, 20, 1, &sx[1], &sw[1]);
+  CTUI_TEST_ASSERT(sx[0] == 0 && sw[0] == 13 && sx[1] == 14 && sw[1] == 6,
+                   "the columns' spans, for an app drawing over a cell "
+                   "(%d+%d, %d+%d)", sx[0], sw[0], sx[1], sw[1]);
 
   ctui_app_render(&app, screen);
   CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 1, "Name ▴") &&
