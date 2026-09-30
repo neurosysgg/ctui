@@ -33,6 +33,28 @@ static void mouse(CTUI_APP *app, CTUI_SCREEN *screen, CTUI_MOUSE_ACTION a,
   }
 }
 
+
+/* a style's control hook: '#' over the cells, what was asked kept; it
+ * declines what `declines` names */
+static CTUI_CONTROL asked[8];
+static int asked_cols[8], asked_n, declines = -1;
+
+static int draw_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
+                        int col, int cols, const CTUI_CONTROL *c,
+                        unsigned char bg, void *arg) {
+  if ((int)c->kind == declines) {
+    return 0;
+  }
+  if (asked_n < 8) {
+    asked[asked_n] = *c;
+    asked_cols[asked_n++] = cols;
+  }
+  for (int i = 0; i < cols; i++) {
+    ctui_widget_putc(self, comp, row, col + i, '#', *(unsigned char *)arg, bg);
+  }
+  return 1;
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
   int rows = 10, cols = 50;
@@ -147,6 +169,45 @@ int main(void) {
   CTUI_TEST_ASSERT(f.scroll == 0 &&
                        ctui_test_row_contains(screen, 1, "Keyboard"),
                    "back at the top, its heading comes along");
+
+  /* the style's control hook: toggles and sliders go to it first */
+  unsigned char ink = CTUI_COLOR_WHITE;
+  CTUI_STYLE hooked = ctui_style_default;
+  hooked.control = draw_control;
+  hooked.control_arg = &ink;
+  f.style = &hooked;
+  w.h = 8;
+  frows[2].value = 45;
+  frows[4].value = 1;
+  ctui_form_focus(&f, 4);
+  f.scroll = 0; /* the page was 3 rows until the next render */
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(asked_n == 3 && asked[0].kind == CTUI_CONTROL_SLIDER &&
+                       asked[0].value == 45 && asked[0].max == 100 &&
+                       asked_cols[0] == 8 && !asked[0].focused &&
+                       asked[1].kind == CTUI_CONTROL_TOGGLE &&
+                       asked[1].disabled && asked[1].value == 0 &&
+                       asked_cols[1] == 3 && asked[2].value == 1 &&
+                       asked[2].max == 1 && asked[2].focused &&
+                       asked[2].kind == CTUI_CONTROL_TOGGLE,
+                   "a hook: asked for the slider (45 of 100, 8 cells) and "
+                   "each toggle (3 cells; disabled, focused) (%d)", asked_n);
+  CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 3, "######## 45  keys/s") &&
+                       ctui_test_row_contains(screen, 5, "###") &&
+                       !ctui_test_row_contains(screen, 5, "[x]") &&
+                       ctui_test_row_contains(screen, 6, "‹ flat ›"),
+                   "... it drew them; the number, the hint and the other "
+                   "controls as before");
+  mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 3, 18 + 7);
+  mouse(&app, screen, CTUI_MOUSE_RELEASE, 0, 3, 18 + 7);
+  CTUI_TEST_ASSERT(frows[2].value == 100,
+                   "a click on a drawn slider lands as on the glyphs (%d)",
+                   frows[2].value);
+  declines = CTUI_CONTROL_TOGGLE;
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 5, "[x]") &&
+                       ctui_test_row_contains(screen, 3, "########"),
+                   "a hook that declines a control leaves it to the glyphs");
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

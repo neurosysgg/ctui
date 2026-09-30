@@ -50,6 +50,20 @@ static int find_col(CTUI_SCREEN *screen, int row, uint32_t ch) {
   return -1;
 }
 
+/* a style's control hook: '=' over the bar's cells */
+static CTUI_CONTROL progress_asked;
+
+static int draw_progress(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
+                         int col, int cols, const CTUI_CONTROL *c,
+                         unsigned char bg, void *arg) {
+  (void)arg;
+  progress_asked = *c;
+  for (int i = 0; i < cols; i++) {
+    ctui_widget_putc(self, comp, row, col + i, '=', CTUI_COLOR_WHITE, bg);
+  }
+  return 1;
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
   int rows = 16, cols = 40;
@@ -152,6 +166,21 @@ int main(void) {
     empty += ctui_test_cell(screen, pr, c) == 0x2591;
   }
   CTUI_TEST_ASSERT(full == 7 && empty == 8, "half full (%d, %d)", full, empty);
+  CTUI_STYLE hooked = ctui_style_default;
+  hooked.control = draw_progress;
+  p.style = &hooked;
+  ctui_app_render(&app, screen);
+  int drawn = 0;
+  for (int c = 0; c < cols; c++) {
+    drawn += ctui_test_cell(screen, pr, c) == '=';
+  }
+  CTUI_TEST_ASSERT(progress_asked.kind == CTUI_CONTROL_PROGRESS &&
+                       progress_asked.value == 50 &&
+                       progress_asked.max == 100 && drawn == 15 &&
+                       ctui_test_row_contains(screen, pr, "50%"),
+                   "a style's control hook draws the bar (%d cells), the "
+                   "percentage stays", drawn);
+  p.style = NULL;
   CTUI_TEST_ASSERT(!ctui_test_key(&app, screen, CTUI_KEY_ENTER, 0) ||
                        p.open,
                    "no buttons: enter picks nothing");

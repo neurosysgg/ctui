@@ -261,11 +261,18 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
       used = ew;
     }
     break;
-  case CTUI_FORM_TOGGLE:
+  case CTUI_FORM_TOGGLE: {
+    CTUI_CONTROL c = {CTUI_CONTROL_TOGGLE, !!r->value, 1, focused,
+                      r->disabled};
+    if (w >= 3 && ctui_style_control(st, self, comp, y, x, 3, &c, hbg)) {
+      used = 3;
+      break;
+    }
     used = ctui_widget_puts_cut(self, comp, y, x, r->value ? "[x]" : "[ ]", w,
                                 r->value ? (focused ? hfg : st->mark_fg) : hfg,
                                 hbg);
     break;
+  }
   case CTUI_FORM_CHOICE:
     snprintf(buf, sizeof buf, "\xe2\x80\xb9 %s \xe2\x80\xba", /* ‹ › */
              r->value >= 0 && r->value < r->option_count
@@ -280,7 +287,10 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
     int span = r->max - r->min, at = span > 0 ? (r->value - r->min) *
                                                     (bar - 1) / span
                                               : 0;
-    for (int c = 0; c < bar; c++) {
+    CTUI_CONTROL ctl = {CTUI_CONTROL_SLIDER, span > 0 ? r->value - r->min : 0,
+                        span > 0 ? span : 0, focused, r->disabled};
+    int drawn = ctui_style_control(st, self, comp, y, x, bar, &ctl, bg);
+    for (int c = 0; c < bar && !drawn; c++) {
       uint32_t ch = c == at ? 0x25cf : c < at ? 0x2501 : 0x2500; /* ● ━ ─ */
       ctui_widget_putc(self, comp, y, x + c, ch,
                        c == at && focused ? st->sel_bg

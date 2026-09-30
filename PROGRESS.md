@@ -237,6 +237,19 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A control hook in the style** (2026-09-30, for ctui-wm's apps:
+      their controls drawn as pixels from its "look", like its panels'):
+      the app widgets drew their controls as glyphs with no way in.
+      `CTUI_STYLE` gains `control` (+ `control_arg`), a
+      `CTUI_CONTROL_DRAW` asked before a form's toggle (3 cells) and
+      slider (its bar) and a dialog's progress bar are drawn: a
+      `CTUI_CONTROL` (kind, value of max, focused, disabled) over the
+      cells the glyphs would take, so clicks and drags don't change.
+      Non-zero = drawn; 0 (or no hook, the default) = the glyphs as
+      before. Tested in `form_test.c` (what is asked, that a drawn
+      slider takes clicks alike, declining per control) and
+      `dialog_test.c`.
+
 - [x] **Frames and input without a terminal** (2026-09-29, for ctui-wm's
       keyboard OLED: widgets drawn into a 128x40 display, later driven
       from a socket): `screen.c` wrote escapes to stdout and `input.c`
