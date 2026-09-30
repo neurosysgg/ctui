@@ -42,6 +42,7 @@ void ctui_textview_free(CTUI_TEXTVIEW *tv) {
   tv->len = 0;
   tv->line_count = 0;
   tv->top = tv->top_row = tv->hscroll = 0;
+  tv->bar_width = 0;
 }
 
 /* line i's bytes, without its '\n' (and a '\r' before it) */
@@ -244,8 +245,54 @@ int ctui_textview_key(CTUI_TEXTVIEW *tv, const CTUI_KEYPRESS_EVENT_DATA *kp) {
   }
 }
 
+/* whether the text takes more than h rows at w columns */
+static int overflows(const CTUI_TEXTVIEW *tv, int w, int h) {
+  if (!tv->wrap) {
+    return tv->line_count > h;
+  }
+  int n = 0;
+  for (int i = 0; i < tv->line_count && n <= h; i++) {
+    n += line_rows(tv, i, w);
+  }
+  return n > h;
+}
+
+/* the view in rows, for its scrollbar: all of them and the first shown */
+static void bar_rows(CTUI_TEXTVIEW *tv, int *total, int *first) {
+  if (!wrapped(tv)) {
+    *total = tv->line_count;
+    *first = tv->top;
+    return;
+  }
+  if (tv->bar_width != tv->width) { /* once per text and width */
+    tv->bar_total = 0;
+    for (int i = 0; i < tv->line_count; i++) {
+      tv->bar_total += line_rows(tv, i, tv->width);
+    }
+    tv->bar_width = tv->width;
+    tv->bar_top = tv->bar_above = 0;
+  }
+  for (; tv->bar_top < tv->top; tv->bar_top++) {
+    tv->bar_above += line_rows(tv, tv->bar_top, tv->width);
+  }
+  for (; tv->bar_top > tv->top; tv->bar_top--) {
+    tv->bar_above -= line_rows(tv, tv->bar_top - 1, tv->width);
+  }
+  *total = tv->bar_total;
+  *first = tv->bar_above + tv->top_row;
+}
+
 int ctui_textview_mouse(CTUI_TEXTVIEW *tv, const CTUI_WIDGET *self,
                         const CTUI_MOUSE_EVENT_DATA *m) {
+  if (tv->bar_shown && tv->lines) {
+    int total, first;
+    bar_rows(tv, &total, &first);
+    int to = ctui_scrollbar_mouse(&tv->bar, self, 0, self->w - 1, tv->page,
+                                  total, tv->page, first, m);
+    if (to >= 0) {
+      return scroll(tv, to - first);
+    }
+  }
   if (!ctui_widget_contains(self, m->row, m->col)) {
     return 0;
   }
@@ -262,7 +309,10 @@ void ctui_textview_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   CTUI_TEXTVIEW *tv = self->widget_data;
   const CTUI_STYLE *st = ctui_style_of(tv->style);
   tv->page = self->h;
-  tv->width = self->w;
+  tv->bar_shown = self->w > 1 && self->h > 0 && st->control && tv->lines &&
+                  overflows(tv, self->w, self->h);
+  int w = self->w - tv->bar_shown;
+  tv->width = w;
   if (self->w <= 0 || !tv->lines) {
     return;
   }
@@ -271,7 +321,7 @@ void ctui_textview_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     tv->top_row = 0;
   }
   if (wrapped(tv)) { /* a resize may have left fewer rows in top */
-    int n = line_rows(tv, tv->top, self->w);
+    int n = line_rows(tv, tv->top, w);
     tv->top_row = tv->top_row < n ? tv->top_row : n - 1;
   } else {
     tv->top_row = 0;
@@ -281,19 +331,24 @@ void ctui_textview_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     const char *s, *e;
     line_span(tv, i, &s, &e);
     if (!tv->wrap) {
-      row(self, comp, r++, s, e, tv->hscroll, self->w, st);
+      row(self, comp, r++, s, e, tv->hscroll, w, st);
       continue;
     }
     int skip = i == tv->top ? tv->top_row : 0;
     do {
-      const char *end, *next = wrap_row(s, e, self->w, &end);
+      const char *end, *next = wrap_row(s, e, w, &end);
       if (skip) {
         skip--;
       } else {
-        row(self, comp, r++, s, end, 0, self->w, st);
+        row(self, comp, r++, s, end, 0, w, st);
       }
       s = next;
     } while (s < e && r < self->h);
+  }
+  if (tv->bar_shown) {
+    int total, first;
+    bar_rows(tv, &total, &first);
+    ctui_scrollbar_render(self, comp, st, 0, w, self->h, total, self->h, first);
   }
 }
 

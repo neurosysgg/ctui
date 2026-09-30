@@ -10,6 +10,12 @@ static int body_rows(const CTUI_TABLE *t, int h) {
   return n > 0 ? n : 0;
 }
 
+int ctui_table_width(const CTUI_TABLE *t, int w, int h) {
+  int bar = w > 1 && ctui_scrollbar_wanted(ctui_style_of(t->style), t->count,
+                                           body_rows(t, h));
+  return w - bar;
+}
+
 static void scroll_into_view(CTUI_TABLE *t, int rows) {
   if (t->selected < t->scroll) {
     t->scroll = t->selected;
@@ -111,6 +117,17 @@ void ctui_table_column_span(const CTUI_TABLE *t, int w, int i, int *x,
 
 int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
                      const CTUI_MOUSE_EVENT_DATA *m) {
+  int cols = ctui_table_width(t, self->w, self->h);
+  if (cols < self->w) {
+    t->page = body_rows(t, self->h);
+    int first = ctui_scrollbar_mouse(&t->bar, self, t->header ? 1 : 0, cols,
+                                     t->page, t->count, t->page, t->scroll, m);
+    if (first >= 0) { /* the cursor keeps its line of the view */
+      int by = first - t->scroll;
+      t->scroll = first;
+      return by ? move(t, t->selected + by) : CTUI_TABLE_NONE;
+    }
+  }
   if (!ctui_widget_contains(self, m->row, m->col)) {
     return CTUI_TABLE_NONE;
   }
@@ -131,7 +148,7 @@ int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
     }
     for (int c = 0; c < t->column_count; c++) {
       int x, w;
-      ctui_table_column_span(t, self->w, c, &x, &w);
+      ctui_table_column_span(t, cols, c, &x, &w);
       if (col >= x && col < x + w) {
         t->sort_desc = t->sort_col == c ? !t->sort_desc : 0;
         t->sort_col = c;
@@ -175,11 +192,12 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   if (self->w <= 0) {
     return;
   }
+  int cols = ctui_table_width(t, self->w, self->h);
   int row = 0;
   if (t->header && self->h > 0) {
     for (int c = 0; c < t->column_count; c++) {
       int x, w;
-      ctui_table_column_span(t, self->w, c, &x, &w);
+      ctui_table_column_span(t, cols, c, &x, &w);
       char title[128];
       snprintf(title, sizeof title, "%s%s", t->columns[c].title,
                c != t->sort_col ? ""
@@ -199,17 +217,21 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     if (sel) {
       fg = marked ? st->mark_fg : st->sel_fg;
       bg = st->sel_bg;
-      for (int c = 0; c < self->w; c++) {
+      for (int c = 0; c < cols; c++) {
         ctui_widget_putc(self, comp, row, c, ' ', fg, bg);
       }
     }
     for (int c = 0; c < t->column_count; c++) {
       int x, w;
-      ctui_table_column_span(t, self->w, c, &x, &w);
+      ctui_table_column_span(t, cols, c, &x, &w);
       scratch[0] = '\0';
       const char *s = t->cell(t->ctx, r, c, scratch, sizeof scratch);
       draw_cell(self, comp, row, x, w, s, t->columns[c].align_right, fg, bg);
     }
+  }
+  if (cols < self->w) {
+    ctui_scrollbar_render(self, comp, st, t->header ? 1 : 0, cols, t->page,
+                          t->count, t->page, t->scroll);
   }
 }
 

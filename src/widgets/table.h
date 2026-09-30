@@ -2,6 +2,7 @@
 #define CTUI_WIDGETS_TABLE_H
 
 #include "../ctui.h"
+#include "scrollbar.h"
 #include "style.h"
 
 /* A table: columns with a header, one row per item, a cursor row, marks.
@@ -16,7 +17,9 @@
  * marks). Mouse: a click selects a row, a click on the selected row
  * activates it, a right click selects it and asks for its menu, the wheel
  * moves three rows, a header click sorts by that column (again: the
- * other way). */
+ * other way). More rows than fit get a scrollbar in the last column where
+ * the style has a control hook (scrollbar.h): scrolling by it takes the
+ * cursor along, so it stays on the same line of the view. */
 typedef struct {
   const char *title;
   int width;       /* > 0: that many columns; 0: an even share of the rest */
@@ -42,6 +45,7 @@ typedef struct {
   void *ctx;
   const CTUI_STYLE *style;
   int page; /* rows shown by the last render (pgup/pgdn) */
+  CTUI_SCROLLBAR bar;
 } CTUI_TABLE;
 
 /* what a key or a click did */
@@ -67,10 +71,14 @@ int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
 
 void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp);
 
-/* column i's left edge and width in a table w columns wide, as the render
- * lays them out: for an app drawing over a cell (a control of its own
- * where the cell's text is). Row r is at line r - scroll (+ 1 with a
- * header). */
+/* the columns' share of a table drawn w x h: w, less the scrollbar's
+ * column when it shows */
+int ctui_table_width(const CTUI_TABLE *t, int w, int h);
+
+/* column i's left edge and width in a table whose columns take w (above),
+ * as the render lays them out: for an app drawing over a cell (a control
+ * of its own where the cell's text is). Row r is at line r - scroll (+ 1
+ * with a header). */
 void ctui_table_column_span(const CTUI_TABLE *t, int w, int i, int *x,
                             int *width);
 

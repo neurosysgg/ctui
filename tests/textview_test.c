@@ -12,6 +12,21 @@ static int key(CTUI_APP *app, CTUI_SCREEN *screen, CTUI_KEYTYPE type) {
   return ctui_test_key(app, screen, type, 0);
 }
 
+/* a style's control hook: '#' down the bar, what was asked kept */
+static CTUI_CONTROL bar_asked;
+
+static int bar_hook(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row, int col,
+                    int cols, const CTUI_CONTROL *c, unsigned char bg,
+                    void *arg) {
+  (void)cols;
+  (void)arg;
+  bar_asked = *c;
+  for (int r = 0; r < c->rows; r++) {
+    ctui_widget_putc(self, comp, row + r, col, '#', 0, bg);
+  }
+  return 1;
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -120,6 +135,58 @@ int main(void) {
   CTUI_TEST_ASSERT(tv.top_row == 0 &&
                        ctui_test_row_contains(screen, 1, "0123456789abcdefghij"),
                    "wider: a row gone from under the view is clamped");
+
+  /* a scrollbar where the style has a hook: 10 lines, 4 rows shown */
+  static const char *lines = "l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\n";
+  CTUI_STYLE hooked = ctui_style_default;
+  hooked.control = bar_hook;
+  tv.style = &hooked;
+  tv.wrap = 0;
+  ctui_textview_set(&tv, lines, strlen(lines));
+  w.w = 10;
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(tv.bar_shown && tv.width == 9 && bar_asked.value == 0 &&
+                       bar_asked.max == 10 && bar_asked.span == 4 &&
+                       bar_asked.rows == 4 &&
+                       ctui_test_cell(screen, 1, 10) == '#',
+                   "longer than the pane: the bar in its last column "
+                   "(%d of %d)",
+                   bar_asked.value, bar_asked.max);
+  m = (CTUI_MOUSE_EVENT_DATA){.action = CTUI_MOUSE_PRESS, .row = 4, .col = 10};
+  ctui_handle_event(&ev);
+  CTUI_TEST_ASSERT(tv.top == 3, "a click under the thumb: a page less one (%d)",
+                   tv.top);
+  m.row = 1 + 2; /* the thumb: rows 2-3 of the pane now */
+  ctui_handle_event(&ev);
+  m = (CTUI_MOUSE_EVENT_DATA){.action = CTUI_MOUSE_MOTION, .row = 9, .col = 3};
+  ctui_handle_event(&ev);
+  CTUI_TEST_ASSERT(tv.top == 6, "dragged below the pane: the end (%d)", tv.top);
+  m.action = CTUI_MOUSE_RELEASE;
+  ctui_handle_event(&ev);
+
+  /* wrapped: the bar counts rows -- 12 of them at 9 columns */
+  static const char *wide = "0123456789abcdefghij\nx\ny\nz\n"
+                            "0123456789abcdefghij\nq\nr\ns\n";
+  tv.wrap = 1;
+  ctui_textview_set(&tv, wide, strlen(wide));
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(tv.bar_shown && bar_asked.max == 12 && bar_asked.value == 0,
+                   "wrapped: all the rows at the text's width (%d)",
+                   bar_asked.max);
+  key(&app, screen, CTUI_KEY_DOWN);
+  key(&app, screen, CTUI_KEY_DOWN);
+  CTUI_TEST_ASSERT(tv.top == 0 && tv.top_row == 2 && bar_asked.value == 2,
+                   "inside a line: its rows count (%d)", bar_asked.value);
+  key(&app, screen, CTUI_KEY_END);
+  CTUI_TEST_ASSERT(bar_asked.value == 12 - 4, "end: the last page (%d)",
+                   bar_asked.value);
+  key(&app, screen, CTUI_KEY_HOME);
+  CTUI_TEST_ASSERT(bar_asked.value == 0, "home: back (%d)", bar_asked.value);
+  const char *three = "a\nb\nc\n";
+  ctui_textview_set(&tv, three, strlen(three));
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(!tv.bar_shown && tv.width == 10,
+                   "what fits gets none, and the whole width");
 
   ctui_textview_free(&tv);
   ctui_app_free(&app);

@@ -41,6 +41,27 @@ static int on_value(CTUI_WIDGET *self, CTUI_EVENT *ev) {
   return 0;
 }
 
+/* a style's control hook: '#' down the bar, what was asked kept */
+static CTUI_CONTROL bar_asked;
+static int bar_row, bar_col, bar_declines;
+
+static int draw_bar(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row, int col,
+                    int cols, const CTUI_CONTROL *c, unsigned char bg,
+                    void *arg) {
+  (void)cols;
+  (void)arg;
+  if (bar_declines) {
+    return 0;
+  }
+  bar_asked = *c;
+  bar_row = row;
+  bar_col = col;
+  for (int r = 0; r < c->rows; r++) {
+    ctui_widget_putc(self, comp, row + r, col, '#', 0, bg);
+  }
+  return 1;
+}
+
 static void click(CTUI_APP *app, CTUI_SCREEN *screen, int row, int col,
                   int button, CTUI_MOUSE_ACTION action) {
   CTUI_MOUSE_EVENT_DATA m = {
@@ -151,6 +172,67 @@ int main(void) {
   strcpy(got, "none");
   click(&app, screen, 9, 28, 0, CTUI_MOUSE_PRESS);
   CTUI_TEST_ASSERT(!strcmp(got, "none"), "a click outside is ignored");
+
+  /* a style with a control hook: a scrollbar in the last column, rows 2-6
+   * of column 21; 11 rows, 5 shown: a thumb of 2 */
+  CTUI_STYLE hooked = ctui_style_default;
+  hooked.control = draw_bar;
+  t.style = &hooked;
+  ctui_test_key(&app, screen, CTUI_KEY_HOME, 0);
+  CTUI_TEST_ASSERT(bar_asked.kind == CTUI_CONTROL_SCROLLBAR &&
+                       bar_asked.value == 0 && bar_asked.max == N &&
+                       bar_asked.span == 5 && bar_asked.rows == 5 &&
+                       bar_row == 1 && bar_col == 19,
+                   "the hook is asked for the bar: first 0 of %d, 5 shown, "
+                   "5 rows at (1, 19) (%d of %d, %d, %d at (%d, %d))",
+                   N, bar_asked.value, bar_asked.max, bar_asked.span,
+                   bar_asked.rows, bar_row, bar_col);
+  CTUI_TEST_ASSERT(ctui_table_width(&t, 20, 6) == 19 &&
+                       ctui_test_cell(screen, 3, 20) == '0' &&
+                       ctui_test_cell(screen, 2, 21) == '#' &&
+                       ctui_test_cell(screen, 6, 21) == '#' &&
+                       ctui_test_cell(screen, 1, 21) != '#',
+                   "the columns give it their last one, the header row "
+                   "stays");
+  click(&app, screen, 5, 21, 0, CTUI_MOUSE_PRESS);
+  CTUI_TEST_ASSERT(t.scroll == 4 && t.selected == 4 && !strcmp(got, "moved"),
+                   "a click under the thumb: a page less one, the cursor "
+                   "along (%d, %d)",
+                   t.scroll, t.selected);
+  click(&app, screen, 1 + 1 + 2, 21, 0, CTUI_MOUSE_PRESS); /* the thumb */
+  CTUI_MOUSE_EVENT_DATA away = {.action = CTUI_MOUSE_MOTION, .row = 0};
+  CTUI_TEST_ASSERT(ctui_scrollbar_held(&away),
+                   "held: a motion anywhere is the bar's");
+  click(&app, screen, 6, 21, 0, CTUI_MOUSE_MOTION);
+  CTUI_TEST_ASSERT(t.scroll == N - 5 && t.selected == 6,
+                   "dragging the thumb to the bottom: the last page (%d, %d)",
+                   t.scroll, t.selected);
+  click(&app, screen, 0, 5, 0, CTUI_MOUSE_MOTION);
+  CTUI_TEST_ASSERT(t.scroll == 0 && t.selected == 0,
+                   "the drag goes on above the table: the top (%d, %d)",
+                   t.scroll, t.selected);
+  click(&app, screen, 0, 5, 0, CTUI_MOUSE_RELEASE);
+  click(&app, screen, 6, 21, 0, CTUI_MOUSE_MOTION);
+  CTUI_TEST_ASSERT(t.scroll == 0 && !t.bar.dragging &&
+                       !ctui_scrollbar_held(&away),
+                   "released: motion no longer scrolls");
+  click(&app, screen, 1 + 1, 21, 0, CTUI_MOUSE_PRESS);
+  away.action = CTUI_MOUSE_PRESS;
+  CTUI_TEST_ASSERT(t.bar.dragging && !ctui_scrollbar_held(&away) &&
+                       !t.bar.dragging,
+                   "a press elsewhere (its release never seen) lets go");
+  bar_declines = 1;
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(ctui_test_cell(screen, 2, 21) == 0x2503 &&
+                       ctui_test_cell(screen, 4, 21) == 0x2502,
+                   "a hook that declines leaves it to the glyphs");
+  bar_declines = 0;
+  t.style = NULL;
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(ctui_table_width(&t, 20, 6) == 20 &&
+                       ctui_test_cell(screen, 3, 21) == '0',
+                   "no hook: no bar, the full width");
+  ctui_table_select(&t, 6);
 
   t.count = 2;
   ctui_app_render(&app, screen);

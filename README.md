@@ -167,7 +167,8 @@ else.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
   `menu`, `status`, `debug_info`, `dump_palette`, `grid`, `list`,
   `periodic`, `kitty_image`, `clock`, and the app widgets sharing one
-  `style`: `entry`, `table`, `dialog`, `textview`, `form`, `tabs`), each a
+  `style`: `entry`, `table`, `dialog`, `textview`, `form`, `tabs`, and
+  the `scrollbar` the table and textview show), each a
   small `.c`/`.h` pair built entirely on the public `ctui.h` API.
 - `examples_apps/` — real, runnable ctui apps, one subfolder each
   (`examples_apps/<name>/main.c` + an optional local `widgets/`):

@@ -252,6 +252,19 @@ terminal resize.
       Then `ctui_table_column_span()` (table.h, the render's own column
       layout made public): an app drawing a control of its own over a
       cell -- a volume bar in a row -- needs where the cell is.
+      Then scrollbars (`widgets/scrollbar.h`): a table or textview
+      holding more than it shows gives its last column to one when the
+      style has a control hook (without one: nothing changes). The hook
+      is asked for `CTUI_CONTROL_SCROLLBAR` (first shown of total, `span`
+      showing, down `rows` cells: `CTUI_CONTROL` gained both); declined,
+      it is `│` with a `┃` thumb. A drag on the thumb scrolls with it
+      (on past the widget's edges until the release), a click beside it
+      pages; a table's cursor keeps its line of the view. Wrapped text
+      counts rows (every row once per text and width, the rows above the
+      view kept up as it moves). `ctui_table_width()`: the columns' share
+      for an app drawing over a cell. `CTUI_CONTROL` initializers are
+      designated now (the struct grows). Tested in `table_test.c` and
+      `textview_test.c`.
 
 - [x] **Frames and input without a terminal** (2026-09-29, for ctui-wm's
       keyboard OLED: widgets drawn into a 128x40 display, later driven

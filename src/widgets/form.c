@@ -262,8 +262,11 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
     }
     break;
   case CTUI_FORM_TOGGLE: {
-    CTUI_CONTROL c = {CTUI_CONTROL_TOGGLE, !!r->value, 1, focused,
-                      r->disabled};
+    CTUI_CONTROL c = {.kind = CTUI_CONTROL_TOGGLE,
+                      .value = !!r->value,
+                      .max = 1,
+                      .focused = focused,
+                      .disabled = r->disabled};
     if (w >= 3 && ctui_style_control(st, self, comp, y, x, 3, &c, hbg)) {
       used = 3;
       break;
@@ -287,8 +290,11 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
     int span = r->max - r->min, at = span > 0 ? (r->value - r->min) *
                                                     (bar - 1) / span
                                               : 0;
-    CTUI_CONTROL ctl = {CTUI_CONTROL_SLIDER, span > 0 ? r->value - r->min : 0,
-                        span > 0 ? span : 0, focused, r->disabled};
+    CTUI_CONTROL ctl = {.kind = CTUI_CONTROL_SLIDER,
+                        .value = span > 0 ? r->value - r->min : 0,
+                        .max = span > 0 ? span : 0,
+                        .focused = focused,
+                        .disabled = r->disabled};
     int drawn = ctui_style_control(st, self, comp, y, x, bar, &ctl, bg);
     for (int c = 0; c < bar && !drawn; c++) {
       uint32_t ch = c == at ? 0x25cf : c < at ? 0x2501 : 0x2500; /* ● ━ ─ */

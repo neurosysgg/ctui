@@ -4,25 +4,30 @@
 #include "../ctui.h"
 
 /* A control an app widget is about to draw as glyphs (a form's toggle and
- * slider, a dialog's progress bar), offered to the style's `control` hook
- * first: an app that draws its controls itself -- as pixels, say -- does it
- * there. */
+ * slider, a dialog's progress bar, a view's scrollbar), offered to the
+ * style's `control` hook first: an app that draws its controls itself --
+ * as pixels, say -- does it there. */
 typedef enum {
-  CTUI_CONTROL_TOGGLE,   /* value 0/1 of max 1 */
-  CTUI_CONTROL_SLIDER,   /* value of max: where its thumb is */
-  CTUI_CONTROL_PROGRESS, /* value of max: how far it is filled */
+  CTUI_CONTROL_TOGGLE,    /* value 0/1 of max 1 */
+  CTUI_CONTROL_SLIDER,    /* value of max: where its thumb is */
+  CTUI_CONTROL_PROGRESS,  /* value of max: how far it is filled */
+  CTUI_CONTROL_SCROLLBAR, /* value = the first shown of max, span of them
+                           * showing; one column, rows cells down */
 } CTUI_CONTROL_KIND;
 
 typedef struct {
   CTUI_CONTROL_KIND kind;
   int value, max; /* 0 <= value <= max */
   int focused, disabled;
+  int span; /* a scrollbar's: how many of max show */
+  int rows; /* the cells it takes downwards; 0 = the one row */
 } CTUI_CONTROL;
 
 /* Draws c over the cols cells from (row, col) of self (widget
- * coordinates, as ctui_widget_putc() takes them) on bg. Returns non-zero
- * if it drew them all; 0 leaves the control to the widget, which then
- * draws its glyphs (so a hook may decline per call: no room, no graphics).
+ * coordinates, as ctui_widget_putc() takes them; c->rows rows of them
+ * when set) on bg. Returns non-zero if it drew them all; 0 leaves the
+ * control to the widget, which then draws its glyphs (so a hook may
+ * decline per call: no room, no graphics).
  * The cells are the ones the glyphs would take: clicks and drags don't
  * change. */
 typedef int (*CTUI_CONTROL_DRAW)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp,
@@ -34,7 +39,8 @@ typedef int (*CTUI_CONTROL_DRAW)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp,
  * tabs) share, so an app themes all of them in one place: each takes a
  * `const CTUI_STYLE *style`, NULL meaning ctui_style_default. Basic
  * CTUI_COLOR_* values. `control` (NULL: none) is asked before a control
- * is drawn as glyphs. */
+ * is drawn as glyphs; with one set, a table or a textview longer than its
+ * pane also shows a scrollbar in its last column (widgets/scrollbar.h). */
 typedef struct {
   unsigned char fg, bg;
   unsigned char dim_fg;         /* hints, headers, secondary text */

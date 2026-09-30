@@ -136,7 +136,9 @@ void ctui_dialog_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     char pct[16];
     snprintf(pct, sizeof pct, " %3d%%", p);
     int bar = iw - (int)strlen(pct), full = bar * p / 100;
-    CTUI_CONTROL ctl = {CTUI_CONTROL_PROGRESS, p < 0 ? 0 : p, 100, 0, 0};
+    CTUI_CONTROL ctl = {.kind = CTUI_CONTROL_PROGRESS,
+                        .value = p < 0 ? 0 : p,
+                        .max = 100};
     int drawn = ctui_style_control(st, self, comp, row, x + 2, bar, &ctl, bg);
     for (int c = 0; c < bar && !drawn; c++) {
       ctui_widget_putc(self, comp, row, x + 2 + c, c < full ? 0x2588 : 0x2591,
