@@ -1139,3 +1139,82 @@ void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
             "[CTUI:GFX] - kitty_place_file @ tick %d (id=%u, %dx%d) %s\n",
             ctui_tick_advance(), image_id, cols, rows, path);
 }
+
+/* the escapes ctui_gfx_kitty_put() / _unput() batch, into out (cap
+ * bytes); the length, or 0 if it doesn't fit or the arguments are
+ * unusable. Non-static only for tests/kitty_protocol_test.c, like
+ * ctui_gfx_kitty_place_file_escape(); not in gfx.h. */
+size_t ctui_gfx_kitty_put_escape(char *out, size_t cap, unsigned int image_id,
+                                 unsigned int placement_id, int row, int col,
+                                 int cols, int rows, int z) {
+  if (image_id == 0 || placement_id == 0 || row < 1 || col < 1 || cols < 1 ||
+      rows < 1) {
+    return 0;
+  }
+  /* C=1: the cursor stays (see ctui_gfx_kitty_display()) */
+  CTUI_KITTY_GFX g = {.a = 'p',
+                      .i = image_id,
+                      .p = placement_id,
+                      .c = (uint32_t)cols,
+                      .r = (uint32_t)rows,
+                      .z = z,
+                      .q = 1,
+                      .C = 1};
+  int n = snprintf(out, cap, "\x1b[%d;%dH", row, col);
+  if (n < 0 || (size_t)n >= cap) {
+    return 0;
+  }
+  const char *err = NULL;
+  size_t k = ctui_kitty_gfx_build(&g, NULL, 0, out + n, cap - (size_t)n, &err);
+  if (k == 0) {
+    ctui_logf(E_WRN, "[CTUI:GFX] - kitty put: %s\n", err);
+    return 0;
+  }
+  return (size_t)n + k;
+}
+
+size_t ctui_gfx_kitty_unput_escape(char *out, size_t cap, unsigned int image_id,
+                                   unsigned int placement_id) {
+  if (image_id == 0 || placement_id == 0) {
+    return 0;
+  }
+  /* d=i: the placement only, the image data stays */
+  CTUI_KITTY_GFX g = {
+      .a = 'd', .d = 'i', .i = image_id, .p = placement_id, .q = 1};
+  const char *err = NULL;
+  return ctui_kitty_gfx_build(&g, NULL, 0, out, cap, &err);
+}
+
+void ctui_gfx_kitty_put(unsigned int image_id, unsigned int placement_id,
+                        int row, int col, int cols, int rows, int z) {
+  char out[160];
+  size_t n =
+      isatty(STDOUT_FILENO)
+          ? ctui_gfx_kitty_put_escape(out, sizeof out, image_id, placement_id,
+                                      row, col, cols, rows, z)
+          : 0;
+  if (n == 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty_put rejected @ tick %d (id=%u, p=%u, "
+              "%dx%d @ %d,%d)\n",
+              ctui_tick_advance(), image_id, placement_id, cols, rows, row,
+              col);
+    return;
+  }
+  kitty_batch_append(out, n);
+}
+
+void ctui_gfx_kitty_unput(unsigned int image_id, unsigned int placement_id) {
+  char out[96];
+  size_t n =
+      isatty(STDOUT_FILENO)
+          ? ctui_gfx_kitty_unput_escape(out, sizeof out, image_id, placement_id)
+          : 0;
+  if (n == 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty_unput rejected @ tick %d (id=%u, p=%u)\n",
+              ctui_tick_advance(), image_id, placement_id);
+    return;
+  }
+  kitty_batch_append(out, n);
+}

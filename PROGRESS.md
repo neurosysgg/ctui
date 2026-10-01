@@ -237,6 +237,20 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Kitty placements under text** (2026-10-01, for ctui-wm's web
+      pages: their buttons and text fields drawn in its "look" with the
+      label still text): a placeholder cell can't hold text, and
+      `ctui_gfx_kitty_display()` sends pixels every time.
+      `ctui_gfx_kitty_put()` places an image the terminal already holds
+      (`ctui_gfx_kitty_place_file()`'s) at a cell, scaled, at a z-index
+      (`a=p,i,p,c,r,z,C=1`), `ctui_gfx_kitty_unput()` takes one placement
+      away (`d=i` with its `p`: the image stays); batched like every kitty
+      escape. `CTUI_GFX_KITTY_Z_UNDER_BG` names kitty's INT32_MIN/2: below
+      it an image is drawn under cells with a background, so only cells
+      left on the default one show it. Tested in `kitty_protocol_test.c`
+      (the escapes, what's refused); `tools/check_kitty_protocol.py`
+      agrees (521 commands, kitty 0.49.1). Seen in kitty: ctui-wm's
+      ctui-web draws a page's controls that way.
 - [x] **A control hook in the style** (2026-09-30, for ctui-wm's apps:
       their controls drawn as pixels from its "look", like its panels'):
       the app widgets drew their controls as glyphs with no way in.

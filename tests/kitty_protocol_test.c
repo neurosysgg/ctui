@@ -60,6 +60,15 @@ extern size_t ctui_gfx_kitty_place_file_escape(char *out, size_t cap,
                                                const char *path, int cols,
                                                int rows);
 
+/* and ctui_gfx_kitty_put() / _unput()'s */
+extern size_t ctui_gfx_kitty_put_escape(char *out, size_t cap,
+                                        unsigned int image_id,
+                                        unsigned int placement_id, int row,
+                                        int col, int cols, int rows, int z);
+extern size_t ctui_gfx_kitty_unput_escape(char *out, size_t cap,
+                                          unsigned int image_id,
+                                          unsigned int placement_id);
+
 /* same again: CTUI_GFX_KITTY_IMAGE's t=s escape (with its frame name
  * linked), and switches no terminal can flip for a headless test */
 extern size_t ctui_gfx_kitty_image_commit_escape(CTUI_GFX_KITTY_IMAGE *img,
@@ -387,6 +396,38 @@ static void test_place_file_escape(void) {
       "in an RGB fg), an empty path, no cells, a buffer too small");
 }
 
+static void test_put_escape(void) {
+  char out[160];
+  size_t n = ctui_gfx_kitty_put_escape(out, sizeof out, 7, 3, 5, 12, 6, 1,
+                                       CTUI_GFX_KITTY_Z_UNDER_BG - 1);
+  const char *want =
+      "\x1b[5;12H\x1b_Ga=p,i=7,p=3,q=1,c=6,r=1,z=-1073741825,C=1\x1b\\";
+  CTUI_TEST_ASSERT(n == strlen(want) && memcmp(out, want, n) == 0,
+                   "put: the cursor to the cell, then a placement (a=p) of "
+                   "image 7 as placement 3 over 6x1 cells at its z, the "
+                   "cursor left where it is (C=1): got %.*s",
+                   (int)n, out);
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_put_escape(out, sizeof out, 0, 3, 5, 12, 6, 1, 0) == 0 &&
+          ctui_gfx_kitty_put_escape(out, sizeof out, 7, 0, 5, 12, 6, 1, 0) ==
+              0 &&
+          ctui_gfx_kitty_put_escape(out, sizeof out, 7, 3, 0, 12, 6, 1, 0) ==
+              0 &&
+          ctui_gfx_kitty_put_escape(out, sizeof out, 7, 3, 5, 12, 0, 1, 0) ==
+              0 &&
+          ctui_gfx_kitty_put_escape(out, 12, 7, 3, 5, 12, 6, 1, 0) == 0,
+      "put refuses image or placement id 0, a cell off the screen, no "
+      "cells, a buffer too small");
+  n = ctui_gfx_kitty_unput_escape(out, sizeof out, 7, 3);
+  want = "\x1b_Ga=d,d=i,i=7,p=3,q=1\x1b\\";
+  CTUI_TEST_ASSERT(n == strlen(want) && memcmp(out, want, n) == 0,
+                   "unput: that placement deleted, the image kept (d=i): "
+                   "got %.*s",
+                   (int)n, out);
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_unput_escape(out, sizeof out, 7, 0) == 0,
+                   "unput refuses placement 0 (d=i would take them all)");
+}
+
 /* the shm name an image escape carries (its base64 payload) */
 static int escape_name(const char *esc, size_t n, char *name, size_t cap) {
   const char *keys = memchr(esc, '_', n);
@@ -541,6 +582,7 @@ int main(void) {
   test_kitty_apc_complete();
   test_kitty_probe_timing();
   test_place_file_escape();
+  test_put_escape();
   test_kitty_image();
 
   return ctui_test_summary();

@@ -151,6 +151,17 @@ just the type and the `CTUI_COLOR_*` basic-color enum.
   Kitty escape; ids up to 24 bits, paths up to 2048 bytes (kitty's
   limit).
 
+- `ctui_gfx_kitty_put(image_id, placement_id, row, col, cols, rows, z)`
+  / `ctui_gfx_kitty_unput(image_id, placement_id)` — a placement of an
+  image the terminal already holds (one `ctui_gfx_kitty_place_file()`
+  loaded, say) at a cell, scaled to `cols` x `rows`, at z-index `z`
+  (`a=p`; the same pair again moves it), and taking it away (`d=i`, the
+  image kept). Not a cell: below 0 text draws over it, and below
+  `CTUI_GFX_KITTY_Z_UNDER_BG` only cells on the default background show
+  it -- a bevel under a label, which anything painted over hides. The
+  caller tracks what it put and takes away what moved or went. Batched,
+  so safe from a plain `render()`.
+
 Every kitty escape these send is built by `kitty.h` below.
 
 ## `kitty.h` — kitty's escape codes, built so they parse

@@ -186,6 +186,29 @@ uint32_t ctui_gfx_kitty_diacritic(int n);
 void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
                                int cols, int rows);
 
+/* a placement of an image the terminal already holds (one placed with
+ * ctui_gfx_kitty_place_file(), say) at row/col (1-based, as
+ * ctui_gfx_kitty_display()), scaled to cols x rows cells, at z-index z,
+ * as placement placement_id of it (1..0xFFFFFFFF; placing the same pair
+ * again moves it). Unlike a placeholder this is no cell: text draws over
+ * it when z < 0, and below CTUI_GFX_KITTY_Z_UNDER_BG only cells left on
+ * the default background show it -- a bevel under a label, which a
+ * dialog's painted cells cover. Nothing moves or clears it with the
+ * text: the caller takes it away (ctui_gfx_kitty_unput()) when what it
+ * belongs to moves or goes. Batched (written after the frame's text, so
+ * safe from a plain render()); only once CTUI_GFX_KITTY was negotiated.
+ * No-op (logs E_WRN) if stdout isn't a real terminal or the arguments
+ * are unusable. */
+void ctui_gfx_kitty_put(unsigned int image_id, unsigned int placement_id,
+                        int row, int col, int cols, int rows, int z);
+
+/* takes placement placement_id of image_id away (the image stays) */
+void ctui_gfx_kitty_unput(unsigned int image_id, unsigned int placement_id);
+
+/* kitty draws images below this z-index under cells with a non-default
+ * background (its INT32_MIN / 2) */
+#define CTUI_GFX_KITTY_Z_UNDER_BG (-1073741824)
+
 /* issues the one real write() for every Kitty escape batched this frame
  * by ctui_gfx_kitty_display()/ctui_gfx_kitty_delete() (kitty_batch_append(),
  * core/gfx.c), then resets the batch for the next frame. Collapses what
