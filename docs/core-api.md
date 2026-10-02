@@ -151,6 +151,14 @@ just the type and the `CTUI_COLOR_*` basic-color enum.
   Kitty escape; ids up to 24 bits, paths up to 2048 bytes (kitty's
   limit).
 
+- `ctui_gfx_kitty_frame_file(image_id, path, gap_ms)` /
+  `ctui_gfx_kitty_animate(image_id, first_gap_ms)` — an animation of an
+  image `ctui_gfx_kitty_place_file()` placed: each further frame a PNG of
+  the same size by path (`a=f`, shown `gap_ms`; 0 = kitty's default),
+  then the frames run in a loop (`a=a`, frame 1 shown `first_gap_ms`).
+  Kitty plays them itself: nothing redraws, the placeholders stay.
+  Re-placing the id drops the frames.
+
 - `ctui_gfx_kitty_put(image_id, placement_id, row, col, cols, rows, z)`
   / `ctui_gfx_kitty_unput(image_id, placement_id)` — a placement of an
   image the terminal already holds (one `ctui_gfx_kitty_place_file()`

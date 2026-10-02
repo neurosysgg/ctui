@@ -1140,6 +1140,84 @@ void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
             ctui_tick_advance(), image_id, cols, rows, path);
 }
 
+/* the escape ctui_gfx_kitty_frame_file() batches, into out (cap bytes);
+ * its length, or 0 if it doesn't fit or the arguments are unusable.
+ * Non-static only for tests/kitty_protocol_test.c; not in gfx.h. */
+size_t ctui_gfx_kitty_frame_file_escape(char *out, size_t cap,
+                                        unsigned int image_id, const char *path,
+                                        int gap_ms) {
+  if (image_id == 0 || image_id > 0xFFFFFFu || path == NULL || !path[0] ||
+      gap_ms < 0) {
+    return 0;
+  }
+  /* kitty reads a=f's z as the frame's gap: a whole frame from the file
+   * (f=100,t=f) on a blank canvas, nothing composed under it */
+  CTUI_KITTY_GFX g = {.a = 'f',
+                      .f = 100,
+                      .t = 'f',
+                      .i = image_id,
+                      .z = gap_ms,
+                      .q = 1};
+  const char *err = NULL;
+  size_t n = ctui_kitty_gfx_build(&g, path, strlen(path), out, cap, &err);
+  if (n == 0) {
+    ctui_logf(E_WRN, "[CTUI:GFX] - kitty frame_file: %s (%s)\n", err, path);
+  }
+  return n;
+}
+
+void ctui_gfx_kitty_frame_file(unsigned int image_id, const char *path,
+                               int gap_ms) {
+  if (!isatty(STDOUT_FILENO)) {
+    return;
+  }
+  char out[64 + (CTUI_KITTY_MAX_NAME + 2) / 3 * 4];
+  size_t n =
+      ctui_gfx_kitty_frame_file_escape(out, sizeof out, image_id, path, gap_ms);
+  if (n == 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:GFX] - kitty_frame_file rejected @ tick %d (id=%u)\n",
+              ctui_tick_advance(), image_id);
+    return;
+  }
+  kitty_batch_append(out, n);
+}
+
+/* the escape ctui_gfx_kitty_animate() batches (as above) */
+size_t ctui_gfx_kitty_animate_escape(char *out, size_t cap,
+                                     unsigned int image_id, int first_gap_ms) {
+  if (image_id == 0 || image_id > 0xFFFFFFu || first_gap_ms < 0) {
+    return 0;
+  }
+  /* frame 1's gap (r=1,z=), then run it (s=3), looping for ever (v=1) */
+  CTUI_KITTY_GFX g = {.a = 'a',
+                      .i = image_id,
+                      .r = 1,
+                      .z = first_gap_ms,
+                      .s = 3,
+                      .v = 1,
+                      .q = 1};
+  const char *err = NULL;
+  size_t n = ctui_kitty_gfx_build(&g, NULL, 0, out, cap, &err);
+  if (n == 0) {
+    ctui_logf(E_WRN, "[CTUI:GFX] - kitty animate: %s\n", err);
+  }
+  return n;
+}
+
+void ctui_gfx_kitty_animate(unsigned int image_id, int first_gap_ms) {
+  if (!isatty(STDOUT_FILENO)) {
+    return;
+  }
+  char out[128];
+  size_t n =
+      ctui_gfx_kitty_animate_escape(out, sizeof out, image_id, first_gap_ms);
+  if (n == 0) {
+    return;
+  }
+  kitty_batch_append(out, n);
+}
+
 /* the escapes ctui_gfx_kitty_put() / _unput() batch, into out (cap
  * bytes); the length, or 0 if it doesn't fit or the arguments are
  * unusable. Non-static only for tests/kitty_protocol_test.c, like

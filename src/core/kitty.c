@@ -153,7 +153,8 @@ const char *ctui_kitty_gfx_check(const CTUI_KITTY_GFX *g, const void *payload,
     return "EINVAL: Query graphics command without image id";
   }
 
-  if (a == 't' || a == 'T' || a == 'q') {
+  /* a frame with data (a=f) is transmitted like an image */
+  if (a == 't' || a == 'T' || a == 'q' || (a == 'f' && n)) {
     char t = g->t ? g->t : 'd';
     if (g->f != 0 && g->f != 24 && g->f != 32 && g->f != 100) {
       return "EINVAL: Unknown image format";

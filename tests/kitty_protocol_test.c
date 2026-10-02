@@ -396,6 +396,43 @@ static void test_place_file_escape(void) {
       "in an RGB fg), an empty path, no cells, a buffer too small");
 }
 
+extern size_t ctui_gfx_kitty_frame_file_escape(char *out, size_t cap,
+                                               unsigned int image_id,
+                                               const char *path, int gap_ms);
+extern size_t ctui_gfx_kitty_animate_escape(char *out, size_t cap,
+                                            unsigned int image_id,
+                                            int first_gap_ms);
+
+static void test_animation_escapes(void) {
+  char out[256];
+  size_t n = ctui_gfx_kitty_frame_file_escape(out, sizeof out, 7, "/i.png", 90);
+  const char *want = "\x1b_Ga=f,t=f,f=100,i=7,q=1,z=90;L2kucG5n\x1b\\";
+  CTUI_TEST_ASSERT(n == strlen(want) && memcmp(out, want, n) == 0,
+                   "frame_file: a frame from a PNG by path, its gap in z "
+                   "('%.*s')",
+                   (int)n, out);
+  n = ctui_gfx_kitty_frame_file_escape(out, sizeof out, 7, "/i.png", 0);
+  want = "\x1b_Ga=f,t=f,f=100,i=7,q=1;L2kucG5n\x1b\\";
+  CTUI_TEST_ASSERT(n == strlen(want) && memcmp(out, want, n) == 0,
+                   "a gap of 0: kitty's default (no z; a negative one would "
+                   "be gapless)");
+  CTUI_TEST_ASSERT(
+      ctui_gfx_kitty_frame_file_escape(out, sizeof out, 0, "/i.png", 9) == 0 &&
+          ctui_gfx_kitty_frame_file_escape(out, sizeof out, 7, "", 9) == 0 &&
+          ctui_gfx_kitty_frame_file_escape(out, sizeof out, 7, "/i.png", -1) ==
+              0,
+      "frame_file refuses id 0, an empty path, a negative gap");
+  n = ctui_gfx_kitty_animate_escape(out, sizeof out, 7, 120);
+  want = "\x1b_Ga=a,i=7,q=1,v=1,s=3,r=1,z=120\x1b\\";
+  CTUI_TEST_ASSERT(n == strlen(want) && memcmp(out, want, n) == 0,
+                   "animate: frame 1's gap, run (s=3), loop for ever (v=1) "
+                   "('%.*s')",
+                   (int)n, out);
+  CTUI_TEST_ASSERT(ctui_gfx_kitty_animate_escape(out, sizeof out, 0, 1) == 0 &&
+                       ctui_gfx_kitty_animate_escape(out, 10, 7, 1) == 0,
+                   "animate refuses id 0, a buffer too small");
+}
+
 static void test_put_escape(void) {
   char out[160];
   size_t n = ctui_gfx_kitty_put_escape(out, sizeof out, 7, 3, 5, 12, 6, 1,
@@ -582,6 +619,7 @@ int main(void) {
   test_kitty_apc_complete();
   test_kitty_probe_timing();
   test_place_file_escape();
+  test_animation_escapes();
   test_put_escape();
   test_kitty_image();
 

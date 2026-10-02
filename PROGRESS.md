@@ -237,6 +237,19 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Kitty animations** (2026-10-02, for ctui-wm's web pages: an
+      animated GIF / WebP): kitty plays an image's frames itself, but
+      nothing here sent them. `ctui_gfx_kitty_frame_file(id, path, gap)`
+      adds a frame to an image `ctui_gfx_kitty_place_file()` placed (a
+      whole one from a PNG by path: `a=f,t=f,f=100,z=gap`; a gap of 0
+      leaves z out, kitty's 40 ms -- a negative one would be gapless),
+      `ctui_gfx_kitty_animate(id, first_gap)` sets frame 1's gap and runs
+      them for ever (`a=a,r=1,z,s=3,v=1`); batched after the placement.
+      `ctui_kitty_gfx_check()` checks an `a=f` with data as the
+      transmission it is. Tested in `kitty_protocol_test.c`;
+      `tools/check_kitty_protocol.py` still agrees (521 commands, kitty
+      0.49.1), and kitty's own parser took a placement, a frame and the
+      control (two frames, gaps 120 / 90, running).
 - [x] **Kitty placements under text** (2026-10-01, for ctui-wm's web
       pages: their buttons and text fields drawn in its "look" with the
       label still text): a placeholder cell can't hold text, and

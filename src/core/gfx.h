@@ -186,6 +186,17 @@ uint32_t ctui_gfx_kitty_diacritic(int n);
 void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
                                int cols, int rows);
 
+/* one more frame of image_id (placed with ctui_gfx_kitty_place_file()):
+ * the PNG at path, the same size as the image, shown for gap_ms (0:
+ * kitty's default, 40 ms) once ctui_gfx_kitty_animate() runs them --
+ * kitty plays the frames itself, nothing is redrawn here. Re-placing the
+ * id drops them. Batched, after the placement in the same flush. */
+void ctui_gfx_kitty_frame_file(unsigned int image_id, const char *path,
+                               int gap_ms);
+/* image_id's frames played round and round, the first shown for
+ * first_gap_ms (0: kitty's default) */
+void ctui_gfx_kitty_animate(unsigned int image_id, int first_gap_ms);
+
 /* a placement of an image the terminal already holds (one placed with
  * ctui_gfx_kitty_place_file(), say) at row/col (1-based, as
  * ctui_gfx_kitty_display()), scaled to cols x rows cells, at z-index z,
