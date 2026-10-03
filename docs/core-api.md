@@ -320,7 +320,9 @@ addEventListener()-style: widgets register interest in one
   (`CTUI_MOD_SHIFT/ALT/CTRL`, where the terminal reports them; on
   Enter/Tab/Backspace only after `ctui_kitty_keys_enable()`).
 - `CTUI_MOUSE_EVENT_DATA` — `action` (press/release/motion/scroll),
-  `button`, absolute `row/col`, `mods`. Only produced after
+  `button` (0 left, 1 middle, 2 right, `CTUI_MOUSE_BUTTON_BACK` /
+  `_FORWARD` for a mouse's side buttons, 5-6 beyond), absolute
+  `row/col`, `mods`. Only produced after
   `ctui_mouse_enable()` (`term.h`); every listener gets every report
   and hit-tests with `ctui_widget_contains()`.
 - `CTUI_FOCUS_EVENT_DATA` — `focused` (1 = the terminal window gained

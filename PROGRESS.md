@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A mouse's side buttons** (2026-10-03, for ctui-wm's browser:
+      back / forward on the mouse): SGR reports buttons 8-11 as 128-131,
+      and `resolve_mouse()` read only their low bits -- the back button
+      came out as a left click, forward as a middle one.
+      `CTUI_MOUSE_EVENT_DATA.button` is now `CTUI_MOUSE_BUTTON_BACK` (3)
+      / `CTUI_MOUSE_BUTTON_FORWARD` (4) for them, 5 and 6 for 10 and 11,
+      in presses, releases and drags; 0-2 unchanged, so handlers testing
+      `button != 0` or a range keep working. Tested in `input_test.c`.
 - [x] **Kitty animations** (2026-10-02, for ctui-wm's web pages: an
       animated GIF / WebP): kitty plays an image's frames itself, but
       nothing here sent them. `ctui_gfx_kitty_frame_file(id, path, gap)`

@@ -154,21 +154,23 @@ static int resolve_mouse(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
     return resolve_key(ev, kp, CTUI_KEY_NONE, 0, 0);
   }
 
-  int btn = (int)(b & 3);
+  /* 128-131: buttons 8-11 (back, forward, ...), as 3-6 -- before this
+   * they read as their low bits: back a left click */
+  int btn = (int)(b & 3) + ((b & 128) ? CTUI_MOUSE_BUTTON_BACK : 0);
   md->mods = ((b & 4) ? CTUI_MOD_SHIFT : 0) | ((b & 8) ? CTUI_MOD_ALT : 0) |
              ((b & 16) ? CTUI_MOD_CTRL : 0);
   md->row = (int)y - 1;
   md->col = (int)x - 1;
   if (b & 64) {
     /* 66/67 are horizontal wheel -- no action for those yet */
-    if (btn > 1) {
+    if (btn != 0 && btn != 1) {
       return resolve_key(ev, kp, CTUI_KEY_NONE, 0, 0);
     }
     md->action = btn == 0 ? CTUI_MOUSE_SCROLL_UP : CTUI_MOUSE_SCROLL_DOWN;
     md->button = -1;
   } else if (b & 32) {
     md->action = CTUI_MOUSE_MOTION;
-    md->button = btn == 3 ? -1 : btn;
+    md->button = btn == 3 && !(b & 128) ? -1 : btn;
   } else {
     md->action = final == 'M' ? CTUI_MOUSE_PRESS : CTUI_MOUSE_RELEASE;
     md->button = btn;

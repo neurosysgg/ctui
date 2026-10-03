@@ -304,6 +304,30 @@ static void test_mouse(void) {
                        md->button == 0 && md->col == 6 && md->row == 1,
                    "32 (motion) + 0: a drag with the left button held");
 
+  feed("\x1b[<128;4;4M");
+  md = next_mouse(&ev);
+  CTUI_TEST_ASSERT(md && md->action == CTUI_MOUSE_PRESS &&
+                       md->button == CTUI_MOUSE_BUTTON_BACK && md->col == 3,
+                   "128 is the back button (button 8), not a left click");
+
+  feed("\x1b[<129;4;4m");
+  md = next_mouse(&ev);
+  CTUI_TEST_ASSERT(md && md->action == CTUI_MOUSE_RELEASE &&
+                       md->button == CTUI_MOUSE_BUTTON_FORWARD,
+                   "129 is the forward button (button 9), released");
+
+  feed("\x1b[<147;4;4M");
+  md = next_mouse(&ev);
+  CTUI_TEST_ASSERT(md && md->action == CTUI_MOUSE_PRESS && md->button == 6 &&
+                       md->mods == CTUI_MOD_CTRL,
+                   "131 + 16 (ctrl): button 11 as 6, with its modifier");
+
+  feed("\x1b[<160;4;4M");
+  md = next_mouse(&ev);
+  CTUI_TEST_ASSERT(md && md->action == CTUI_MOUSE_MOTION &&
+                       md->button == CTUI_MOUSE_BUTTON_BACK,
+                   "160 (128 + 32): a drag with the back button held");
+
   CTUI_WIDGET w = ctui_widget_make(8, 3, 4, 2, NULL, NULL, NULL);
   CTUI_TEST_ASSERT(ctui_widget_contains(&w, 4, 9) &&
                        !ctui_widget_contains(&w, 5, 9) &&

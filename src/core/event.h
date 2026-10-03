@@ -66,10 +66,16 @@ typedef enum {
   CTUI_MOUSE_SCROLL_DOWN,
 } CTUI_MOUSE_ACTION;
 
+/* CTUI_MOUSE_EVENT_DATA.button for a mouse's side buttons (X11's 8 and 9,
+ * SGR's 128 and 129) */
+#define CTUI_MOUSE_BUTTON_BACK 3
+#define CTUI_MOUSE_BUTTON_FORWARD 4
+
 typedef struct {
   CTUI_MOUSE_ACTION action;
-  int button; /* 0 left, 1 middle, 2 right; -1 for motion with nothing
-               * held and for scroll */
+  int button; /* 0 left, 1 middle, 2 right, CTUI_MOUSE_BUTTON_BACK /
+               * _FORWARD (a mouse's side buttons) and 5, 6 (X11's 10, 11);
+               * -1 for motion with nothing held and for scroll */
   int row, col; /* 0-based absolute screen cell -- test against a widget
                  * with ctui_widget_contains() */
   unsigned int mods; /* CTUI_MOD_* */
