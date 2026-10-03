@@ -472,6 +472,14 @@ above into the loop described in "Life of a frame".
   resets the timer and fd-watch registries).
 - `app->quit_on_esc` — `1` after `ctui_app_init()`; set it to `0` for
   an app where ESC is an ordinary key (a shell, a launcher).
+- `app->render_begin(arg)` / `app->rendered(widget, comp, arg)` /
+  `app->render_end(comp, arg)` (+ `app->render_arg`) — optional, `NULL`
+  after `ctui_app_init()`: `ctui_app_render()` calls the first after
+  clearing the compositor, the second after every widget
+  `ctui_widget_dispatch_render()` draws (nested ones first, then the one
+  drawing them), the third before the blit. For state an app keeps across
+  a frame's widgets (images placed under text that a later widget may draw
+  over).
 - `ctui_app_quit()` — ends `ctui_app_run()` once the current event
   finishes; callable from any handler.
 - `ctui_app_render(app, screen)` / `ctui_app_resize(app, screen, rows,

@@ -237,6 +237,25 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Controls drawn under text; render hooks** (2026-10-03, for
+      ctui-wm's apps: buttons, drop-downs, text fields, group boxes and
+      dialog frames drawn in its "look"). `CTUI_CONTROL` gains the kinds
+      that carry text -- `BUTTON`, `CHOICE`, `FIELD`, `GROUP`, `FRAME` --
+      which a hook draws *under* the cells (kitty: `ctui_gfx_kitty_put()`
+      below the text); when it takes one the widget writes its text plain:
+      a form's button and choice without `[ ]` / `‹ ›` (a choice's field
+      as wide as its widest option, clicks in it stepping), a heading as
+      a group over its rows (`label` / `label_cols`: the opening its
+      heading sits in), a dialog's frame without box drawing and its
+      buttons without `sel_bg` (focus is the control's), an entry's text
+      over a field (its cursor cell keeps `sel_bg`). A hook that declines
+      (or none) leaves every glyph as before. `CTUI_APP.render_begin` /
+      `rendered` / `render_end` (+ `render_arg`): called as a frame
+      starts, after each widget `ctui_widget_dispatch_render()` draws
+      (nested ones first) and once the frame is in the compositor -- for
+      an app keeping placements across a frame's widgets (one drawn over
+      by a later widget goes). Tested in `form_test.c`, `dialog_test.c`,
+      `widget_test.c`.
 - [x] **A mouse's side buttons** (2026-10-03, for ctui-wm's browser:
       back / forward on the mouse): SGR reports buttons 8-11 as 128-131,
       and `resolve_mouse()` read only their low bits -- the back button

@@ -34,6 +34,10 @@ int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
   app->handler_cap = 0;
   app->quit_on_esc = 1;
   app->quit_requested = 0;
+  app->render_begin = NULL;
+  app->rendered = NULL;
+  app->render_end = NULL;
+  app->render_arg = NULL;
   ctui_g_app = app;
   ctui_timer_reset();
   ctui_io_reset();
@@ -90,6 +94,9 @@ void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen) {
   ctui_logf(E_INF, "[CTUI:APP] - render pass @ tick %d (%d widgets)\n",
             ctui_tick_advance(), app->count);
   ctui_compositor_clear(app->comp);
+  if (app->render_begin) {
+    app->render_begin(app->render_arg);
+  }
   for (int i = 0; i < app->count; i++) {
     CTUI_WIDGET *w = app->widgets[i];
 
@@ -112,6 +119,9 @@ void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen) {
               "[CTUI:WIDGET] - widget %p (x=%d, y=%d) post-render @ "
               "widget-tick %d\n",
               (void *)w, w->x, w->y, w->ticks);
+  }
+  if (app->render_end) {
+    app->render_end(app->comp, app->render_arg);
   }
   ctui_compositor_blit(app->comp, screen);
 }

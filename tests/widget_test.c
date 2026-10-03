@@ -308,6 +308,66 @@ static void test_puts_cell(void) {
   ctui_compositor_free(comp);
 }
 
+/* CTUI_APP's render hooks: begin, each widget drawn (a nested one before
+ * the one drawing it), end -- in that order, every frame */
+static char g_seen[32];
+static int g_nseen;
+static CTUI_WIDGET g_inner;
+
+static void outer_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  (void)self;
+  ctui_widget_dispatch_render(&g_inner, comp);
+}
+
+static void plain_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  (void)self, (void)comp;
+}
+
+static void seen(char c) {
+  if (g_nseen < (int)sizeof g_seen - 1) {
+    g_seen[g_nseen++] = c;
+  }
+}
+
+static void hook_begin(void *arg) { seen(*(char *)arg); }
+
+static void hook_rendered(CTUI_WIDGET *w, CTUI_COMPOSITOR *comp, void *arg) {
+  (void)comp, (void)arg;
+  seen(*(char *)w->widget_data);
+}
+
+static void hook_end(CTUI_COMPOSITOR *comp, void *arg) {
+  (void)arg;
+  seen(comp ? 'e' : '?');
+}
+
+static void test_render_hooks(void) {
+  char a = 'a', o = 'o', i = 'i', b = 'b';
+  CTUI_WIDGET wa = ctui_widget_make(0, 0, 2, 1, &a, plain_render, NULL);
+  CTUI_WIDGET wo = ctui_widget_make(0, 1, 2, 1, &o, outer_render, NULL);
+  g_inner = ctui_widget_make(0, 1, 2, 1, &i, plain_render, NULL);
+  CTUI_WIDGET *ws[] = {&wa, &wo};
+  CTUI_SCREEN *screen = ctui_screen_create(3, 4);
+  CTUI_APP app;
+  ctui_app_init(&app, ws, 2, 3, 4);
+  ctui_widget_init(&g_inner, app.comp);
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(g_nseen == 0, "no hooks set: none called");
+  app.render_begin = hook_begin;
+  app.rendered = hook_rendered;
+  app.render_end = hook_end;
+  app.render_arg = &b;
+  ctui_app_render(&app, screen);
+  ctui_app_render(&app, screen);
+  g_seen[g_nseen] = 0;
+  CTUI_TEST_ASSERT(!strcmp(g_seen, "baioebaioe"),
+                   "begin, each widget (the nested one first), end -- each "
+                   "frame (%s)",
+                   g_seen);
+  ctui_app_free(&app);
+  ctui_screen_free(screen);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -318,6 +378,7 @@ int main(void) {
   test_puts_cell();
   test_widget_init_out_of_bounds();
   test_gfx_dispatch();
+  test_render_hooks();
 
   return ctui_test_summary();
 }

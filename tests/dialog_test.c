@@ -50,6 +50,24 @@ static int find_col(CTUI_SCREEN *screen, int row, uint32_t ch) {
   return -1;
 }
 
+/* a hook taking the kinds drawn under text, what it was asked kept */
+static CTUI_CONTROL under_asked[8];
+static int under_cols[8], under_row[8], under_col[8], under_n;
+
+static int draw_under(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
+                      int col, int cols, const CTUI_CONTROL *c,
+                      unsigned char bg, void *arg) {
+  (void)self, (void)comp, (void)bg, (void)arg;
+  if (c->kind < CTUI_CONTROL_BUTTON || under_n == 8) {
+    return 0;
+  }
+  under_asked[under_n] = *c;
+  under_row[under_n] = row;
+  under_col[under_n] = col;
+  under_cols[under_n++] = cols;
+  return 1;
+}
+
 /* a style's control hook: '=' over the bar's cells */
 static CTUI_CONTROL progress_asked;
 
@@ -57,6 +75,9 @@ static int draw_progress(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
                          int col, int cols, const CTUI_CONTROL *c,
                          unsigned char bg, void *arg) {
   (void)arg;
+  if (c->kind != CTUI_CONTROL_PROGRESS) {
+    return 0;
+  }
   progress_asked = *c;
   for (int i = 0; i < cols; i++) {
     ctui_widget_putc(self, comp, row, col + i, '=', CTUI_COLOR_WHITE, bg);
@@ -186,6 +207,43 @@ int main(void) {
                    "no buttons: enter picks nothing");
   ctui_test_key(&app, screen, CTUI_KEY_ESC, 0);
   CTUI_TEST_ASSERT(!p.open, "esc still cancels it");
+
+  /* drawn under the text: the frame, the entry's field, the buttons */
+  char nb[32] = "";
+  CTUI_ENTRY ne = {.buf = nb, .cap = sizeof nb};
+  CTUI_STYLE under = ctui_style_default;
+  under.control = draw_under;
+  ne.style = &under;
+  CTUI_DIALOG u = {.open = 1, .title = "Name", .entry = &ne, .buttons = {"OK", "Cancel"},
+                   .button_count = 2, .width = 20, .style = &under};
+  w.widget_data = &u;
+  ctui_app_render(&app, screen);
+  int frames = 0, fields = 0, buttons = 0, focused = 0, glyphs = 0;
+  for (int i = 0; i < under_n; i++) {
+    const CTUI_CONTROL *c = &under_asked[i];
+    frames += c->kind == CTUI_CONTROL_FRAME && c->rows == 7 &&
+              under_cols[i] == 24 && c->label == 2 && c->label_cols == 6;
+    fields += c->kind == CTUI_CONTROL_FIELD && under_cols[i] == 20;
+    buttons += c->kind == CTUI_CONTROL_BUTTON;
+    focused += c->kind == CTUI_CONTROL_BUTTON && c->focused;
+  }
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+      uint32_t ch = ctui_test_cell(screen, r, c);
+      glyphs += ch == 0x2500 || ch == 0x2502 || ch == 0x256d;
+    }
+  }
+  int ur = find_row(screen, "Cancel");
+  CTUI_TEST_ASSERT(frames == 1 && fields == 1 && buttons == 2 &&
+                       focused == 1 && glyphs == 0 &&
+                       find_row(screen, " Name ") >= 0 && ur >= 0 &&
+                       ctui_test_row_contains(screen, ur, " OK    Cancel "),
+                   "a hook taking them: one frame (7 rows, 24 wide, the "
+                   "title's opening), the entry's field, two buttons (one "
+                   "focused); no box drawing, the labels plain (%d %d %d "
+                   "%d %d)",
+                   frames, fields, buttons, focused, glyphs);
+  ctui_test_key(&app, screen, CTUI_KEY_ESC, 0);
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

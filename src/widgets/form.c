@@ -131,6 +131,17 @@ int ctui_form_key(CTUI_FORM *f, const CTUI_KEYPRESS_EVENT_DATA *kp) {
   }
 }
 
+/* a choice's widest option: a drawn one is a field this wide, so it
+ * doesn't change size as it steps */
+static int choice_width(const CTUI_FORM_ROW *r) {
+  int w = 0;
+  for (int i = 0; i < r->option_count; i++) {
+    int ow = ctui_utf8_width(r->options[i]);
+    w = ow > w ? ow : w;
+  }
+  return w;
+}
+
 static int label_width(const CTUI_FORM *f) {
   if (f->label_width > 0) {
     return f->label_width;
@@ -215,10 +226,7 @@ int ctui_form_mouse(CTUI_FORM *f, const CTUI_WIDGET *self,
       }
       break;
     case CTUI_FORM_CHOICE: {
-      int w = r->option_count > 0 && r->value >= 0 &&
-                      r->value < r->option_count
-                  ? ctui_utf8_width(r->options[r->value])
-                  : 0;
+      int w = choice_width(r);
       if (col < 2) {
         what = choice_step(r, -1);
       } else if (col < w + 4) {
@@ -276,13 +284,26 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
                                 hbg);
     break;
   }
-  case CTUI_FORM_CHOICE:
-    snprintf(buf, sizeof buf, "\xe2\x80\xb9 %s \xe2\x80\xba", /* ‹ › */
-             r->value >= 0 && r->value < r->option_count
-                 ? r->options[r->value]
-                 : "");
+  case CTUI_FORM_CHOICE: {
+    const char *v = r->value >= 0 && r->value < r->option_count
+                        ? r->options[r->value]
+                        : "";
+    int cw = choice_width(r) + 4;
+    CTUI_CONTROL c = {.kind = CTUI_CONTROL_CHOICE,
+                      .value = r->value,
+                      .max = r->option_count > 0 ? r->option_count - 1 : 0,
+                      .focused = focused,
+                      .disabled = r->disabled};
+    if (cw <= w && ctui_style_control(st, self, comp, y, x, cw, &c, bg)) {
+      /* a cell in: the drop button takes the field's right end */
+      ctui_widget_puts_cut(self, comp, y, x + 1, v, cw - 4, fg, bg);
+      used = cw;
+      break;
+    }
+    snprintf(buf, sizeof buf, "\xe2\x80\xb9 %s \xe2\x80\xba", v); /* ‹ › */
     used = ctui_widget_puts_cut(self, comp, y, x, buf, w, hfg, hbg);
     break;
+  }
   case CTUI_FORM_SLIDER: {
     if (bar < 2) {
       break;
@@ -309,10 +330,21 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
                                       fg, bg);
     break;
   }
-  case CTUI_FORM_BUTTON:
+  case CTUI_FORM_BUTTON: {
+    int bw = ctui_utf8_width(r->label) + 4;
+    CTUI_CONTROL c = {.kind = CTUI_CONTROL_BUTTON,
+                      .focused = focused,
+                      .disabled = r->disabled};
+    if (bw <= w && ctui_style_control(st, self, comp, y, x, bw, &c, bg)) {
+      used = 2 + ctui_widget_puts_cut(self, comp, y, x + 2, r->label, bw - 4,
+                                      fg, bg) +
+             2;
+      break;
+    }
     snprintf(buf, sizeof buf, "[ %s ]", r->label);
     used = ctui_widget_puts_cut(self, comp, y, x, buf, w, hfg, hbg);
     break;
+  }
   default:
     break;
   }
@@ -340,6 +372,25 @@ void ctui_form_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     CTUI_FORM_ROW *r = &f->rows[i];
     int focused = i == f->focus;
     if (r->kind == CTUI_FORM_HEADING) {
+      /* a group: the heading and its rows down to the next one, as far
+       * as they show, the heading over its top edge */
+      int n = 1;
+      while (i + n < f->count && y + n < self->h &&
+             f->rows[i + n].kind != CTUI_FORM_HEADING) {
+        n++;
+      }
+      int lw = ctui_utf8_width(r->label);
+      lw = lw > self->w - 4 ? self->w - 4 : lw;
+      CTUI_CONTROL c = {.kind = CTUI_CONTROL_GROUP,
+                        .rows = n,
+                        .label = 1,
+                        .label_cols = lw + 2};
+      if (n > 1 && lw > 0 &&
+          ctui_style_control(st, self, comp, y, 0, self->w, &c, st->bg)) {
+        ctui_widget_puts_cut(self, comp, y, 2, r->label, lw, st->title_fg,
+                             st->bg);
+        continue;
+      }
       ctui_widget_puts_cut(self, comp, y, 0, r->label, self->w, st->title_fg,
                            st->bg);
       continue;

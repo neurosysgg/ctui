@@ -211,6 +211,10 @@ void ctui_entry_draw(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
   } else if (cur - e->scroll > width - 1) {
     e->scroll = cur - width + 1;
   }
+  /* drawn as a field under the text, or not: the text is the same (the
+   * cursor's cell keeps sel_bg either way) */
+  CTUI_CONTROL field = {.kind = CTUI_CONTROL_FIELD, .focused = focused};
+  ctui_style_control(st, self, comp, row, col, width, &field, st->bg);
   if (!e->buf[0] && e->placeholder && !focused) {
     ctui_widget_puts_cut(self, comp, row, col, e->placeholder, width,
                          st->dim_fg, st->bg);

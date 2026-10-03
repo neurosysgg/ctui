@@ -25,6 +25,17 @@ typedef struct {
    * app ends its run loop with ctui_app_quit() instead. */
   int quit_on_esc;
   int quit_requested; /* set by ctui_app_quit(), read by ctui_app_run() */
+
+  /* optional (NULL: none), set after ctui_app_init(): called as
+   * ctui_app_render() starts a frame, after each widget's render() -- every
+   * widget ctui_widget_dispatch_render() draws, nested ones too, innermost
+   * first -- and once the frame is in the compositor. For an app keeping
+   * state across a frame's widgets: images placed under text, say, which
+   * must go when a later widget draws over their cells. */
+  void (*render_begin)(void *arg);
+  void (*rendered)(CTUI_WIDGET *w, CTUI_COMPOSITOR *comp, void *arg);
+  void (*render_end)(CTUI_COMPOSITOR *comp, void *arg);
+  void *render_arg;
 } CTUI_APP;
 
 /* app / event loop */

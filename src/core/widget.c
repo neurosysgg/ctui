@@ -343,6 +343,9 @@ void ctui_widget_dispatch_render(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp) {
   if (widget->gfx_render_mode == 0 ||
       widget->gfx_render_mode != ctui_g_gfx_mode) {
     widget->render(widget, comp);
+    if (ctui_g_app && ctui_g_app->rendered) {
+      ctui_g_app->rendered(widget, comp, ctui_g_app->render_arg);
+    }
     return;
   }
 

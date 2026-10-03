@@ -99,10 +99,17 @@ void ctui_dialog_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   int x = (self->w - iw - 4) / 2, y = (self->h - h) / 2, w = iw + 4;
   unsigned char fg = st->fg, bg = st->bg, dim = st->dim_fg;
 
+  int tw = d->title && d->title[0] ? ctui_utf8_width(d->title) + 2 : 0;
+  tw = tw > w - 4 ? w - 4 : tw;
+  CTUI_CONTROL frame = {
+      .kind = CTUI_CONTROL_FRAME, .rows = h, .label = 2, .label_cols = tw};
+  int drawn = ctui_style_control(st, self, comp, y, x, w, &frame, bg);
   for (int r = 0; r < h; r++) {
     for (int c = 0; c < w; c++) {
       uint32_t ch = ' ';
-      if (r == 0 || r == h - 1) {
+      if (drawn) {
+        /* the frame is under the cells: they're blank */
+      } else if (r == 0 || r == h - 1) {
         ch = c == 0       ? (r ? 0x2570 : 0x256d)  /* ╰ ╭ */
              : c == w - 1 ? (r ? 0x256f : 0x256e)  /* ╯ ╮ */
                           : 0x2500;                /* ─ */
@@ -156,9 +163,16 @@ void ctui_dialog_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       snprintf(label, sizeof label, " %s ", d->buttons[i]);
       int focused = i == d->focus;
       d->button_from[i] = self->x + col;
-      col += ctui_widget_puts_cut(self, comp, row, col, label, x + w - 2 - col,
-                                  focused ? st->sel_fg : fg,
-                                  focused ? st->sel_bg : bg);
+      int lw = ctui_utf8_width(label);
+      CTUI_CONTROL b = {.kind = CTUI_CONTROL_BUTTON, .focused = focused};
+      if (lw <= x + w - 2 - col &&
+          ctui_style_control(st, self, comp, row, col, lw, &b, bg)) {
+        col += ctui_widget_puts_cut(self, comp, row, col, label, lw, fg, bg);
+      } else {
+        col += ctui_widget_puts_cut(self, comp, row, col, label,
+                                    x + w - 2 - col, focused ? st->sel_fg : fg,
+                                    focused ? st->sel_bg : bg);
+      }
       d->button_to[i] = self->x + col;
       col += 2;
     }

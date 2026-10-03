@@ -35,19 +35,26 @@ static void mouse(CTUI_APP *app, CTUI_SCREEN *screen, CTUI_MOUSE_ACTION a,
 
 
 /* a style's control hook: '#' over the cells, what was asked kept; it
- * declines what `declines` names */
-static CTUI_CONTROL asked[8];
-static int asked_cols[8], asked_n, declines = -1;
+ * declines what `declines` names, and the kinds drawn under text unless
+ * `under` is set (it then takes them, drawing nothing: they're under) */
+static CTUI_CONTROL asked[16];
+static int asked_cols[16], asked_row[16], asked_col[16], asked_n,
+    declines = -1, under;
 
 static int draw_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
                         int col, int cols, const CTUI_CONTROL *c,
                         unsigned char bg, void *arg) {
-  if ((int)c->kind == declines) {
+  if ((int)c->kind == declines || (c->kind >= CTUI_CONTROL_BUTTON && !under)) {
     return 0;
   }
-  if (asked_n < 8) {
+  if (asked_n < 16) {
     asked[asked_n] = *c;
+    asked_row[asked_n] = row;
+    asked_col[asked_n] = col;
     asked_cols[asked_n++] = cols;
+  }
+  if (c->kind >= CTUI_CONTROL_BUTTON) {
+    return 1;
   }
   for (int i = 0; i < cols; i++) {
     ctui_widget_putc(self, comp, row, col + i, '#', *(unsigned char *)arg, bg);
@@ -208,6 +215,59 @@ int main(void) {
   CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 5, "[x]") &&
                        ctui_test_row_contains(screen, 3, "########"),
                    "a hook that declines a control leaves it to the glyphs");
+
+
+  /* the kinds under text: the hook takes them, the text stays plain */
+  declines = -1;
+  under = 1;
+  asked_n = 0;
+  entry.style = &hooked;
+  ctui_form_focus(&f, 6);
+  f.scroll = 0;
+  ctui_app_render(&app, screen);
+  const CTUI_CONTROL *grp = NULL, *fld = NULL, *chc = NULL, *btn = NULL;
+  int gi = -1, ci = -1, bi = -1, fi = -1;
+  for (int i = 0; i < asked_n; i++) {
+    switch (asked[i].kind) {
+    case CTUI_CONTROL_GROUP:
+      grp = &asked[i], gi = i;
+      break;
+    case CTUI_CONTROL_FIELD:
+      fld = &asked[i], fi = i;
+      break;
+    case CTUI_CONTROL_CHOICE:
+      chc = &asked[i], ci = i;
+      break;
+    case CTUI_CONTROL_BUTTON:
+      btn = &asked[i], bi = i;
+      break;
+    default:
+      break;
+    }
+  }
+  CTUI_TEST_ASSERT(grp && grp->rows == 7 && asked_row[gi] == 0 &&
+                       asked_col[gi] == 0 && asked_cols[gi] == 40 &&
+                       grp->label == 1 && grp->label_cols == 10 &&
+                       ctui_test_row_contains(screen, 1, "  Keyboard"),
+                   "a heading: a group of its 7 rows the form wide, the "
+                   "heading at its top edge's opening (col 2)");
+  CTUI_TEST_ASSERT(fld && asked_cols[fi] == 22 && !fld->focused &&
+                       ctui_test_row_contains(screen, 2, "de"),
+                   "an entry: a field as wide as it's drawn (%d)",
+                   fld ? asked_cols[fi] : -1);
+  CTUI_TEST_ASSERT(chc && asked_cols[ci] == 12 && chc->value == 0 &&
+                       chc->max == 1 &&
+                       ctui_test_row_contains(screen, 6, " flat") &&
+                       !ctui_test_row_contains(screen, 6, "‹"),
+                   "a choice: a field the widest option wide (12), its "
+                   "value plain");
+  CTUI_TEST_ASSERT(btn && asked_cols[bi] == 9 && btn->focused &&
+                       ctui_test_row_contains(screen, 7, "  Apply") &&
+                       !ctui_test_row_contains(screen, 7, "[ Apply ]"),
+                   "a button: 9 cells, focused, its label plain");
+  mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 6, 18 + 10);
+  CTUI_TEST_ASSERT(frows[5].value == 1,
+                   "a click in a drawn choice's wider field steps it");
 
   ctui_app_free(&app);
   ctui_screen_free(screen);
