@@ -62,6 +62,16 @@ void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen);
  * CTUI_TICK_EVENT through the registry, same as any other event */
 void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms);
 
+/* the run loop again, from inside a handler (a modal dialog: the caller
+ * opened one and wants its answer before it returns), until *done is set
+ * -- by a handler, a timer or an fd watch -- or the app quits: 1 if done,
+ * 0 if it quit (or input ended), and then the ctui_app_run() around it
+ * returns too once the handler does. Events reach the same handlers as in
+ * ctui_app_run(): the app routes keys to its dialog while it's open. The
+ * current frame is drawn first. */
+int ctui_app_run_until(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms,
+                       const volatile int *done);
+
 /* asks the running app's ctui_app_run() to return once the event currently
  * being handled finishes (same frame, no further input read). Callable from
  * any handler -- event, timer, or fd watch. */

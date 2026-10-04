@@ -482,6 +482,13 @@ above into the loop described in "Life of a frame".
   over).
 - `ctui_app_quit()` — ends `ctui_app_run()` once the current event
   finishes; callable from any handler.
+- `ctui_app_run_until(app, screen, tick_ms, &done)` — the run loop again
+  from inside a handler (a modal dialog whose answer the caller waits
+  for: a script's `alert()` / `confirm()` / `prompt()`), until `done` is
+  set by a handler, timer or fd watch: `1`; `0` if the app quit or input
+  ended meanwhile, and the `ctui_app_run()` around it then returns too.
+  Events go to the same handlers (the app routes keys to its dialog);
+  the current frame is drawn first.
 - `ctui_app_render(app, screen)` / `ctui_app_resize(app, screen, rows,
   cols)` / `ctui_app_run(app, screen, tick_ms)` — see "Life of a
   frame" above for exactly what each does and in what order.

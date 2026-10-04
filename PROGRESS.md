@@ -237,6 +237,15 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A run loop inside a handler** (2026-10-04, for ctui-wm's browser:
+      a page script's `alert()` / `confirm()` / `prompt()` return the
+      user's answer, so the script waits in its call while the app keeps
+      drawing and handling input). `ctui_app_run_until(app, screen,
+      tick_ms, &done)`: `ctui_app_run()`'s body as `loop()`, run until
+      `*done` or a quit; a quit (or ESC with `quit_on_esc`) inside it
+      sets `quit_requested`, so the outer run ends too. Tested in
+      `input_test.c` (answered: the handler goes on; a quit inside: both
+      end).
 - [x] **Controls drawn under text; render hooks** (2026-10-03, for
       ctui-wm's apps: buttons, drop-downs, text fields, group boxes and
       dialog frames drawn in its "look"). `CTUI_CONTROL` gains the kinds

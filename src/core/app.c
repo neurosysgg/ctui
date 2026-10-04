@@ -182,16 +182,15 @@ void ctui_app_quit(void) {
   ctui_g_app->quit_requested = 1;
 }
 
-void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
-  ctui_logf(E_INF, "[CTUI:APP] - run loop starting @ tick %d (tick_ms=%d)\n",
-            ctui_tick_advance(), tick_ms);
-  run_frame(app, screen);
-
+/* the run loop's body: events handled and frames drawn until the app
+ * quits (ESC with quit_on_esc counts) or *done (NULL: never) is set */
+static void loop(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms,
+                 const volatile int *done) {
   CTUI_EVENT ev;
   ev.scope = CTUI_EVENT_SCOPE_GLOBAL;
 
-  app->quit_requested = 0;
-  while (!app->quit_requested && ctui_input_loop(&ev, tick_ms)) {
+  while (!app->quit_requested && !(done && *done) &&
+         ctui_input_loop(&ev, tick_ms)) {
     if (ev.type == CTUI_RESIZE_EVENT) {
       CTUI_RESIZE_EVENT_DATA *resize_data = ev.event_data;
       ctui_app_resize(app, screen, resize_data->rows, resize_data->cols);
@@ -205,6 +204,8 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
         ctui_logf(E_INF,
                   "[CTUI:APP] - ESC received @ tick %d, breaking run loop\n",
                   ctui_tick_advance());
+        /* an outer run (around ctui_app_run_until()'s) ends too */
+        app->quit_requested = 1;
         break;
       }
     }
@@ -226,6 +227,24 @@ void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
       run_frame(app, screen);
     }
   }
+}
+
+void ctui_app_run(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms) {
+  ctui_logf(E_INF, "[CTUI:APP] - run loop starting @ tick %d (tick_ms=%d)\n",
+            ctui_tick_advance(), tick_ms);
+  run_frame(app, screen);
+  app->quit_requested = 0;
+  loop(app, screen, tick_ms, NULL);
   ctui_logf(E_INF, "[CTUI:APP] - run loop exited @ tick %d\n",
             ctui_tick_advance());
+}
+
+int ctui_app_run_until(CTUI_APP *app, CTUI_SCREEN *screen, int tick_ms,
+                       const volatile int *done) {
+  ctui_logf(E_DBG, "[CTUI:APP] - nested run loop @ tick %d\n",
+            ctui_tick_advance());
+  /* what asked for it (a dialog opened) is shown before waiting */
+  run_frame(app, screen);
+  loop(app, screen, tick_ms, done);
+  return *done != 0;
 }

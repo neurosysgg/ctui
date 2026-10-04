@@ -561,6 +561,84 @@ static void test_quit(CTUI_APP *app, CTUI_WIDGET *w) {
   ctui_screen_free(screen);
 }
 
+/* a modal answer: 'm' opens a nested run (a dialog), 'y' answers it, 'q'
+ * quits from wherever it comes */
+static CTUI_APP *g_m_app;
+static CTUI_SCREEN *g_m_screen;
+static volatile int g_m_done;
+static int g_m_result = -1, g_m_after = 0, g_m_depth = 0;
+
+static int feed_later(CTUI_WIDGET *self, CTUI_EVENT *ev);
+static const char *g_feed_next;
+
+static int on_key_modal(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  (void)self;
+  CTUI_KEYPRESS_EVENT_DATA *kp = ev->event_data;
+  if (kp->type != CTUI_KEY_CHAR) {
+    return 0;
+  }
+  if (kp->ch == 'm') {
+    g_m_done = 0;
+    g_m_depth++;
+    g_m_result = ctui_app_run_until(g_m_app, g_m_screen, 0, &g_m_done);
+    g_m_depth--;
+    /* the handler goes on after the answer */
+    g_m_after = 1;
+  } else if (kp->ch == 'y' && g_m_depth > 0) {
+    g_m_done = 1;
+  } else if (kp->ch == 'q') {
+    ctui_app_quit();
+  }
+  return 0;
+}
+
+static CTUI_TIMER *g_feeder;
+static int feed_later(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  (void)self;
+  (void)ev;
+  if (g_feed_next && *g_feed_next) {
+    char c[2] = {*g_feed_next++, '\0'};
+    feed(c);
+  }
+  return 0;
+}
+
+/* ctui_app_run_until(): a run inside a handler until it's answered, the
+ * handler going on after; a quit inside it ends both */
+static void test_run_until(CTUI_APP *app, CTUI_WIDGET *w) {
+  CTUI_SCREEN *screen = ctui_screen_create(2, 4);
+  g_m_app = app;
+  g_m_screen = screen;
+  ctui_event_register("input", CTUI_KEYPRESS_EVENT, w, on_key_modal);
+  app->quit_on_esc = 0;
+  int saved = dup(STDOUT_FILENO);
+  int devnull = open("/dev/null", O_WRONLY);
+  dup2(devnull, STDOUT_FILENO);
+  /* one key a timer tick apart: m (the dialog), y (answered), q */
+  g_feed_next = "myq";
+  g_feeder = ctui_timer_register(60, NULL, feed_later);
+  ctui_app_run(app, screen, 0);
+  dup2(saved, STDOUT_FILENO);
+  CTUI_TEST_ASSERT(g_m_result == 1 && g_m_after && g_m_depth == 0,
+                   "the nested run returned once answered (%d), the handler "
+                   "went on",
+                   g_m_result);
+  /* quit while it waits: both runs end */
+  g_m_result = -1;
+  g_m_after = 0;
+  g_feed_next = "mq";
+  dup2(devnull, STDOUT_FILENO);
+  ctui_app_run(app, screen, 0);
+  dup2(saved, STDOUT_FILENO);
+  close(saved);
+  close(devnull);
+  ctui_timer_cancel(g_feeder);
+  CTUI_TEST_ASSERT(g_m_result == 0 && g_m_after,
+                   "a quit inside it: 0, and the outer run ended too");
+  ctui_event_unregister(w);
+  ctui_screen_free(screen);
+}
+
 /* a source of decoded events: each byte in its pipe is one key; 'x' ends
  * it; g_src_buffered keys wait inside it, handed out before any wait */
 static int g_src_pipe[2] = {-1, -1};
@@ -714,6 +792,7 @@ int main(void) {
   test_io_fd_reuse();
   test_timer_wake_and_tick();
   test_quit(&app, &w);
+  test_run_until(&app, &w);
   test_source();
 
   ctui_app_free(&app);
