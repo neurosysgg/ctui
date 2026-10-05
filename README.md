@@ -170,6 +170,15 @@ else.
   `style`: `entry`, `table`, `dialog`, `textview`, `form`, `tabs`, and
   the `scrollbar` the table and textview show), each a
   small `.c`/`.h` pair built entirely on the public `ctui.h` API.
+- `src/json/` — a growable string (`buf`) and a JSON parser / writer for
+  hand-edited configs (`json`): `#include "json/json.h"`.
+- `src/look/` — drawn controls: a "look" (colour roles and shape
+  parameters, built-ins and from a config's JSON), the controls and
+  pictograms painted from it in device pixels, period filters, and
+  `drawn` / `icon`, which cache them as PNGs and show them in cells
+  through kitty's Unicode placeholders (the glyphs as text without a
+  look or kitty): `#include "look/drawn.h"`. Came from ctui-wm once
+  ctui-mus wanted them too.
 - `examples_apps/` — real, runnable ctui apps, one subfolder each
   (`examples_apps/<name>/main.c` + an optional local `widgets/`):
   `hello` (the minimal border + label app walked through in Usage above),

@@ -237,6 +237,32 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **JSON and the look, promoted from ctui-wm** (2026-10-05, ctui-mus
+      the second app wanting them: its overhaul draws its controls in
+      ctui-wm's look and reads its config as JSON). Two new directories
+      beside `core/` and `widgets/`, included by path like the widgets
+      (`"json/json.h"`, `"look/drawn.h"`), not through `ctui.h`:
+      `src/json/` -- `buf` (a growable string, `CTUI_BUF`) and `json`
+      (`CTUI_JSON`: a DOM parser for hand-edited configs, comments and
+      trailing commas allowed, key order kept, positions kept for
+      editing in place; a writer that reads back equal). `src/look/` --
+      `look` (colour roles + shape parameters, the built-ins win95 / nt
+      / ...), `lookconf` (a config's `"look"` from JSON), `paint` (the
+      primitives), `control` (`CTUI_LOOK_CONTROL`: sliders, levels,
+      checks, toggles, buttons, chips, scrollbars, fields, frames,
+      panels, boxes as pure functions of their state and a box in device
+      pixels; named `LOOK_` beside the style hook's `CTUI_CONTROL`),
+      `picto` (16 / 24 px pictograms in roles), `filter` (period filters
+      for icons), `resample` (area resampling), `png` (an RGBA writer on
+      core's DEFLATE), `icon` (images by path as Unicode placeholders,
+      an LRU of ids, a prepare hook) and `drawn` (a control's PNG cached
+      by its key in `ctui_drawn_dir()`, placed and shown in cells, or
+      under the text; the text glyphs without a look or kitty). The
+      cache dir is a setting now (default `$XDG_RUNTIME_DIR/ctui`;
+      ctui-wm sets its runtime dir). Moved with their tests:
+      `json_test.c` (44), `look_test.c` (171; ctui-wm keeps its
+      icon-theme part). The code is ctui-wm's as it was, renamed
+      `ctui_wm_` -> `ctui_` (`CTUI_LOOK_*` for the look's kinds).
 - [x] **A run loop inside a handler** (2026-10-04, for ctui-wm's browser:
       a page script's `alert()` / `confirm()` / `prompt()` return the
       user's answer, so the script waits in its call while the app keeps

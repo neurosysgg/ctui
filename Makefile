@@ -2,8 +2,8 @@ CC = cc
 CFLAGS = -Wall -Wextra -std=c11 -Isrc -g
 LDLIBS = -lm
 
-CORE_SRC = $(wildcard src/*.c src/core/*.c src/widgets/*.c)
-CORE_HDR = $(wildcard src/*.h src/core/*.h src/widgets/*.h)
+CORE_SRC = $(wildcard src/*.c src/core/*.c src/widgets/*.c src/json/*.c src/look/*.c)
+CORE_HDR = $(wildcard src/*.h src/core/*.h src/widgets/*.h src/json/*.h src/look/*.h)
 
 TEST_SRC = $(wildcard tests/*.c)
 TEST_BIN = $(patsubst tests/%.c,test-%,$(TEST_SRC))
