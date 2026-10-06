@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A splitter control, `CTUI_LOOK_CTL_SPLITTER`** (2026-10-06, for
+  ctui-mus's resizable panels). The bar between two panes, vertical when
+  taller than wide: the face with three raised bumps across its middle
+  (in the shadow without bevels), the face turning to the shadow while
+  `PRESSED` (being dragged); `PRESSED` is the only state it keeps, so a
+  hovered one shares the plain one's image. Appended to the kinds (their
+  numbers unchanged). Five new assertions in `tests/look_test.c` (the
+  snap invariant covers it too); 23 suites, 779 passed.
 - [x] **Spanning rows in `CTUI_TABLE`** (2026-10-06, for ctui-mus's
   playlist: group headers over its track columns). An optional
   `row_span(ctx, row)`: a nonzero row is drawn as column 0's text across

@@ -48,6 +48,10 @@ typedef enum {
                          * the tint inks a flat style (solid, double,
                          * dashed, dotted: else the shadow) or an icon's
                          * accent */
+  CTUI_LOOK_CTL_SPLITTER, /* the bar between two panes that resizes them,
+                           * vertical when taller than wide: the face with
+                           * a grip of raised bumps in its middle, the
+                           * shadow while PRESSED (being dragged) */
   CTUI_LOOK_CTL_KINDS,
 } CTUI_LOOK_CTL_KIND;
 

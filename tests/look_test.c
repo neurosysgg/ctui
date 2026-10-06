@@ -902,6 +902,31 @@ static void test_browser(void) {
                        px(p, 40, &l, 20, 10) == 'f',
                    "a panel: a shadow top-left, highlight bottom-right, the "
                    "face inside");
+
+  /* a splitter: the face, three raised bumps in its middle; the shadow
+   * while dragged */
+  CTUI_LOOK_CONTROL sp = ctl(CTUI_LOOK_CTL_SPLITTER, 0, 0);
+  p = paint(sp, &l, 9, 60);
+  /* 9 px across: 3 px bumps at x 3..5, 15 px of them from y 22 */
+  CTUI_TEST_ASSERT(px(p, 9, &l, 0, 0) == 'f' && px(p, 9, &l, 8, 59) == 'f' &&
+                       px(p, 9, &l, 4, 10) == 'f',
+                   "a splitter: the face along it");
+  CTUI_TEST_ASSERT(px(p, 9, &l, 3, 22) == 'h' && px(p, 9, &l, 5, 24) == 's' &&
+                       px(p, 9, &l, 3, 34) == 'h' && px(p, 9, &l, 3, 25) == 'f',
+                   "its grip: raised bumps a bump apart down the middle");
+  p = paint(sp, &l, 60, 9);
+  CTUI_TEST_ASSERT(px(p, 60, &l, 22, 3) == 'h' && px(p, 60, &l, 34, 3) == 'h',
+                   "wider than tall: the grip runs across");
+  sp.flags = CTUI_LOOK_CTL_PRESSED | CTUI_LOOK_CTL_HOVER;
+  p = paint(sp, &l, 9, 60);
+  CTUI_TEST_ASSERT(px(p, 9, &l, 0, 0) == 's' && px(p, 9, &l, 3, 22) == 'h',
+                   "dragged: the shadow round its grip");
+  CTUI_LOOK_CONTROL hover = ctl(CTUI_LOOK_CTL_SPLITTER, 5, 9);
+  hover.flags = CTUI_LOOK_CTL_HOVER;
+  CTUI_TEST_ASSERT(ctui_look_control_key(&hover, &l, 9, 60) ==
+                       ctui_look_control_key(&(CTUI_LOOK_CONTROL){.kind = CTUI_LOOK_CTL_SPLITTER},
+                                             &l, 9, 60),
+                   "only being dragged tells two splitters apart");
 }
 
 /* a page's frames a row at a time (CTUI_LOOK_CTL_BOX; n2) */

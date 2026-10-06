@@ -121,6 +121,11 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
     c->max = c->value ? h : 0;
     c->span = 0;
     break;
+  case CTUI_LOOK_CTL_SPLITTER:
+    /* dragged or not: nothing else shows */
+    c->value = c->max = c->span = 0;
+    c->flags &= CTUI_LOOK_CTL_PRESSED;
+    break;
   default:
     c->value = c->max = c->span = 0;
     break;
@@ -153,7 +158,8 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
       (c->kind != CTUI_LOOK_CTL_BUTTON || c->picto != CTUI_LOOK_PICTO_NONE)) {
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_FOCUSED;
   }
-  if (!button || c->kind == CTUI_LOOK_CTL_FIELD) {
+  if ((!button && c->kind != CTUI_LOOK_CTL_SPLITTER) ||
+      c->kind == CTUI_LOOK_CTL_FIELD) {
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_PRESSED;
   }
   if (!(c->under & CTUI_LOOK_CTL_TINT)) {
@@ -585,6 +591,33 @@ static void paint_panel(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK *l) {
                       l->bevel ? 1 : 0, !l->bevel, role(l, CTUI_LOOK_FACE));
 }
 
+/* a splitter: the face (the shadow while dragged), three bumps across its
+ * middle along its length -- raised, or in the shadow without bevels */
+static void paint_splitter(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
+                           const CTUI_LOOK *l) {
+  int vertical = cv->h > cv->w;
+  int across = vertical ? cv->w : cv->h, len = vertical ? cv->h : cv->w;
+  int pressed = !!(c->flags & CTUI_LOOK_CTL_PRESSED);
+  ctui_look_paint_rect(cv, 0, 0, cv->w, cv->h,
+                       role(l, pressed ? CTUI_LOOK_SHADOW : CTUI_LOOK_FACE));
+  int bump = clamp(across / 3, 2, 4), n = 3;
+  int span = (2 * n - 1) * bump;
+  if (across < bump + 2 || len < span + 2) {
+    return;
+  }
+  int at = (len - span) / 2, off = (across - bump) / 2;
+  for (int i = 0; i < n; i++, at += 2 * bump) {
+    int x = vertical ? off : at, y = vertical ? at : off;
+    if (l->bevel) {
+      ctui_look_paint_box(cv, x, y, bump, bump, l, CTUI_LOOK_PAINT_RAISED, 1,
+                          0, role(l, CTUI_LOOK_FACE));
+    } else {
+      ctui_look_paint_rect(cv, x, y, bump, bump,
+                           role(l, pressed ? CTUI_LOOK_FACE : CTUI_LOOK_SHADOW));
+    }
+  }
+}
+
 /* --- a frame's row (CTUI_LOOK_CTL_BOX) --- */
 
 /* the colours of a box's edge line k (0 the outermost) on a side: the top
@@ -824,6 +857,9 @@ void ctui_look_control_paint(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
     break;
   case CTUI_LOOK_CTL_BOX:
     paint_box_row(&cv, c, l);
+    break;
+  case CTUI_LOOK_CTL_SPLITTER:
+    paint_splitter(&cv, c, l);
     break;
   default:
     break;
