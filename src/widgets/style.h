@@ -64,6 +64,7 @@ typedef enum {
   CTUI_STYLE_SEL_BG,
   CTUI_STYLE_MARK,
   CTUI_STYLE_ERROR,
+  CTUI_STYLE_MARK_BG,
   CTUI_STYLE_SLOTS,
   CTUI_STYLE_NONE = -1 /* no slot: the basic colour given alongside */
 } CTUI_STYLE_SLOT;
@@ -87,6 +88,9 @@ typedef struct {
   unsigned char title_fg;       /* titles, headings */
   unsigned char sel_fg, sel_bg; /* the cursor row, the focused control */
   unsigned char mark_fg;        /* marked rows, a toggle that's on */
+  unsigned char mark_bg;        /* a marked row filled with it (a table's
+                                 * selection); CTUI_COLOR_DEFAULT (0, so
+                                 * every style made before it) unfilled */
   unsigned char error_fg;
   CTUI_CONTROL_DRAW control;
   void *control_arg;

@@ -29,6 +29,8 @@ static unsigned char basic(const CTUI_STYLE *st, CTUI_STYLE_SLOT slot,
     return st->mark_fg;
   case CTUI_STYLE_ERROR:
     return st->error_fg;
+  case CTUI_STYLE_MARK_BG:
+    return st->mark_bg;
   default:
     return given;
   }

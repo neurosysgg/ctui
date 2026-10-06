@@ -219,12 +219,18 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                          : span ? CTUI_STYLE_TITLE
                                 : CTUI_STYLE_FG;
     CTUI_STYLE_SLOT bg = CTUI_STYLE_BG;
+    /* a marked row filled when the style has a mark_bg */
+    int fill = marked && (st->mark_bg != CTUI_COLOR_DEFAULT ||
+                          (st->rgb[CTUI_STYLE_MARK_BG] & CTUI_STYLE_RGB));
+    if (fill) {
+      bg = CTUI_STYLE_MARK_BG;
+    }
     if (sel) {
-      fg = marked ? CTUI_STYLE_MARK : CTUI_STYLE_SEL_FG;
+      fg = marked && !fill ? CTUI_STYLE_MARK : CTUI_STYLE_SEL_FG;
       bg = CTUI_STYLE_SEL_BG;
     }
     CTUI_CELL pen = ctui_style_cell(st, fg, bg, own, 0);
-    if (sel) {
+    if (sel || fill) {
       for (int c = 0; c < cols; c++) {
         ctui_widget_putc_cell(self, comp, row, c, ' ', &pen);
       }

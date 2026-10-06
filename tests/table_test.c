@@ -291,6 +291,17 @@ int main(void) {
                    "rgb: a plain row in the text's");
   CTUI_TEST_ASSERT(own->color_mode == CTUI_COLOR_MODE_BASIC && own->fg == CTUI_COLOR_RED,
                    "rgb: a row's own colour (row_fg) stays basic");
+  /* a mark_bg: marked rows filled (a selection), the cursor row still
+   * the cursor's */
+  marks[2] = marks[3] = 1;
+  tinted.rgb[CTUI_STYLE_MARK_BG] = CTUI_STYLE_RGB | 0x808080;
+  ctui_app_render(&app, screen);
+  const CTUI_CELL *m3 = &screen->cells[4 * cols + 2], *m3end = &screen->cells[4 * cols + 21];
+  CTUI_TEST_ASSERT(m3->color_mode == CTUI_COLOR_MODE_RGB && m3->bg_r == 0x80 &&
+                       m3end->bg_r == 0x80 && cur->bg_b == 0x80,
+                   "mark_bg: a marked row filled across, the cursor row the cursor's");
+  marks[2] = marks[3] = 0;
+  tinted.rgb[CTUI_STYLE_MARK_BG] = 0;
   tinted.rgb[CTUI_STYLE_SEL_FG] = 0;
   ctui_app_render(&app, screen);
   CTUI_TEST_ASSERT(cur->color_mode == CTUI_COLOR_MODE_RGB && cur->bg_b == 0x80 &&

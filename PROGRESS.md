@@ -237,6 +237,13 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A marked table row filled: `CTUI_STYLE.mark_bg`** (2026-10-06,
+  for ctui-mus's playlist selection). A style with a `mark_bg` (or its
+  `CTUI_STYLE_MARK_BG` 24-bit colour) fills a marked row across in it,
+  its text in `mark_fg`, as a selection; the cursor row stays the
+  cursor's. `CTUI_COLOR_DEFAULT` (0, so every style made before) keeps
+  marked rows as they were (only their text coloured). table_test (1).
+
 - [x] **`CTUI_KITTY_IMAGE.z`** (2026-10-06, for ctui-mus's menu over its
   cover art). The image's z-index, passed to `ctui_gfx_kitty_display()`
   (and part of the skip-identical cache key); 0, the old fixed value,
