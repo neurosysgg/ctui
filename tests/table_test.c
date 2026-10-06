@@ -14,6 +14,7 @@ static const char *names[] = {"alpha", "beta",  "gamma", "delta",
                               "iota",  "kappa", "lambda"};
 #define N (int)(sizeof names / sizeof *names)
 static int calls; /* cell() calls: only the visible rows */
+static int span_row = -1, span_asked_col1;
 static char got[32];
 static int got_row;
 
@@ -21,6 +22,10 @@ static const char *cell(void *ctx, int row, int col, char *scratch,
                         size_t cap) {
   (void)ctx;
   calls++;
+  if (row == span_row) {
+    span_asked_col1 |= col != 0;
+    return "the gamma group, wide";
+  }
   if (col == 0) {
     return names[row];
   }
@@ -31,6 +36,11 @@ static const char *cell(void *ctx, int row, int col, char *scratch,
 static unsigned char row_fg(void *ctx, int row) {
   (void)ctx;
   return row == 1 ? CTUI_COLOR_RED : 0;
+}
+
+static int row_span(void *ctx, int row) {
+  (void)ctx;
+  return row == span_row;
 }
 
 static int on_value(CTUI_WIDGET *self, CTUI_EVENT *ev) {
@@ -233,6 +243,29 @@ int main(void) {
                        ctui_test_cell(screen, 3, 21) == '0',
                    "no hook: no bar, the full width");
   ctui_table_select(&t, 6);
+
+  /* a spanning row (a group's header): row 2, line 4 */
+  span_row = 2;
+  t.row_span = row_span;
+  ctui_table_select(&t, 0);
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 4, "the gamma group, w") &&
+                       !span_asked_col1,
+                   "a spanning row: column 0's text across the columns, "
+                   "the others not asked");
+  CTUI_TEST_ASSERT(screen->cells[4 * cols + 2].fg == ctui_style_default.title_fg &&
+                       screen->cells[5 * cols + 2].fg == ctui_style_default.fg,
+                   "in the title colour, the rows under it as before");
+  ctui_test_key(&app, screen, CTUI_KEY_DOWN, 0);
+  ctui_test_key(&app, screen, CTUI_KEY_DOWN, 0);
+  CTUI_TEST_ASSERT(t.selected == 2 && !strcmp(got, "moved") &&
+                       screen->cells[4 * cols + 21].bg == CTUI_COLOR_CYAN,
+                   "the cursor stops on it, highlighted across");
+  ctui_test_key(&app, screen, CTUI_KEY_ENTER, 0);
+  CTUI_TEST_ASSERT(!strcmp(got, "activate") && got_row == 2,
+                   "and activates it, as any row");
+  t.row_span = NULL;
+  span_row = -1;
 
   t.count = 2;
   ctui_app_render(&app, screen);

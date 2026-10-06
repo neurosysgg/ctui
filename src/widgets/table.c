@@ -211,8 +211,9 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   char scratch[256];
   for (int r = t->scroll; r < t->count && row < self->h; r++, row++) {
     int sel = r == t->selected, marked = t->marks && t->marks[r];
+    int span = t->row_span && t->row_span(t->ctx, r);
     unsigned char fg = t->row_fg ? t->row_fg(t->ctx, r) : 0;
-    fg = marked ? st->mark_fg : fg ? fg : st->fg;
+    fg = marked ? st->mark_fg : fg ? fg : span ? st->title_fg : st->fg;
     unsigned char bg = st->bg;
     if (sel) {
       fg = marked ? st->mark_fg : st->sel_fg;
@@ -220,6 +221,12 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       for (int c = 0; c < cols; c++) {
         ctui_widget_putc(self, comp, row, c, ' ', fg, bg);
       }
+    }
+    if (span) {
+      scratch[0] = '\0';
+      draw_cell(self, comp, row, 0, cols,
+                t->cell(t->ctx, r, 0, scratch, sizeof scratch), 0, fg, bg);
+      continue;
     }
     for (int c = 0; c < t->column_count; c++) {
       int x, w;

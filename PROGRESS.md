@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Spanning rows in `CTUI_TABLE`** (2026-10-06, for ctui-mus's
+  playlist: group headers over its track columns). An optional
+  `row_span(ctx, row)`: a nonzero row is drawn as column 0's text across
+  the whole width, in the style's `title_fg` (a `row_fg` still wins);
+  the other columns aren't asked. For the cursor, marks, clicks and
+  events it is a row like any other (the app decides what activating it
+  does, e.g. collapsing the group). Four new assertions in
+  `tests/table_test.c`; 23 suites, 774 passed.
 - [x] **JSON and the look, promoted from ctui-wm** (2026-10-05, ctui-mus
       the second app wanting them: its overhaul draws its controls in
       ctui-wm's look and reads its config as JSON). Two new directories

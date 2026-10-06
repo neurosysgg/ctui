@@ -42,6 +42,11 @@ typedef struct {
                       size_t cap);
   /* optional: row's fg, 0 (CTUI_COLOR_DEFAULT) for the style's */
   unsigned char (*row_fg)(void *ctx, int row);
+  /* optional: nonzero = row spans the columns (a group's header): its
+   * column 0 text is drawn across the whole width in the style's title_fg
+   * (row_fg still wins), the other columns aren't asked. It is a row like
+   * any other for the cursor, marks and events. */
+  int (*row_span)(void *ctx, int row);
   void *ctx;
   const CTUI_STYLE *style;
   int page; /* rows shown by the last render (pgup/pgdn) */
