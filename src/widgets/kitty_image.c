@@ -56,6 +56,7 @@ typedef struct {
   const unsigned char *rgba;
   int px_w, px_h;
   unsigned int image_id;
+  int z;
   int cell_x, cell_y, cell_w, cell_h;
 } ctui_kitty_image_cache_entry;
 
@@ -74,7 +75,7 @@ static int ctui_kitty_image_frame_changed(const CTUI_WIDGET *widget,
       continue;
     }
     if (e->rgba == img->rgba && e->px_w == img->px_w && e->px_h == img->px_h &&
-        e->image_id == img->image_id && e->cell_x == widget->x &&
+        e->image_id == img->image_id && e->z == img->z && e->cell_x == widget->x &&
         e->cell_y == widget->y && e->cell_w == widget->w &&
         e->cell_h == widget->h) {
       return 0;
@@ -83,6 +84,7 @@ static int ctui_kitty_image_frame_changed(const CTUI_WIDGET *widget,
     e->px_w = img->px_w;
     e->px_h = img->px_h;
     e->image_id = img->image_id;
+    e->z = img->z;
     e->cell_x = widget->x;
     e->cell_y = widget->y;
     e->cell_w = widget->w;
@@ -103,6 +105,7 @@ static int ctui_kitty_image_frame_changed(const CTUI_WIDGET *widget,
                                      .px_w = img->px_w,
                                      .px_h = img->px_h,
                                      .image_id = img->image_id,
+                                     .z = img->z,
                                      .cell_x = widget->x,
                                      .cell_y = widget->y,
                                      .cell_w = widget->w,
@@ -135,5 +138,5 @@ void ctui_kitty_image_gfx_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
             "cells=%dx%d)\n",
             ctui_tick_advance(), self->y + 1, self->x + 1, self->w, self->h);
   ctui_gfx_kitty_display(self->y + 1, self->x + 1, self->w, self->h,
-                         img->rgba, img->px_w, img->px_h, img->image_id, 0);
+                         img->rgba, img->px_w, img->px_h, img->image_id, img->z);
 }

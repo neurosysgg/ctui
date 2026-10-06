@@ -237,6 +237,13 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`CTUI_KITTY_IMAGE.z`** (2026-10-06, for ctui-mus's menu over its
+  cover art). The image's z-index, passed to `ctui_gfx_kitty_display()`
+  (and part of the skip-identical cache key); 0, the old fixed value,
+  stays the default (over the text). Below `CTUI_GFX_KITTY_Z_UNDER_BG` a
+  cell with a background of its own hides it, so a dialog drawn as cells
+  covers a picture without taking it away.
+
 - [x] **24-bit colours in `CTUI_STYLE`, a group box's rows** (2026-10-06,
   for ctui-mus's panels in the look). `CTUI_STYLE.rgb[CTUI_STYLE_SLOTS]`:
   per slot (`CTUI_STYLE_FG`, `_BG`, `_DIM`, `_TITLE`, `_SEL_FG`,

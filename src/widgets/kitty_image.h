@@ -10,6 +10,10 @@ typedef struct {
   unsigned int image_id;  /* passed to ctui_gfx_kitty_display() so every
                            * redraw replaces the same image in place
                            * instead of layering a new one on top */
+  int z;                  /* its z-index (gfx.h); 0, the default, is over
+                           * the text, below CTUI_GFX_KITTY_Z_UNDER_BG it
+                           * is under any cell with a background of its
+                           * own (a dialog drawn over it hides it) */
 } CTUI_KITTY_IMAGE;
 
 /* generates a px_w x px_h RGB diagonal gradient (no external image
