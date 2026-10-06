@@ -78,6 +78,9 @@ typedef struct {
                * -1 for motion with nothing held and for scroll */
   int row, col; /* 0-based absolute screen cell -- test against a widget
                  * with ctui_widget_contains() */
+  int px, py;   /* 0-based pixel in the window after
+                 * ctui_mouse_pixels_enable(), else -1; outside it
+                 * (negative, past the edge) while dragging out */
   unsigned int mods; /* CTUI_MOD_* */
 } CTUI_MOUSE_EVENT_DATA;
 

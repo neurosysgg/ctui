@@ -338,7 +338,11 @@ static void test_mouse(void) {
 
 /* what ctui_mouse_enable(track) writes to the terminal (stdout, caught
  * in a pipe) */
-static const char *mouse_enable_writes(int track) {
+static int g_track;
+static void enable_with_track(void) { ctui_mouse_enable(g_track); }
+
+/* what fn writes to the terminal (stdout, caught in a pipe) */
+static const char *mouse_enable_writes_fn(void (*fn)(void)) {
   static char buf[256];
   int p[2];
   pipe(p);
@@ -346,7 +350,7 @@ static const char *mouse_enable_writes(int track) {
   int saved = dup(STDOUT_FILENO);
   dup2(p[1], STDOUT_FILENO);
   close(p[1]);
-  ctui_mouse_enable(track);
+  fn();
   fflush(stdout);
   dup2(saved, STDOUT_FILENO);
   close(saved);
@@ -354,6 +358,11 @@ static const char *mouse_enable_writes(int track) {
   buf[n > 0 ? n : 0] = '\0';
   close(p[0]);
   return buf;
+}
+
+static const char *mouse_enable_writes(int track) {
+  g_track = track;
+  return mouse_enable_writes_fn(enable_with_track);
 }
 
 /* the terminal has one tracking mode: ctui_mouse_enable() only raises it */
@@ -371,6 +380,46 @@ static void test_mouse_modes(void) {
                    "any motion raises it to 1003");
   CTUI_TEST_ASSERT(!*mouse_enable_writes(CTUI_MOUSE_TRACK_DRAG),
                    "a later drag doesn't narrow 1003 back to 1002");
+}
+
+/* SGR-Pixels (ctui_mouse_pixels_enable()): x/y are pixels, row/col the
+ * cell under them; a leave report is nothing */
+static void test_mouse_pixels(void) {
+  CTUI_EVENT ev;
+  CTUI_MOUSE_EVENT_DATA *md;
+
+  feed("\x1b[<0;10;5M");
+  md = next_mouse(&ev);
+  CTUI_TEST_ASSERT(md && md->px == -1 && md->py == -1,
+                   "cell reports carry no pixel (-1)");
+
+  ctui_cell_px_set(10, 20);
+  CTUI_TEST_ASSERT(strcmp(mouse_enable_writes_fn(ctui_mouse_pixels_enable),
+                          "\x1b[?1016h") == 0,
+                   "with the mouse on, asking for pixels writes 1016");
+  feed("\x1b[<0;0;0M");
+  md = next_mouse(&ev);
+  CTUI_TEST_ASSERT(md && md->action == CTUI_MOUSE_PRESS && md->px == 0 &&
+                       md->py == 0 && md->col == 0 && md->row == 0,
+                   "pixel 0,0 (kitty's are 0-based) is no longer malformed");
+  feed("\x1b[<32;127;45M");
+  md = next_mouse(&ev);
+  CTUI_TEST_ASSERT(md && md->action == CTUI_MOUSE_MOTION && md->px == 127 &&
+                       md->py == 45 && md->col == 12 && md->row == 2,
+                   "a drag at 127,45 px is cell 12,2 at 10x20 px cells");
+  feed("\x1b[<32;-3;-21M");
+  md = next_mouse(&ev);
+  CTUI_TEST_ASSERT(md && md->px == -3 && md->py == -21 && md->col == -1 &&
+                       md->row == -2,
+                   "dragged out past the left/top: negative pixels, cells "
+                   "rounded down");
+  feed("\x1b[<288;5;5M");
+  CTUI_TEST_ASSERT(ctui_input_loop(&ev, 0) && ev.type == CTUI_KEYPRESS_EVENT &&
+                       ((CTUI_KEYPRESS_EVENT_DATA *)ev.event_data)->type ==
+                           CTUI_KEY_NONE,
+                   "kitty's leave report (256 + 32) resolves to nothing, not "
+                   "a left drag");
+  ctui_cell_px_set(0, 0);
 }
 
 static int g_io_calls = 0;
@@ -785,6 +834,7 @@ int main(void) {
   test_keys();
   test_mouse();
   test_mouse_modes();
+  test_mouse_pixels();
   test_focus();
   test_csi_u();
   test_osc();

@@ -18,6 +18,10 @@ extern volatile sig_atomic_t ctui_g_resize_pending;
  * don't need an app pointer threaded through every call */
 extern CTUI_APP *ctui_g_app;
 
+/* 1 once ctui_mouse_pixels_enable() (term.c) asked for SGR-Pixels
+ * reports: resolve_mouse() (input.c) then reads pixels, not cells */
+extern int ctui_g_mouse_pixels;
+
 /* the graphics mode negotiated by ctui_init() (term.c) -- one CTUI_GFX_MODE
  * value, not a bitmask. Not read by ctui_screen_flush() (per-cell
  * color_mode drives emission there, see GFX_DESIGN.md); reserved for

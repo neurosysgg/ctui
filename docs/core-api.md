@@ -325,7 +325,8 @@ addEventListener()-style: widgets register interest in one
 - `CTUI_MOUSE_EVENT_DATA` — `action` (press/release/motion/scroll),
   `button` (0 left, 1 middle, 2 right, `CTUI_MOUSE_BUTTON_BACK` /
   `_FORWARD` for a mouse's side buttons, 5-6 beyond), absolute
-  `row/col`, `mods`. Only produced after
+  `row/col`, `mods`, and `px/py` (the pixel in the window after
+  `ctui_mouse_pixels_enable()`, else -1). Only produced after
   `ctui_mouse_enable()` (`term.h`); every listener gets every report
   and hit-tests with `ctui_widget_contains()`.
 - `CTUI_FOCUS_EVENT_DATA` — `focused` (1 = the terminal window gained
@@ -513,6 +514,13 @@ above into the loop described in "Life of a frame".
   held, for sliders and drag handles) or `CTUI_MOUSE_TRACK_ANY` (1: plus
   every motion, for hover; chatty). The terminal has one mode, so calls
   only raise it: widgets can each ask for their own level in any order.
+- `ctui_mouse_pixels_enable()` — the reports in pixels (SGR-Pixels,
+  mode 1016): events then carry `px/py`, `row/col` still the cell
+  under them (so hit tests are unchanged); for a brush on a picture.
+  A no-op where the cell size in pixels is unknown.
+- `ctui_cell_px(cw, ch)` — the cell size in pixels (TIOCGWINSZ), or
+  what `ctui_cell_px_set(cw, ch)` set (tests; 0, 0 asks again); -1 when
+  unknown. `ctui_drawn_cell_px()` falls back to it.
 - `ctui_focus_enable()` — opt into focus reports (`CTUI_FOCUS_EVENT`)
   when the terminal window gains/loses keyboard focus;
   `ctui_shutdown()` turns them back off.

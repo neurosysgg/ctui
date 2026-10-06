@@ -34,6 +34,23 @@ void ctui_get_termsize(int *rows, int *cols);
  * select anyway); ctui_shutdown() turns it back off. */
 void ctui_mouse_enable(int track_motion);
 
+/* asks for the mouse in pixels (SGR-Pixels, mode 1016; kitty, foot,
+ * WezTerm, xterm): CTUI_MOUSE_EVENT_DATA's px/py then say the pixel
+ * within the window, row/col still the cell under it (px / cell width),
+ * so hit tests stay as they are. For whatever needs finer than a cell --
+ * a brush on a picture. Before or after ctui_mouse_enable(); a no-op,
+ * logged, where the cell size in pixels is unknown (no ws_xpixel). Off
+ * again with the mouse at ctui_shutdown(). */
+void ctui_mouse_pixels_enable(void);
+
+/* the cell size in pixels from the terminal (TIOCGWINSZ): 0, or -1 when
+ * it doesn't say */
+int ctui_cell_px(int *cw, int *ch);
+
+/* a cell size ctui_cell_px() says instead of asking (0 x 0: ask again) --
+ * for a terminal that doesn't report one, and for tests */
+void ctui_cell_px_set(int cw, int ch);
+
 /* opts into focus reporting (CTUI_FOCUS_EVENT, core/event.h): the terminal
  * says when its window gains or loses keyboard focus -- e.g. a popup that
  * closes when the user clicks elsewhere. Call after ctui_init();

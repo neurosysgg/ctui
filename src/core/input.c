@@ -148,7 +148,7 @@ static int resolve_mouse(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   long b = strtol(params, &end, 10);
   long x = *end == ';' ? strtol(end + 1, &end, 10) : 0;
   long y = *end == ';' ? strtol(end + 1, &end, 10) : 0;
-  if (x < 1 || y < 1) {
+  if (!ctui_g_mouse_pixels && (x < 1 || y < 1)) {
     ctui_logf(E_WRN, "[CTUI:INPUT] - malformed SGR mouse report @ tick %d\n",
               ctui_tick_advance());
     return resolve_key(ev, kp, CTUI_KEY_NONE, 0, 0);
@@ -161,6 +161,20 @@ static int resolve_mouse(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
              ((b & 16) ? CTUI_MOD_CTRL : 0);
   md->row = (int)y - 1;
   md->col = (int)x - 1;
+  md->px = md->py = -1;
+  int cw, ch;
+  if (ctui_g_mouse_pixels && ctui_cell_px(&cw, &ch) == 0) {
+    /* kitty: 0-based, relative to the cell area, past it while a drag
+     * leaves the window */
+    md->px = (int)x;
+    md->py = (int)y;
+    md->col = md->px >= 0 ? md->px / cw : -1 - (-1 - md->px) / cw;
+    md->row = md->py >= 0 ? md->py / ch : -1 - (-1 - md->py) / ch;
+  }
+  if (b & 256) {
+    /* kitty's leave report (pixel mode only): nothing to act on */
+    return resolve_key(ev, kp, CTUI_KEY_NONE, 0, 0);
+  }
   if (b & 64) {
     /* 66/67 are horizontal wheel -- no action for those yet */
     if (btn != 0 && btn != 1) {

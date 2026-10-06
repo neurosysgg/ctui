@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The mouse in pixels: `ctui_mouse_pixels_enable()`** (2026-10-06,
+  for ctui-wm's photo editor: a brush at the picture's pixels, not the
+  cells'). Mode 1016 (SGR-Pixels) on top of whatever tracking is on,
+  off again with it; `CTUI_MOUSE_EVENT_DATA.px/py` the pixel (kitty's
+  0-based, negative or past the edge while a drag leaves the window),
+  `row/col` derived from it by the cell size so hit tests stay as they
+  are; kitty's leave report (256) resolves to nothing. Cell reports
+  carry -1. `ctui_cell_px()` / `_set()` in core (the look's
+  `ctui_drawn_cell_px()` now asks it). input_test (5).
+
 - [x] **A marked table row filled: `CTUI_STYLE.mark_bg`** (2026-10-06,
   for ctui-mus's playlist selection). A style with a `mark_bg` (or its
   `CTUI_STYLE_MARK_BG` 24-bit colour) fills a marked row across in it,

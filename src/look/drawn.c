@@ -6,11 +6,12 @@
 #include "icon.h"
 #include "png.h"
 
+#include "../core/term.h"
+
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -58,14 +59,7 @@ int ctui_drawn_cell_px(int *cw, int *ch) {
     *ch = g_ch;
     return 0;
   }
-  struct winsize ws;
-  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0 || !ws.ws_col || !ws.ws_row ||
-      !ws.ws_xpixel || !ws.ws_ypixel) {
-    return -1;
-  }
-  *cw = ws.ws_xpixel / ws.ws_col;
-  *ch = ws.ws_ypixel / ws.ws_row;
-  return *cw > 0 && *ch > 0 ? 0 : -1;
+  return ctui_cell_px(cw, ch);
 }
 
 void ctui_drawn_path(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,

@@ -20,6 +20,7 @@
 static struct termios orig_termios, raw_termios;
 /* 0 off, else 1 + the tracking level: clicks 1, drag 2, any motion 3 */
 static int g_mouse_enabled = 0;
+int ctui_g_mouse_pixels = 0;
 static int g_focus_enabled = 0;
 static int g_kitty_keys_enabled = 0;
 
@@ -133,12 +134,16 @@ static void mouse_on(int level) {
   printf(level == 3   ? "\x1b[?1000h\x1b[?1003h\x1b[?1006h"
          : level == 2 ? "\x1b[?1000h\x1b[?1002h\x1b[?1006h"
                       : "\x1b[?1000h\x1b[?1006h");
+  if (ctui_g_mouse_pixels) {
+    printf("\x1b[?1016h");
+  }
 }
 
 /* every mode ctui turned on, off again (the flags stay: for a resume) */
 static void modes_off(void) {
   if (g_mouse_enabled) {
-    printf("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
+    printf("%s\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l",
+           ctui_g_mouse_pixels ? "\x1b[?1016l" : "");
   }
   if (g_focus_enabled) {
     printf("\x1b[?1004l");
@@ -191,6 +196,54 @@ void ctui_mouse_enable(int track_motion) {
             ctui_tick_advance(), track_motion);
 }
 
+void ctui_mouse_pixels_enable(void) {
+  if (ctui_g_mouse_pixels) {
+    return;
+  }
+  /* 1016 = SGR-Pixels: the same reports, x/y in pixels of the window;
+   * a terminal without it ignores the mode and keeps sending cells,
+   * which the replies can't tell apart -- so only ask where the cell
+   * size is known (resolve_mouse() needs it for row/col) */
+  int cw, ch;
+  if (ctui_cell_px(&cw, &ch) != 0) {
+    ctui_logf(E_WRN,
+              "[CTUI:TERM] - pixel mouse not turned on: the cell size is "
+              "unknown @ tick %d\n",
+              ctui_tick_advance());
+    return;
+  }
+  ctui_g_mouse_pixels = 1;
+  if (g_mouse_enabled) {
+    printf("\x1b[?1016h");
+    fflush(stdout);
+  }
+  ctui_logf(E_INF, "[CTUI:TERM] - pixel mouse reports on @ tick %d\n",
+            ctui_tick_advance());
+}
+
+static int g_cell_w = 0, g_cell_h = 0;
+
+void ctui_cell_px_set(int cw, int ch) {
+  g_cell_w = cw;
+  g_cell_h = ch;
+}
+
+int ctui_cell_px(int *cw, int *ch) {
+  if (g_cell_w > 0 && g_cell_h > 0) {
+    *cw = g_cell_w;
+    *ch = g_cell_h;
+    return 0;
+  }
+  struct winsize ws;
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0 || !ws.ws_col || !ws.ws_row ||
+      !ws.ws_xpixel || !ws.ws_ypixel) {
+    return -1;
+  }
+  *cw = ws.ws_xpixel / ws.ws_col;
+  *ch = ws.ws_ypixel / ws.ws_row;
+  return *cw > 0 && *ch > 0 ? 0 : -1;
+}
+
 void ctui_focus_enable(void) {
   printf("\x1b[?1004h");
   fflush(stdout);
@@ -220,6 +273,7 @@ void ctui_shutdown(void) {
   ctui_log_shutdown();
   modes_off();
   g_mouse_enabled = g_focus_enabled = g_kitty_keys_enabled = 0;
+  ctui_g_mouse_pixels = 0;
   fflush(stdout);
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
