@@ -106,6 +106,22 @@ static void test_puts_cut(void) {
   ctui_compositor_free(comp);
 }
 
+static void test_puts_cut_cell(void) {
+  CTUI_COMPOSITOR *comp = ctui_compositor_create(1, 10);
+  CTUI_WIDGET w = ctui_widget_make(0, 0, 10, 1, NULL, noop_render, NULL);
+  ctui_widget_init(&w, comp);
+  CTUI_CELL pen = {.color_mode = CTUI_COLOR_MODE_RGB_FG, .fg_r = 9, .bg = CTUI_COLOR_DEFAULT,
+                   .attr = CTUI_ATTR_BOLD};
+  int used = ctui_widget_puts_cut_cell(&w, comp, 0, 0, "abcdef", 4, &pen);
+  CTUI_TEST_ASSERT(used == 4 && comp->cells[3].ch == 0x2026 &&
+                       comp->cells[0].color_mode == CTUI_COLOR_MODE_RGB_FG &&
+                       comp->cells[0].fg_r == 9 && comp->cells[3].fg_r == 9 &&
+                       comp->cells[3].attr == CTUI_ATTR_BOLD,
+                   "puts_cut_cell() cuts as puts_cut() does, every cell (the "
+                   "ellipsis too) in the pen's colours and attributes");
+  ctui_compositor_free(comp);
+}
+
 static void test_puts_and_color_modes(void) {
   CTUI_COMPOSITOR *comp = ctui_compositor_create(5, 20);
   CTUI_WIDGET w = ctui_widget_make(0, 0, 20, 5, NULL, noop_render, NULL);
@@ -374,6 +390,7 @@ int main(void) {
   test_putc_bounds();
   test_puts_and_color_modes();
   test_puts_cut();
+  test_puts_cut_cell();
   test_puts_n();
   test_puts_cell();
   test_widget_init_out_of_bounds();

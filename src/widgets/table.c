@@ -173,13 +173,13 @@ int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
 
 static void draw_cell(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
                       int x, int w, const char *s, int right,
-                      unsigned char fg, unsigned char bg) {
+                      const CTUI_CELL *pen) {
   if (w <= 0 || !s) {
     return;
   }
   int sw = ctui_utf8_width(s);
   int at = right && sw < w ? x + w - sw : x;
-  ctui_widget_puts_cut(self, comp, row, at, s, w, fg, bg);
+  ctui_widget_puts_cut_cell(self, comp, row, at, s, w, pen);
 }
 
 void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
@@ -203,8 +203,8 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                c != t->sort_col ? ""
                : t->sort_desc   ? " \xe2\x96\xbe"   /* ▾ */
                                 : " \xe2\x96\xb4"); /* ▴ */
-      draw_cell(self, comp, 0, x, w, title, t->columns[c].align_right,
-                st->title_fg, st->bg);
+      CTUI_CELL pen = ctui_style_cell(st, CTUI_STYLE_TITLE, CTUI_STYLE_BG, 0, 0);
+      draw_cell(self, comp, 0, x, w, title, t->columns[c].align_right, &pen);
     }
     row = 1;
   }
@@ -212,20 +212,27 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   for (int r = t->scroll; r < t->count && row < self->h; r++, row++) {
     int sel = r == t->selected, marked = t->marks && t->marks[r];
     int span = t->row_span && t->row_span(t->ctx, r);
-    unsigned char fg = t->row_fg ? t->row_fg(t->ctx, r) : 0;
-    fg = marked ? st->mark_fg : fg ? fg : span ? st->title_fg : st->fg;
-    unsigned char bg = st->bg;
+    /* the row's own colour (row_fg) is a basic one */
+    unsigned char own = t->row_fg ? t->row_fg(t->ctx, r) : 0;
+    CTUI_STYLE_SLOT fg = marked ? CTUI_STYLE_MARK
+                         : own  ? CTUI_STYLE_NONE
+                         : span ? CTUI_STYLE_TITLE
+                                : CTUI_STYLE_FG;
+    CTUI_STYLE_SLOT bg = CTUI_STYLE_BG;
     if (sel) {
-      fg = marked ? st->mark_fg : st->sel_fg;
-      bg = st->sel_bg;
+      fg = marked ? CTUI_STYLE_MARK : CTUI_STYLE_SEL_FG;
+      bg = CTUI_STYLE_SEL_BG;
+    }
+    CTUI_CELL pen = ctui_style_cell(st, fg, bg, own, 0);
+    if (sel) {
       for (int c = 0; c < cols; c++) {
-        ctui_widget_putc(self, comp, row, c, ' ', fg, bg);
+        ctui_widget_putc_cell(self, comp, row, c, ' ', &pen);
       }
     }
     if (span) {
       scratch[0] = '\0';
       draw_cell(self, comp, row, 0, cols,
-                t->cell(t->ctx, r, 0, scratch, sizeof scratch), 0, fg, bg);
+                t->cell(t->ctx, r, 0, scratch, sizeof scratch), 0, &pen);
       continue;
     }
     for (int c = 0; c < t->column_count; c++) {
@@ -233,7 +240,7 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       ctui_table_column_span(t, cols, c, &x, &w);
       scratch[0] = '\0';
       const char *s = t->cell(t->ctx, r, c, scratch, sizeof scratch);
-      draw_cell(self, comp, row, x, w, s, t->columns[c].align_right, fg, bg);
+      draw_cell(self, comp, row, x, w, s, t->columns[c].align_right, &pen);
     }
   }
   if (cols < self->w) {

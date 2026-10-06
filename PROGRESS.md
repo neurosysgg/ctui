@@ -237,6 +237,23 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **24-bit colours in `CTUI_STYLE`, a group box's rows** (2026-10-06,
+  for ctui-mus's panels in the look). `CTUI_STYLE.rgb[CTUI_STYLE_SLOTS]`:
+  per slot (`CTUI_STYLE_FG`, `_BG`, `_DIM`, `_TITLE`, `_SEL_FG`,
+  `_SEL_BG`, `_MARK`, `_ERROR`) an optional `0xRRGGBB | CTUI_STYLE_RGB`,
+  0 keeping the basic colour; `ctui_style_cell(st, fg, bg, ...)` makes
+  the cell to write (an RGB fg over a basic bg keeps the terminal's
+  background; an RGB bg takes the fg as RGB too, a basic one
+  approximated). The table and the textview write through it so far (a
+  row's own `row_fg` stays basic); entry, dialog, form and tabs keep
+  their basic colours until an app needs theirs. Core:
+  `ctui_widget_puts_cut_cell()` (`puts_cut` with a cell as the style).
+  Look: `ctui_look_box_row(box, cols, r, rows, gap, gap_cols)`, the
+  `CTUI_LOOK_CTL_BOX` for each row of a framed box (the place flags, the
+  heading's gap on top), promoted from ctui-wm's appshell now that
+  ctui-mus frames its panels as group boxes too. Tests: table_test (5),
+  widget_test (1), look_test (3).
+
 - [x] **A splitter control, `CTUI_LOOK_CTL_SPLITTER`** (2026-10-06, for
   ctui-mus's resizable panels). The bar between two panes, vertical when
   taller than wide: the face with three raised bumps across its middle

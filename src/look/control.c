@@ -865,3 +865,22 @@ void ctui_look_control_paint(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
     break;
   }
 }
+
+CTUI_LOOK_CONTROL ctui_look_box_row(int box, int cols, int r, int rows, int gap,
+                                    int gap_cols) {
+  int top = r == 0, bottom = r == rows - 1;
+  int place = (top ? CTUI_LOOK_BOX_TOP : 0) | (bottom ? CTUI_LOOK_BOX_BOTTOM : 0);
+  if (box == CTUI_LOOK_BOX_OUTSET) {
+    place |= CTUI_LOOK_BOX_THICK;
+  } else {
+    place |= CTUI_LOOK_BOX_FLUSH_X | (bottom && !top ? CTUI_LOOK_BOX_FLUSH : 0);
+  }
+  int open = top && gap_cols > 0;
+  return (CTUI_LOOK_CONTROL){.kind = CTUI_LOOK_CTL_BOX,
+                             .span = cols,
+                             .box = (uint8_t)box,
+                             .sides = 0xf,
+                             .place = (uint8_t)place,
+                             .gap = (uint16_t)(open ? gap : 0),
+                             .gap_cols = (uint16_t)(open ? gap_cols : 0)};
+}

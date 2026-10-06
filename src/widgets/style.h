@@ -54,12 +54,33 @@ typedef int (*CTUI_CONTROL_DRAW)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp,
                                  const CTUI_CONTROL *c, unsigned char bg,
                                  void *arg);
 
+/* a CTUI_STYLE colour, by name: an index into its rgb[] */
+typedef enum {
+  CTUI_STYLE_FG,
+  CTUI_STYLE_BG,
+  CTUI_STYLE_DIM,
+  CTUI_STYLE_TITLE,
+  CTUI_STYLE_SEL_FG,
+  CTUI_STYLE_SEL_BG,
+  CTUI_STYLE_MARK,
+  CTUI_STYLE_ERROR,
+  CTUI_STYLE_SLOTS,
+  CTUI_STYLE_NONE = -1 /* no slot: the basic colour given alongside */
+} CTUI_STYLE_SLOT;
+
+/* a slot's rgb[] entry is 0xRRGGBB with this bit set; 0 = the basic one */
+#define CTUI_STYLE_RGB 0x1000000u
+
 /* The colours the app widgets (entry, table, dialog, textview, form,
  * tabs) share, so an app themes all of them in one place: each takes a
  * `const CTUI_STYLE *style`, NULL meaning ctui_style_default. Basic
- * CTUI_COLOR_* values. `control` (NULL: none) is asked before a control
- * is drawn as glyphs; with one set, a table or a textview longer than its
- * pane also shows a scrollbar in its last column (widgets/scrollbar.h). */
+ * CTUI_COLOR_* values, and per slot an optional 24-bit one for a
+ * truecolor terminal (rgb[], CTUI_STYLE_RGB; an app following a look's
+ * colours sets them) -- the table and the textview honour those so far,
+ * the others their basic colours. `control` (NULL: none) is asked before
+ * a control is drawn as glyphs; with one set, a table or a textview
+ * longer than its pane also shows a scrollbar in its last column
+ * (widgets/scrollbar.h). */
 typedef struct {
   unsigned char fg, bg;
   unsigned char dim_fg;         /* hints, headers, secondary text */
@@ -69,6 +90,7 @@ typedef struct {
   unsigned char error_fg;
   CTUI_CONTROL_DRAW control;
   void *control_arg;
+  uint32_t rgb[CTUI_STYLE_SLOTS];
 } CTUI_STYLE;
 
 extern const CTUI_STYLE ctui_style_default;
@@ -77,6 +99,14 @@ extern const CTUI_STYLE ctui_style_default;
 static inline const CTUI_STYLE *ctui_style_of(const CTUI_STYLE *style) {
   return style ? style : &ctui_style_default;
 }
+
+/* the cell to write in fg over bg: the slots' basic colours (fg_basic /
+ * bg_basic where a slot is CTUI_STYLE_NONE), or their 24-bit ones where
+ * st has them -- an RGB fg over a basic bg keeps that bg (the terminal's
+ * background stays the terminal's); an RGB bg takes the fg as RGB too
+ * (a basic one approximated, ctui_gfx_ansi16_rgb()) */
+CTUI_CELL ctui_style_cell(const CTUI_STYLE *st, CTUI_STYLE_SLOT fg, CTUI_STYLE_SLOT bg,
+                          unsigned char fg_basic, unsigned char bg_basic);
 
 /* asks st's hook to draw c (above); 0 without one, or if it declined */
 static inline int ctui_style_control(const CTUI_STYLE *st, CTUI_WIDGET *self,

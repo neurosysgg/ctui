@@ -78,6 +78,7 @@ static const char *row(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int r,
       break;
     }
     if (self) {
+      CTUI_CELL pen = ctui_style_cell(st, CTUI_STYLE_FG, CTUI_STYLE_BG, 0, 0);
       for (int c = col; c < col + gw; c++) {
         int x = c - skip;
         if (x < 0 || x >= width) {
@@ -86,10 +87,10 @@ static const char *row(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int r,
         int whole = cp != '\t' && c == col && col >= skip &&
                     col + gw <= skip + width;
         if (whole) {
-          ctui_widget_putc(self, comp, r, x, cp, st->fg, st->bg);
+          ctui_widget_putc_cell(self, comp, r, x, cp, &pen);
           break;
         }
-        ctui_widget_putc(self, comp, r, x, ' ', st->fg, st->bg);
+        ctui_widget_putc_cell(self, comp, r, x, ' ', &pen);
       }
     }
     col += gw;

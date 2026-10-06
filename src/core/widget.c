@@ -185,14 +185,20 @@ int ctui_widget_puts_n(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
 int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                          int col, const char *str, int width,
                          unsigned char fg, unsigned char bg) {
+  CTUI_CELL style = {.fg = fg, .bg = bg, .color_mode = CTUI_COLOR_MODE_BASIC};
+  return ctui_widget_puts_cut_cell(widget, comp, row, col, str, width, &style);
+}
+
+int ctui_widget_puts_cut_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
+                              int row, int col, const char *str, int width,
+                              const CTUI_CELL *style) {
   if (width <= 0) {
     return 0;
   }
-  CTUI_CELL style = {.fg = fg, .bg = bg, .color_mode = CTUI_COLOR_MODE_BASIC};
   int w;
   size_t n = ctui_utf8_prefix(str, width, &w);
   if (!str[n]) {
-    widget_puts_styled(widget, comp, row, col, str, &style);
+    widget_puts_styled(widget, comp, row, col, str, style);
     return w;
   }
   /* the prefix one column short of width, then U+2026 right after it:
@@ -207,9 +213,9 @@ int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   while (str < end) {
     uint32_t ch;
     str += ctui_utf8_cluster(str, (size_t)(end - str), &ch, NULL);
-    c += widget_put(widget, comp, row, c, ch, &style);
+    c += widget_put(widget, comp, row, c, ch, style);
   }
-  widget_put(widget, comp, row, col + w, 0x2026, &style);
+  widget_put(widget, comp, row, col + w, 0x2026, style);
   return w + 1;
 }
 

@@ -1526,6 +1526,26 @@ static void test_cache(void) {
   ctui_drawn_set_dir(NULL);
 }
 
+/* a framed box's rows: the place flags, the heading's gap on top only */
+static void test_box_rows(void) {
+  CTUI_LOOK_CONTROL t = ctui_look_box_row(CTUI_LOOK_BOX_GROOVE, 20, 0, 4, 2, 5);
+  CTUI_LOOK_CONTROL m = ctui_look_box_row(CTUI_LOOK_BOX_GROOVE, 20, 1, 4, 2, 5);
+  CTUI_LOOK_CONTROL b = ctui_look_box_row(CTUI_LOOK_BOX_GROOVE, 20, 3, 4, 2, 5);
+  CTUI_TEST_ASSERT(t.kind == CTUI_LOOK_CTL_BOX && t.span == 20 && t.sides == 0xf &&
+                       t.place == (CTUI_LOOK_BOX_TOP | CTUI_LOOK_BOX_FLUSH_X) && t.gap == 2 &&
+                       t.gap_cols == 5,
+                   "a group box's top row: open over its heading, flush left / right");
+  CTUI_TEST_ASSERT(m.place == CTUI_LOOK_BOX_FLUSH_X && m.gap_cols == 0 &&
+                       b.place == (CTUI_LOOK_BOX_BOTTOM | CTUI_LOOK_BOX_FLUSH_X |
+                                   CTUI_LOOK_BOX_FLUSH),
+                   "a middle row has sides only, the bottom row is flush at the bottom");
+  CTUI_LOOK_CONTROL one = ctui_look_box_row(CTUI_LOOK_BOX_GROOVE, 8, 0, 1, 0, 0);
+  CTUI_LOOK_CONTROL o = ctui_look_box_row(CTUI_LOOK_BOX_OUTSET, 8, 2, 3, 0, 0);
+  CTUI_TEST_ASSERT(one.place == (CTUI_LOOK_BOX_TOP | CTUI_LOOK_BOX_BOTTOM | CTUI_LOOK_BOX_FLUSH_X) &&
+                       o.place == (CTUI_LOOK_BOX_BOTTOM | CTUI_LOOK_BOX_THICK),
+                   "a one-row box is top and bottom; a dialog's frame is thick, not flush");
+}
+
 int main(void) {
   ctui_log_init(0);
   test_looks();
@@ -1545,6 +1565,7 @@ int main(void) {
   test_column();
   test_sky();
   test_cache();
+  test_box_rows();
   test_filter();
   test_filter_config();
   return ctui_test_summary();

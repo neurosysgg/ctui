@@ -283,6 +283,9 @@ ever set; every other widget leaves both `NULL`.
   `puts` cut to `width` columns, a string that doesn't fit ending in "…"
   (U+2026) in the last one; returns the columns written. The way to draw
   anything (a title, a name) that may be longer than its room.
+  `ctui_widget_puts_cut_cell(widget, comp, row, col, str, width, style)`
+  is the same with a whole `CTUI_CELL` as the style (every cell, the
+  "…" too).
 - `ctui_widget_puts_n(widget, comp, row, col, str, n, fg, bg)` — puts of
   `str`'s first `n` bytes (stopping early at a NUL): a slice of a longer
   text, such as a line from `ctui_util_wrap()`, drawn without copying it

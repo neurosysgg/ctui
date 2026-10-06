@@ -267,6 +267,38 @@ int main(void) {
   t.row_span = NULL;
   span_row = -1;
 
+  /* 24-bit colours in the style: the slots that have one take it */
+  CTUI_STYLE tinted = ctui_style_default;
+  tinted.rgb[CTUI_STYLE_FG] = CTUI_STYLE_RGB | 0x102030;
+  tinted.rgb[CTUI_STYLE_TITLE] = CTUI_STYLE_RGB | 0x405060;
+  tinted.rgb[CTUI_STYLE_SEL_BG] = CTUI_STYLE_RGB | 0x000080;
+  tinted.rgb[CTUI_STYLE_SEL_FG] = CTUI_STYLE_RGB | 0xffffff;
+  t.style = &tinted;
+  int was = t.selected;
+  marks[0] = 0;
+  ctui_test_key(&app, screen, CTUI_KEY_HOME, 0);
+  const CTUI_CELL *head = &screen->cells[1 * cols + 2];
+  const CTUI_CELL *cur = &screen->cells[2 * cols + 2];
+  const CTUI_CELL *own = &screen->cells[3 * cols + 2];
+  const CTUI_CELL *plain = &screen->cells[4 * cols + 2];
+  CTUI_TEST_ASSERT(head->color_mode == CTUI_COLOR_MODE_RGB_FG && head->fg_b == 0x60 &&
+                       head->bg == CTUI_COLOR_DEFAULT,
+                   "rgb: the header in the title's, over the terminal's background");
+  CTUI_TEST_ASSERT(cur->color_mode == CTUI_COLOR_MODE_RGB && cur->bg_b == 0x80 &&
+                       cur->fg_r == 0xff && screen->cells[2 * cols + 21].bg_b == 0x80,
+                   "rgb: the cursor row across, in the selection's");
+  CTUI_TEST_ASSERT(plain->color_mode == CTUI_COLOR_MODE_RGB_FG && plain->fg_g == 0x20,
+                   "rgb: a plain row in the text's");
+  CTUI_TEST_ASSERT(own->color_mode == CTUI_COLOR_MODE_BASIC && own->fg == CTUI_COLOR_RED,
+                   "rgb: a row's own colour (row_fg) stays basic");
+  tinted.rgb[CTUI_STYLE_SEL_FG] = 0;
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(cur->color_mode == CTUI_COLOR_MODE_RGB && cur->bg_b == 0x80 &&
+                       cur->fg_r == 0 && cur->fg_g == 0 && cur->fg_b == 0,
+                   "rgb: an rgb background takes a basic fg as rgb (black)");
+  t.style = NULL;
+  ctui_table_select(&t, was);
+
   t.count = 2;
   ctui_app_render(&app, screen);
   CTUI_TEST_ASSERT(t.selected == 1 && t.scroll == 0,

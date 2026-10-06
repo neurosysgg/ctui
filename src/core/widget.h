@@ -167,6 +167,10 @@ int ctui_widget_putc_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
 int ctui_widget_puts_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           int col, const char *str, size_t n,
                           const CTUI_CELL *style);
+/* puts_cut() with a whole cell as the style */
+int ctui_widget_puts_cut_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
+                              int row, int col, const char *str, int width,
+                              const CTUI_CELL *style);
 
 /* same as ctui_widget_putc()/puts() above, except fg/bg are read as a
  * 0-255 ANSI 256-color index (CTUI_COLOR_MODE_256) instead of a basic

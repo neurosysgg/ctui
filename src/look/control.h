@@ -149,6 +149,16 @@ enum {
 #define CTUI_LOOK_BOX_FLUSH_LEFT 64
 #define CTUI_LOOK_BOX_FLUSH_RIGHT 128
 
+/* row r (of rows) of a framed box drawn as one CTUI_LOOK_CTL_BOX per row
+ * (the middle rows one picture): box a CTUI_LOOK_BOX_STYLE over cols
+ * cells, all four sides; the top row's edge left open over gap_cols
+ * cells from gap (a group box's heading, a dialog's title; gap_cols 0:
+ * none). OUTSET (a dialog's frame) is 2 px; the others sit flush with the
+ * cells' left / right and the bottom row's bottom, so a box filling a
+ * pane reaches its edges. */
+CTUI_LOOK_CONTROL ctui_look_box_row(int box, int cols, int r, int rows, int gap,
+                                    int gap_cols);
+
 /* rewrites c's numbers to the pixels they land on in a w x h box (a
  * slider's value = its thumb's x, max = the thumb's travel, ...), so
  * every state that looks the same is the same; painting the snapped
