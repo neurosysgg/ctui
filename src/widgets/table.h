@@ -17,9 +17,10 @@
  * marks). Mouse: a click selects a row, a click on the selected row
  * activates it, a right click selects it and asks for its menu, the wheel
  * moves three rows, a header click sorts by that column (again: the
- * other way). More rows than fit get a scrollbar in the last column where
- * the style has a control hook (scrollbar.h): scrolling by it takes the
- * cursor along, so it stays on the same line of the view. */
+ * other way), a right click on it asks for that column's menu. More rows than
+ * fit get a scrollbar in the last column where the style has a control hook
+ * (scrollbar.h): scrolling by it takes the cursor along, so it stays on the
+ * same line of the view. */
 typedef struct {
   const char *title;
   int width;       /* > 0: that many columns; 0: an even share of the rest */
@@ -50,17 +51,19 @@ typedef struct {
   void *ctx;
   const CTUI_STYLE *style;
   int page; /* rows shown by the last render (pgup/pgdn) */
+  int menu_col; /* the column the last header right click was on */
   CTUI_SCROLLBAR bar;
 } CTUI_TABLE;
 
 /* what a key or a click did */
 enum {
   CTUI_TABLE_NONE = 0,
-  CTUI_TABLE_MOVED,    /* the cursor moved */
-  CTUI_TABLE_ACTIVATE, /* Enter / a click on the cursor row */
-  CTUI_TABLE_MARK,     /* a mark toggled (the cursor may have moved too) */
-  CTUI_TABLE_SORT,     /* sort_col / sort_desc changed: re-order the rows */
-  CTUI_TABLE_MENU,     /* a right click: the cursor row's menu */
+  CTUI_TABLE_MOVED,       /* the cursor moved */
+  CTUI_TABLE_ACTIVATE,    /* Enter / a click on the cursor row */
+  CTUI_TABLE_MARK,        /* a mark toggled (the cursor may have moved too) */
+  CTUI_TABLE_SORT,        /* sort_col / sort_desc changed: re-order the rows */
+  CTUI_TABLE_MENU,        /* a right click: the cursor row's menu */
+  CTUI_TABLE_HEADER_MENU, /* a right click on the header: menu_col's menu */
 };
 
 /* moves the cursor to row (clamped), scrolling it into view; call after
@@ -89,8 +92,9 @@ void ctui_table_column_span(const CTUI_TABLE *t, int w, int i, int *x,
 
 /* ("input", CTUI_KEYPRESS_EVENT) and ("input", CTUI_MOUSE_EVENT): each
  * result but NONE emits a CTUI_VALUE_CHANGED_EVENT (source "table", origin
- * self), value = "moved" | "activate" | "mark" | "sort" | "menu", enabled =
- * the cursor row (the column for "sort") */
+ * self), value = "moved" | "activate" | "mark" | "sort" | "menu" |
+ * "header_menu", enabled = the cursor row (the column for "sort" and
+ * "header_menu") */
 int ctui_table_handle_keypress(CTUI_WIDGET *self, CTUI_EVENT *ev);
 int ctui_table_handle_mouse(CTUI_WIDGET *self, CTUI_EVENT *ev);
 

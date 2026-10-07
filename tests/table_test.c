@@ -176,6 +176,11 @@ int main(void) {
   click(&app, screen, 1, 20, 0, CTUI_MOUSE_PRESS);
   CTUI_TEST_ASSERT(t.sort_desc && ctui_test_row_contains(screen, 1, "Size ▾"),
                    "again: the other way");
+  click(&app, screen, 1, 20, 2, CTUI_MOUSE_PRESS);
+  CTUI_TEST_ASSERT(
+      !strcmp(got, "header_menu") && got_row == 1 && t.menu_col == 1 &&
+          t.sort_col == 1 && t.sort_desc,
+      "a right click on the header asks for that column's menu, the sort kept");
   click(&app, screen, 5, 5, -1, CTUI_MOUSE_SCROLL_DOWN);
   CTUI_TEST_ASSERT(t.selected == 6, "the wheel moves three rows (%d)",
                    t.selected);

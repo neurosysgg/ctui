@@ -90,7 +90,7 @@ int ctui_tabs_mouse(CTUI_TABS *t, const CTUI_WIDGET *self,
   if (m->action == CTUI_MOUSE_SCROLL_UP || m->action == CTUI_MOUSE_SCROLL_DOWN) {
     return move(t, m->action == CTUI_MOUSE_SCROLL_UP ? -1 : 1, t->selected);
   }
-  if (m->action != CTUI_MOUSE_PRESS || m->button != 0) {
+  if (m->action != CTUI_MOUSE_PRESS || (m->button != 0 && m->button != 2)) {
     return CTUI_TABS_NONE;
   }
   int hit = -1;
@@ -106,7 +106,14 @@ int ctui_tabs_mouse(CTUI_TABS *t, const CTUI_WIDGET *self,
       x += w;
     }
   }
-  if (!selectable(t, hit) || hit == t->selected) {
+  if (!selectable(t, hit)) {
+    return CTUI_TABS_NONE;
+  }
+  if (m->button == 2) {
+    t->menu_item = hit;
+    return CTUI_TABS_MENU;
+  }
+  if (hit == t->selected) {
     return CTUI_TABS_NONE;
   }
   t->selected = hit;
@@ -158,11 +165,14 @@ static int emit(CTUI_WIDGET *self, int what) {
     return 0;
   }
   CTUI_TABS *t = self->widget_data;
-  const char *name = what == CTUI_TABS_MOVED ? "moved" : "activate";
+  const char *name = what == CTUI_TABS_MOVED      ? "moved"
+                     : what == CTUI_TABS_ACTIVATE ? "activate"
+                                                  : "menu";
   ctui_logf(E_INF, "[CTUI:TABS] - %s '%s' @ tick %d\n", name,
             t->items[t->selected].label, ctui_tick_advance());
-  CTUI_VALUE_CHANGED_EVENT_DATA changed = {.value = name,
-                                           .enabled = t->selected};
+  CTUI_VALUE_CHANGED_EVENT_DATA changed = {
+      .value = name,
+      .enabled = what == CTUI_TABS_MENU ? t->menu_item : t->selected};
   CTUI_EVENT out = {.type = CTUI_VALUE_CHANGED_EVENT,
                     .scope = CTUI_EVENT_SCOPE_GLOBAL,
                     .ev_source = "tabs",

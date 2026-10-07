@@ -89,6 +89,17 @@ int main(void) {
   CTUI_TEST_ASSERT(side.selected == 2, "a click selects");
   click(&app, screen, 4, 4);
   CTUI_TEST_ASSERT(side.selected == 2, "a click on a heading doesn't");
+  CTUI_MOUSE_EVENT_DATA right = {
+      .action = CTUI_MOUSE_PRESS, .button = 2, .row = 5, .col = 4};
+  CTUI_TEST_ASSERT(
+      ctui_tabs_mouse(&side, &sw, &right) == CTUI_TABS_MENU &&
+          side.menu_item == 4 && side.selected == 2,
+      "a right click asks for that item's menu, the selection kept");
+  right.row = 4;
+  side.menu_item = -1;
+  CTUI_TEST_ASSERT(ctui_tabs_mouse(&side, &sw, &right) == CTUI_TABS_NONE &&
+                       side.menu_item == -1,
+                   "a right click on a heading: nothing");
 
   sw.h = 2;
   side.selected = 5;

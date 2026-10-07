@@ -237,6 +237,31 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A popup menu: `widgets/popmenu`** (2026-10-07, for ctui-mus's
+  right-click menus; ctui-wm's three app-local menus -- photo's and web's
+  menubars, the tray's menuview -- are the same shape and can move to it).
+  Opened at a cell, its submenus cascading beside their items, each level
+  kept on screen (flipped left of / above its point when it won't fit,
+  so the opening press's release lands on the frame's corner, never an
+  item). Items: an `&` letter (underlined; "&&" an '&'), a key hint,
+  act / arg, separator / off / checked / radio flags, a submenu. Keys
+  (up / down wrapping and skipping what can't be chosen, Home / End,
+  Right / Enter open a submenu, Left / Esc close a level, a letter
+  chooses its one item or moves between several); the mouse (the pointer
+  selects and opens a submenu, a release chooses -- press, drag,
+  release works -- a press outside cancels). The frame goes to the
+  style's hook as a `CTUI_CONTROL_FRAME`, else box drawing. Pure
+  `_key()` / `_mouse()` returning NONE / REDRAW / CHOSEN / CLOSED as the
+  dialog's, and event wrappers (source "popmenu"). popmenu_test (56).
+
+- [x] **The table's and the tabs' right clicks** (2026-10-07, the same
+  menus). A right click on the table's header returns
+  `CTUI_TABLE_HEADER_MENU` with the column in `menu_col` (event
+  "header_menu"); the sort is left alone. A right click on a tab returns
+  `CTUI_TABS_MENU` with the item in `menu_item` (event "menu"), the
+  selection left alone, so an app reacting to MOVED only isn't handed a
+  selection it didn't show. table_test (1), tabs_test (2).
+
 - [x] **The mouse in pixels: `ctui_mouse_pixels_enable()`** (2026-10-06,
   for ctui-wm's photo editor: a brush at the picture's pixels, not the
   cells'). Mode 1016 (SGR-Pixels) on top of whatever tracking is on,

@@ -167,7 +167,8 @@ else.
 - `src/widgets/` — the built-in widget catalog (`border`, `label`,
   `menu`, `status`, `debug_info`, `dump_palette`, `grid`, `list`,
   `periodic`, `kitty_image`, `clock`, and the app widgets sharing one
-  `style`: `entry`, `table`, `dialog`, `textview`, `form`, `tabs`, and
+  `style`: `entry`, `table`, `dialog`, `textview`, `form`, `tabs`,
+  `popmenu` (a right-click menu with cascading submenus), and
   the `scrollbar` the table and textview show), each a
   small `.c`/`.h` pair built entirely on the public `ctui.h` API.
 - `src/json/` — a growable string (`buf`) and a JSON parser / writer for

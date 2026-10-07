@@ -143,17 +143,19 @@ int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
   }
   int row = m->row - self->y, col = m->col - self->x;
   if (t->header && row == 0) {
-    if (m->button != 0) {
-      return CTUI_TABLE_NONE;
-    }
     for (int c = 0; c < t->column_count; c++) {
       int x, w;
       ctui_table_column_span(t, cols, c, &x, &w);
-      if (col >= x && col < x + w) {
-        t->sort_desc = t->sort_col == c ? !t->sort_desc : 0;
-        t->sort_col = c;
-        return CTUI_TABLE_SORT;
+      if (col < x || col >= x + w) {
+        continue;
       }
+      if (m->button == 2) {
+        t->menu_col = c;
+        return CTUI_TABLE_HEADER_MENU;
+      }
+      t->sort_desc = t->sort_col == c ? !t->sort_desc : 0;
+      t->sort_col = c;
+      return CTUI_TABLE_SORT;
     }
     return CTUI_TABLE_NONE;
   }
@@ -255,8 +257,8 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   }
 }
 
-static const char *const action_names[] = {"", "moved", "activate", "mark",
-                                           "sort", "menu"};
+static const char *const action_names[] = {
+    "", "moved", "activate", "mark", "sort", "menu", "header_menu"};
 
 static int emit(CTUI_WIDGET *self, int what) {
   if (what == CTUI_TABLE_NONE) {
@@ -267,7 +269,9 @@ static int emit(CTUI_WIDGET *self, int what) {
             action_names[what], ctui_tick_advance(), t->selected, t->count);
   CTUI_VALUE_CHANGED_EVENT_DATA changed = {
       .value = action_names[what],
-      .enabled = what == CTUI_TABLE_SORT ? t->sort_col : t->selected};
+      .enabled = what == CTUI_TABLE_SORT          ? t->sort_col
+                 : what == CTUI_TABLE_HEADER_MENU ? t->menu_col
+                                                  : t->selected};
   CTUI_EVENT out = {.type = CTUI_VALUE_CHANGED_EVENT,
                     .scope = CTUI_EVENT_SCOPE_GLOBAL,
                     .ev_source = "table",
