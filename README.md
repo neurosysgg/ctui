@@ -171,8 +171,10 @@ else.
   `popmenu` (a right-click menu with cascading submenus), and
   the `scrollbar` the table and textview show), each a
   small `.c`/`.h` pair built entirely on the public `ctui.h` API.
-- `src/json/` — a growable string (`buf`) and a JSON parser / writer for
-  hand-edited configs (`json`): `#include "json/json.h"`.
+- `src/json/` — a growable string (`buf`), a JSON parser / writer for
+  hand-edited configs (`json`): `#include "json/json.h"`, and in-place
+  edits of such a config that keep its comments and layout (`jsonedit`:
+  set / remove / insert / swap a member, saved with a `.bak`).
 - `src/look/` — drawn controls: a "look" (colour roles and shape
   parameters, built-ins and from a config's JSON), the controls and
   pictograms painted from it in device pixels, period filters, and

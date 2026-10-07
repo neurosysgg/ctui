@@ -237,6 +237,17 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`json/jsonedit`: a config edited in place** (2026-10-07,
+  promoted from ctui-wm's `base/jsonedit`, its second user ctui-mus's
+  layout editor). Set / remove a member at a path of keys (`"[N]"` an
+  array's item), insert / swap array items: only that member's bytes
+  change, comments and the rest of the file stay; each result parsed
+  again and compared with the tree it should be, refused when not.
+  `ctui_json_edit_write()` as a config writes JSON (short things on one
+  line), `_load()` / `_save()` (a temp file renamed in, the old one kept
+  as `.bak`, the mode kept). jsonedit_test (40). ctui-wm keeps its copy
+  until it moves over.
+
 - [x] **A popup menu: `widgets/popmenu`** (2026-10-07, for ctui-mus's
   right-click menus; ctui-wm's three app-local menus -- photo's and web's
   menubars, the tray's menuview -- are the same shape and can move to it).
