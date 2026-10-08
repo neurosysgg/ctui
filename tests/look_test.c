@@ -923,10 +923,81 @@ static void test_browser(void) {
                    "dragged: the shadow round its grip");
   CTUI_LOOK_CONTROL hover = ctl(CTUI_LOOK_CTL_SPLITTER, 5, 9);
   hover.flags = CTUI_LOOK_CTL_HOVER;
-  CTUI_TEST_ASSERT(ctui_look_control_key(&hover, &l, 9, 60) ==
-                       ctui_look_control_key(&(CTUI_LOOK_CONTROL){.kind = CTUI_LOOK_CTL_SPLITTER},
-                                             &l, 9, 60),
-                   "only being dragged tells two splitters apart");
+  CTUI_TEST_ASSERT(
+      ctui_look_control_key(&hover, &l, 9, 60) ==
+          ctui_look_control_key(
+              &(CTUI_LOOK_CONTROL){.kind = CTUI_LOOK_CTL_SPLITTER}, &l, 9, 60),
+      "only being dragged tells two splitters apart");
+
+  /* a bar's surface: the face, raised along the sides facing the screen
+   * (a bottom taskbar's top, a top bar's bottom) */
+  CTUI_LOOK_CONTROL bar = ctl(CTUI_LOOK_CTL_BAR, 0, 0);
+  p = paint(bar, &l, 40, 20);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 0, 0) == 'f' && px(p, 40, &l, 39, 19) == 'f',
+                   "a bar without sides: the face alone");
+  bar.sides = 1;
+  p = paint(bar, &l, 40, 20);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 5, 0) == 'h' && px(p, 40, &l, 5, 1) == 'l' &&
+                       px(p, 40, &l, 5, 2) == 'f' &&
+                       px(p, 40, &l, 5, 19) == 'f',
+                   "a taskbar: lit along its top, the face below");
+  bar.sides = 4;
+  p = paint(bar, &l, 40, 20);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 5, 19) == 'd' && px(p, 40, &l, 5, 18) == 's' &&
+                       px(p, 40, &l, 5, 0) == 'f',
+                   "a top bar: shaded along its bottom");
+  CTUI_LOOK flat = l;
+  flat.bevel = 0;
+  p = paint(bar, &flat, 40, 20);
+  CTUI_TEST_ASSERT(px(p, 40, &flat, 5, 19) == 's' &&
+                       px(p, 40, &flat, 5, 18) == 'f',
+                   "flat: a line in the shadow");
+  CTUI_LOOK_CONTROL tb = ctl(CTUI_LOOK_CTL_BAR, 3, 9);
+  tb.sides = 1 | 0x30;
+  tb.flags = CTUI_LOOK_CTL_HOVER | CTUI_LOOK_CTL_CHECKED;
+  CTUI_LOOK_CONTROL top0 = ctl(CTUI_LOOK_CTL_BAR, 0, 0);
+  top0.sides = 1;
+  CTUI_TEST_ASSERT(ctui_look_control_key(&tb, &l, 40, 20) ==
+                           ctui_look_control_key(&top0, &l, 40, 20) &&
+                       ctui_look_control_key(&top0, &l, 40, 20) !=
+                           ctui_look_control_key(&bar, &l, 40, 20),
+                   "only a bar's sides tell two apart");
+
+  /* a latched button (the active window's on a taskbar): sunken, the
+   * highlight checkered over the face inside */
+  CTUI_LOOK_CONTROL up = ctl(CTUI_LOOK_CTL_BUTTON, 0, 0);
+  CTUI_LOOK_CONTROL down = up;
+  down.flags = CTUI_LOOK_CTL_CHECKED;
+  p = paint(down, &l, 40, 20);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 0, 0) == 's' && px(p, 40, &l, 39, 19) == 'h' &&
+                       px(p, 40, &l, 10, 10) == 'h' &&
+                       px(p, 40, &l, 11, 10) == 'f',
+                   "latched: sunken, checkered inside (%c %c)",
+                   px(p, 40, &l, 10, 10), px(p, 40, &l, 11, 10));
+  CTUI_TEST_ASSERT(ctui_look_control_key(&down, &l, 40, 20) !=
+                       ctui_look_control_key(&up, &l, 40, 20),
+                   "a latched button is an image of its own");
+  p = paint(down, &flat, 40, 20);
+  CTUI_TEST_ASSERT(px(p, 40, &flat, 10, 10) == 'l' &&
+                       px(p, 40, &flat, 11, 10) == 'l',
+                   "flat: latched is the light face");
+
+  /* a taskbar's button kept off the bar's edge: clear above and below */
+  CTUI_LOOK_CONTROL off = up;
+  off.span = 3;
+  p = paint(off, &l, 40, 20);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 10, 2) == '.' && px(p, 40, &l, 10, 3) == 'h' &&
+                       px(p, 40, &l, 10, 16) == 'd' &&
+                       px(p, 40, &l, 10, 17) == '.',
+                   "span: the button between 3 clear px top and bottom");
+  CTUI_LOOK_CONTROL far = up, quarter = up;
+  far.span = 9;
+  quarter.span = 5;
+  CTUI_TEST_ASSERT(ctui_look_control_key(&off, &l, 40, 20) !=
+                           ctui_look_control_key(&up, &l, 40, 20) &&
+                       ctui_look_control_key(&far, &l, 40, 20) ==
+                           ctui_look_control_key(&quarter, &l, 40, 20),
+                   "a span is its own image, up to a quarter of the height");
 }
 
 /* a page's frames a row at a time (CTUI_LOOK_CTL_BOX; n2) */

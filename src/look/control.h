@@ -25,7 +25,12 @@ typedef enum {
                          * a pictogram and max > 0 a toolbar's: the
                          * pictogram in its top value of max, the rest left
                          * for a label (text over it), the pictogram's
-                         * accent in the tint if one is given */
+                         * accent in the tint if one is given; CHECKED:
+                         * latched down, the face inside checkered with
+                         * the highlight (95's taskbar button of the
+                         * active window); span: px left clear above and
+                         * below it (off a bar's edge), up to a quarter of
+                         * its height */
   CTUI_LOOK_CTL_CHIP,   /* the glyph alone: raised on HOVER, sunken while
                          * PRESSED (a 95 toolbar button) */
   CTUI_LOOK_CTL_SCROLL, /* a scrollbar, vertical when taller than wide:
@@ -52,6 +57,10 @@ typedef enum {
                            * vertical when taller than wide: the face with
                            * a grip of raised bumps in its middle, the
                            * shadow while PRESSED (being dragged) */
+  /* a bar's surface (a taskbar, a top bar): the face, raised along the
+   * sides set (1 << top, right, bottom, left: the box's order) -- the edges
+   * facing the screen; none: the face alone */
+  CTUI_LOOK_CTL_BAR,
   CTUI_LOOK_CTL_KINDS,
 } CTUI_LOOK_CTL_KIND;
 
@@ -59,7 +68,8 @@ typedef enum {
   CTUI_LOOK_CTL_OFF = 1,     /* muted, disabled: marks in the disabled role */
   CTUI_LOOK_CTL_HOVER = 2,   /* the pointer is over it */
   CTUI_LOOK_CTL_PRESSED = 4, /* held down */
-  CTUI_LOOK_CTL_CHECKED = 8, /* a check or toggle that is on */
+  CTUI_LOOK_CTL_CHECKED = 8, /* a check or toggle that is on, a button
+                              * latched down */
   /* a check box or radio button with the keys' focus and no label to
    * carry it: 95's dotted rectangle round it; a button's inside its
    * bevel */
@@ -97,8 +107,8 @@ typedef struct {
    * panel */
   uint32_t under;
   /* CTUI_LOOK_CTL_BOX's: its CTUI_LOOK_BOX_STYLE, the sides drawn (1 <<
-   * top, right, bottom, left: CSS's order) and its place
-   * (CTUI_LOOK_BOX_TOP, ...) */
+   * top, right, bottom, left: CSS's order; a CTUI_LOOK_CTL_BAR's raised
+   * ones too) and its place (CTUI_LOOK_BOX_TOP, ...) */
   uint8_t box, sides, place;
   /* CTUI_LOOK_CTL_BOX's: painted inside its edges (a page's background),
    * as 0xRRGGBB with CTUI_LOOK_CTL_TINT set; 0 = what under paints */

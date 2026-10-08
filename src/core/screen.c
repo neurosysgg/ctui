@@ -46,6 +46,10 @@ void ctui_screen_free(CTUI_SCREEN *s) {
   free(s);
 }
 
+static unsigned g_clears;
+
+unsigned ctui_screen_clears(void) { return g_clears; }
+
 void ctui_screen_resize(CTUI_SCREEN *s, int rows, int cols) {
   ctui_logf(E_INF,
             "[CTUI:SCREEN] - resizing %dx%d -> %dx%d @ tick %d\n", s->cols,
@@ -66,6 +70,7 @@ void ctui_screen_resize(CTUI_SCREEN *s, int rows, int cols) {
   if (isatty(STDOUT_FILENO)) {
     printf("\x1b[2J");
     fflush(stdout);
+    g_clears++;
   }
 }
 

@@ -119,12 +119,18 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
                    ? share(c->value, c->max, h)
                    : 0;
     c->max = c->value ? h : 0;
-    c->span = 0;
+    c->span = clamp(c->span, 0, h / 4);
     break;
   case CTUI_LOOK_CTL_SPLITTER:
     /* dragged or not: nothing else shows */
     c->value = c->max = c->span = 0;
     c->flags &= CTUI_LOOK_CTL_PRESSED;
+    break;
+  case CTUI_LOOK_CTL_BAR:
+    /* only its raised sides show */
+    c->value = c->max = c->span = 0;
+    c->flags = 0;
+    c->sides &= 0xf;
     break;
   default:
     c->value = c->max = c->span = 0;
@@ -169,14 +175,15 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_HOVER;
   }
   if (c->kind != CTUI_LOOK_CTL_BOX) {
-    c->box = c->sides = c->place = 0;
+    c->box = c->place = 0;
+    c->sides = c->kind == CTUI_LOOK_CTL_BAR ? c->sides : 0;
     c->fill = 0;
   }
   if (c->kind != CTUI_LOOK_CTL_BOX || !(c->place & CTUI_LOOK_BOX_TOP) ||
       !c->gap_cols) {
     c->gap = c->gap_cols = 0;
   }
-  if (!check) {
+  if (!check && c->kind != CTUI_LOOK_CTL_BUTTON) {
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_CHECKED;
   }
 }
@@ -497,18 +504,44 @@ static void paint_toggle(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
                       role(l, CTUI_LOOK_FACE));
 }
 
-static void paint_button(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
+/* a latched button's inside, from inset to x1 / y1: 95's checker of the
+ * highlight over the face; a flat look's light face */
+static void checker(CTUI_LOOK_CANVAS *cv, int inset, int x1, int y1,
+                    const CTUI_LOOK *l) {
+  for (int y = inset; y < y1; y++) {
+    for (int x = inset; x < x1; x++) {
+      if (!l->bevel || ((x + y) & 1) == 0) {
+        ctui_look_paint_px(
+            cv, x, y,
+            role(l, l->bevel ? CTUI_LOOK_HIGHLIGHT : CTUI_LOOK_LIGHT));
+      }
+    }
+  }
+}
+
+static void paint_button(CTUI_LOOK_CANVAS *whole, const CTUI_LOOK_CONTROL *c,
                          const CTUI_LOOK *l) {
+  /* a button kept off a bar's edge: the rows between its spans */
+  int off =
+      c->kind == CTUI_LOOK_CTL_BUTTON ? clamp(c->span, 0, whole->h / 4) : 0;
+  CTUI_LOOK_CANVAS inside = {whole->px + (size_t)off * (size_t)whole->w * 4,
+                             whole->w, whole->h - 2 * off};
+  CTUI_LOOK_CANVAS *cv = &inside;
   int pressed = !!(c->flags & CTUI_LOOK_CTL_PRESSED);
   int depth = l->bevel, inset = depth + !!l->outline;
   if (c->kind == CTUI_LOOK_CTL_CHIP) {
     depth = inset = min2(depth, 1); /* the same glyph size in every state */
   }
   if (c->kind == CTUI_LOOK_CTL_BUTTON) {
+    int latched = !!(c->flags & CTUI_LOOK_CTL_CHECKED);
     ctui_look_paint_box(cv, 0, 0, cv->w, cv->h, l,
-                        pressed ? CTUI_LOOK_PAINT_SUNKEN
-                                : CTUI_LOOK_PAINT_RAISED,
+                        pressed || latched ? CTUI_LOOK_PAINT_SUNKEN
+                                           : CTUI_LOOK_PAINT_RAISED,
                         depth, l->outline, role(l, CTUI_LOOK_FACE));
+    if (latched) {
+      checker(cv, inset, cv->w - inset, cv->h - inset, l);
+    }
+    pressed |= latched;
   } else if (pressed || (c->flags & CTUI_LOOK_CTL_HOVER)) {
     /* a flat look has no edge to raise: the light face says it instead */
     ctui_look_paint_box(cv, 0, 0, cv->w, cv->h, l,
@@ -519,7 +552,8 @@ static void paint_button(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   if (c->kind == CTUI_LOOK_CTL_BUTTON && c->picto != CTUI_LOOK_PICTO_NONE) {
     /* inside the edge, pushed down-right with the button; a toolbar's in
      * its top part, tinted */
-    int top = c->max > 0 ? share(c->value, c->max, cv->h) : 0;
+    int top = c->max > 0 ? share(c->value, c->max, whole->h) : 0;
+    top = top > 0 ? max2(top - off, 1) : 0;
     int ph = top > 0 ? top - inset : cv->h - 2 * inset;
     CTUI_LOOK tinted = *l;
     if (c->tint & CTUI_LOOK_CTL_TINT) {
@@ -589,6 +623,36 @@ static void paint_frame(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
 static void paint_panel(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK *l) {
   ctui_look_paint_box(cv, 0, 0, cv->w, cv->h, l, CTUI_LOOK_PAINT_SUNKEN,
                       l->bevel ? 1 : 0, !l->bevel, role(l, CTUI_LOOK_FACE));
+}
+
+/* a bar's surface: the face, each raised side as a button's edge on
+ * it (lit on top and left, shaded on the bottom and right); a flat
+ * look's a line in the shadow */
+static void paint_bar(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
+                      const CTUI_LOOK *l) {
+  ctui_look_paint_rect(cv, 0, 0, cv->w, cv->h, role(l, CTUI_LOOK_FACE));
+  int depth = l->bevel;
+  for (int side = 0; side < 4; side++) {
+    if (!(c->sides & (1 << side))) {
+      continue;
+    }
+    int lit = side == 0 || side == 3;
+    for (int k = 0; k < (depth ? depth : 1); k++) {
+      /* outer ring then inner, as ctui_look_paint_box() raises */
+      int r = !depth       ? CTUI_LOOK_SHADOW
+              : depth == 1 ? (lit ? CTUI_LOOK_HIGHLIGHT : CTUI_LOOK_SHADOW)
+              : lit        ? (k ? CTUI_LOOK_LIGHT : CTUI_LOOK_HIGHLIGHT)
+              : k          ? CTUI_LOOK_SHADOW
+                           : CTUI_LOOK_DARK;
+      if (side == 0 || side == 2) {
+        ctui_look_paint_rect(cv, 0, side == 0 ? k : cv->h - 1 - k, cv->w, 1,
+                             role(l, r));
+      } else {
+        ctui_look_paint_rect(cv, side == 3 ? k : cv->w - 1 - k, 0, 1, cv->h,
+                             role(l, r));
+      }
+    }
+  }
 }
 
 /* a splitter: the face (the shadow while dragged), three bumps across its
@@ -860,6 +924,9 @@ void ctui_look_control_paint(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
     break;
   case CTUI_LOOK_CTL_SPLITTER:
     paint_splitter(&cv, c, l);
+    break;
+  case CTUI_LOOK_CTL_BAR:
+    paint_bar(&cv, c, l);
     break;
   default:
     break;

@@ -219,6 +219,9 @@ this directly except at the two ends of its lifecycle and
 - `ctui_screen_resize(s, rows, cols)` — reallocates in place, forces a
   full redraw next flush, clears the real terminal outright (a shrink
   could otherwise leave stale content outside the new bounds).
+- `ctui_screen_clears()` — how often that clear happened: kitty's image
+  placements (`ctui_gfx_kitty_put()`) went with it, so whoever put some
+  puts them again once it moved on (`CTUI_DRAWN_UNDER` does).
 - `ctui_screen_set_sink(s, sink, ctx)` — frames go to
   `sink->frame(ctx, s)` instead of the terminal (an OLED, a remote
   viewer): called only when a cell changed, with `s->cells` the new frame

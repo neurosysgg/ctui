@@ -75,7 +75,8 @@ void ctui_drawn_put(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row, int col,
  * which shows it; anything painted over them (a dialog) hides it. A
  * placement isn't a cell: what was put last time and isn't this time is
  * taken away, so a widget puts all of its every render, between begin()
- * and end(). */
+ * and end(); a resize's clear took them all away, so they're put
+ * again. */
 typedef struct {
   unsigned int id; /* the image's */
   int row, col, cols, rows, z;
@@ -84,7 +85,9 @@ typedef struct {
 typedef struct {
   CTUI_DRAWN_PUT *put, *next; /* shown, being put */
   int nput, nnext, cap_put, cap_next;
-  unsigned int base; /* its placement ids: base + 1.. */
+  unsigned int base;   /* its placement ids: base + 1.. */
+  unsigned int clears; /* ctui_screen_clears() when last put: after a
+                        * clear (a resize) every one is put again */
 } CTUI_DRAWN_UNDER;
 
 void ctui_drawn_under_begin(CTUI_DRAWN_UNDER *u);

@@ -50,5 +50,9 @@ void ctui_screen_flush(
  * real terminal outright, since a shrink could otherwise leave stale
  * content lingering outside the new (smaller) bounds. */
 void ctui_screen_resize(CTUI_SCREEN *s, int rows, int cols);
+/* how often the real terminal was cleared (a resize): kitty's image
+ * placements went with it, so whoever put some (ctui_gfx_kitty_put())
+ * puts them again once this has moved on */
+unsigned ctui_screen_clears(void);
 
 #endif

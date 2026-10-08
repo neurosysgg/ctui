@@ -157,6 +157,11 @@ void ctui_drawn_under_begin(CTUI_DRAWN_UNDER *u) {
   if (!u->base) {
     u->base = ++g_under_bases << 16;
   }
+  if (u->clears != ctui_screen_clears()) {
+    /* the terminal was cleared: nothing is shown any more */
+    u->clears = ctui_screen_clears();
+    u->nput = 0;
+  }
   u->nnext = 0;
 }
 

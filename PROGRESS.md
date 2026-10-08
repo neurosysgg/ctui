@@ -237,6 +237,24 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A bar's surface, a latched button, placements after a resize**
+  (2026-10-08, for ctui-wm's bars in the look: a top bar, a dock and its
+  taskbar buttons). `CTUI_LOOK_CTL_BAR`: the face, raised along the
+  `sides` set (1 << top, right, bottom, left: the edges facing the
+  screen; a flat look's a shadow line); only the sides tell two apart.
+  `CTUI_LOOK_CTL_BUTTON` keeps `CHECKED` now: latched down, sunken with
+  95's checker of the highlight over the face inside (a flat look's light
+  face) -- the active window's taskbar button; its `span` is the px it
+  keeps clear above and below (off a bar's edge, up to a quarter of its
+  height). Appended to the kinds; a button's images as they were.
+  Fixed: `ctui_screen_resize()` clears the terminal with `\e[2J`, which
+  takes kitty's placements away, and `CTUI_DRAWN_UNDER` never put an
+  unchanged one again -- a kitty resize left the controls under text
+  gone until something moved (ctui-wm's padded zones, ctui-web's drawn
+  toolbar). `ctui_screen_clears()` counts the clears; `_under_begin()`
+  forgets what it had shown after one, so `_end()` puts every control
+  again. look_test (10); 904 passed in all.
+
 - [x] **`json/jsonedit`: a config edited in place** (2026-10-07,
   promoted from ctui-wm's `base/jsonedit`, its second user ctui-mus's
   layout editor). Set / remove a member at a path of keys (`"[N]"` an
