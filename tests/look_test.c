@@ -474,6 +474,24 @@ static void test_buttons(void) {
                        count(p, 18, 20, &l, 't') ==
                            seen[CTUI_LOOK_GLYPH_EJECT][0],
                    "a hovered chip raises, its glyph unchanged");
+  /* a menu's submenu arrow on its selection: the accent under, the glyph
+   * in accent_text */
+  const unsigned char *at = l.color[CTUI_LOOK_ACCENT_TEXT],
+                      *ac = l.color[CTUI_LOOK_ACCENT];
+  CTUI_LOOK_CONTROL arrow = ctl(CTUI_LOOK_CTL_CHIP, 0, 0);
+  arrow.glyph = CTUI_LOOK_GLYPH_PLAY;
+  arrow.tint = CTUI_LOOK_CTL_TINT | (uint32_t)at[0] << 16 |
+               (uint32_t)at[1] << 8 | at[2];
+  arrow.under = CTUI_LOOK_CTL_TINT | (uint32_t)ac[0] << 16 |
+                (uint32_t)ac[1] << 8 | ac[2];
+  p = paint(arrow, &l, 18, 20);
+  CTUI_TEST_ASSERT(count(p, 18, 20, &l, 'A') == seen[CTUI_LOOK_GLYPH_PLAY][0] &&
+                       count(p, 18, 20, &l, 'a') ==
+                           18 * 20 - seen[CTUI_LOOK_GLYPH_PLAY][0],
+                   "a tinted chip: its glyph in the tint, on what's under");
+  arrow.flags = CTUI_LOOK_CTL_OFF;
+  ctui_look_control_snap(&arrow, &l, 18, 20);
+  CTUI_TEST_ASSERT(arrow.tint == 0, "off: the tint dropped (greyed)");
   l.bevel = 0;
   p = paint(chip, &l, 18, 20);
   CTUI_TEST_ASSERT(px(p, 18, &l, 0, 0) == 'l', "flat: the light face instead");

@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A chip's glyph in its tint** (2026-10-08, for ctui-wm's menus: a
+  submenu's ▶ on the selection's accent). `CTUI_LOOK_CTL_CHIP` keeps a
+  `tint` now (`CTUI_LOOK_CTL_TINT` set, not `OFF`) and paints its glyph
+  in it instead of the text role; with `under` the accent, a chip sits
+  on a selection bar. Snap drops the tint of a disabled chip (greyed as
+  before), so its key and pixels stay what paint makes. Untinted chips
+  as they were. look_test (2); 906 passed in all.
+
 - [x] **A bar's surface, a latched button, placements after a resize**
   (2026-10-08, for ctui-wm's bars in the look: a top bar, a dock and its
   taskbar buttons). `CTUI_LOOK_CTL_BAR`: the face, raised along the

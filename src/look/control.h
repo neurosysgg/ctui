@@ -32,7 +32,9 @@ typedef enum {
                          * below it (off a bar's edge), up to a quarter of
                          * its height */
   CTUI_LOOK_CTL_CHIP,   /* the glyph alone: raised on HOVER, sunken while
-                         * PRESSED (a 95 toolbar button) */
+                         * PRESSED (a 95 toolbar button); the glyph in the
+                         * tint if one is given (a menu's ▶ on its
+                         * selection) */
   CTUI_LOOK_CTL_SCROLL, /* a scrollbar, vertical when taller than wide:
                          * value = the first shown of max, span = how many
                          * show */

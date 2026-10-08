@@ -145,6 +145,11 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
   } else if (c->kind == CTUI_LOOK_CTL_BOX) {
     c->picto = CTUI_LOOK_PICTO_NONE;
     c->tint = c->tint & CTUI_LOOK_CTL_TINT ? c->tint : 0;
+  } else if (c->kind == CTUI_LOOK_CTL_CHIP) {
+    c->picto = CTUI_LOOK_PICTO_NONE;
+    c->tint = (c->tint & CTUI_LOOK_CTL_TINT) && !(c->flags & CTUI_LOOK_CTL_OFF)
+                  ? c->tint
+                  : 0;
   } else if (c->kind != CTUI_LOOK_CTL_PICTO) {
     c->picto = CTUI_LOOK_PICTO_NONE;
     c->tint = 0;
@@ -567,8 +572,14 @@ static void paint_button(CTUI_LOOK_CANVAS *whole, const CTUI_LOOK_CONTROL *c,
                           !!(c->flags & CTUI_LOOK_CTL_OFF), &tinted);
     return;
   }
+  const unsigned char tint[3] = {(unsigned char)(c->tint >> 16),
+                                 (unsigned char)(c->tint >> 8),
+                                 (unsigned char)c->tint};
   glyph(cv, pressed, pressed, cv->w, cv->h, inset, c->glyph,
-        marks(c, l, CTUI_LOOK_TEXT));
+        c->kind == CTUI_LOOK_CTL_CHIP && (c->tint & CTUI_LOOK_CTL_TINT) &&
+                !(c->flags & CTUI_LOOK_CTL_OFF)
+            ? tint
+            : marks(c, l, CTUI_LOOK_TEXT));
   focus_ring(cv, c, l, inset + 1);
 }
 
