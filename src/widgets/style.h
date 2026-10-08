@@ -28,6 +28,14 @@ typedef enum {
                            * the heading over its top edge at label */
   CTUI_CONTROL_FRAME,     /* a dialog's box, rows down; its title over
                            * its top edge at label */
+  CTUI_CONTROL_HEADER,    /* a table column's header, its title over it
+                           * (a button); value 1 sorted by it ascending, 2
+                           * descending, 0 not */
+  CTUI_CONTROL_TAB,       /* a bar's tab, its label over it; value 1 = the
+                           * one shown */
+  CTUI_CONTROL_SELECTION, /* a list's cursor row, its text over it: the
+                           * widget writes that in its plain colours (the
+                           * hook gives them the selection's) */
 } CTUI_CONTROL_KIND;
 
 typedef struct {

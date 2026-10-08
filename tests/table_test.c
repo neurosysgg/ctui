@@ -72,6 +72,37 @@ static int draw_bar(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row, int col,
   return 1;
 }
 
+/* a hook taking the headers and the cursor row (the bar left to the
+ * glyphs), each call kept */
+static CTUI_CONTROL asked[8];
+static int asked_row[8], asked_col[8], asked_cols[8], nasked;
+
+static int draw_chrome(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
+                       int col, int cols, const CTUI_CONTROL *c,
+                       unsigned char bg, void *arg) {
+  (void)self, (void)comp, (void)bg, (void)arg;
+  if (c->kind == CTUI_CONTROL_SCROLLBAR || nasked == 8) {
+    return 0;
+  }
+  asked[nasked] = *c;
+  asked_row[nasked] = row;
+  asked_col[nasked] = col;
+  asked_cols[nasked++] = cols;
+  return 1;
+}
+
+/* an icon "@" + a space before column 0's text, on row 3 only */
+static int icon(void *ctx, int row, int col, CTUI_WIDGET *self,
+                CTUI_COMPOSITOR *comp, int line, int x, int w,
+                const CTUI_CELL *pen) {
+  (void)ctx, (void)w;
+  if (col != 0 || row != 3) {
+    return 0;
+  }
+  ctui_widget_putc_cell(self, comp, line, x, '@', pen);
+  return 2;
+}
+
 static void click(CTUI_APP *app, CTUI_SCREEN *screen, int row, int col,
                   int button, CTUI_MOUSE_ACTION action) {
   CTUI_MOUSE_EVENT_DATA m = {
@@ -314,6 +345,50 @@ int main(void) {
                    "rgb: an rgb background takes a basic fg as rgb (black)");
   t.style = NULL;
   ctui_table_select(&t, was);
+
+  /* the hook asked for the headers and the cursor row; a cell's icon */
+  CTUI_STYLE chrome = ctui_style_default;
+  chrome.control = draw_chrome;
+  t.style = &chrome;
+  t.cell_icon = icon;
+  t.sort_col = 1;
+  t.sort_desc = 1;
+  ctui_table_select(&t, 3);
+  t.scroll = 2;
+  nasked = 0;
+  ctui_app_render(&app, screen);
+  /* 19 columns (the bar's): Name 0+12, Size 13+6 */
+  CTUI_TEST_ASSERT(
+      nasked == 3 && asked[0].kind == CTUI_CONTROL_HEADER &&
+          asked[0].value == 0 && asked_row[0] == 0 && asked_col[0] == 0 &&
+          asked_cols[0] == 13 && asked[1].kind == CTUI_CONTROL_HEADER &&
+          asked[1].value == 2 && asked_col[1] == 13 && asked_cols[1] == 7,
+      "a header button a column, the gap on its right, the "
+      "last to the edge; the sorted one says which way (%d: "
+      "%d at %d+%d, %d at %d+%d)",
+      nasked, asked[0].value, asked_col[0], asked_cols[0], asked[1].value,
+      asked_col[1], asked_cols[1]);
+  CTUI_TEST_ASSERT(screen->cells[1 * cols + 2].fg == ctui_style_default.fg &&
+                       ctui_test_row_contains(screen, 1, "Size ▾"),
+                   "the titles in the plain text over the buttons, the mark "
+                   "stays");
+  CTUI_TEST_ASSERT(asked[2].kind == CTUI_CONTROL_SELECTION &&
+                       asked_row[2] == 2 && asked_col[2] == 0 &&
+                       asked_cols[2] == 19,
+                   "the cursor row asked across the columns (%d at %d+%d)",
+                   asked_row[2], asked_col[2], asked_cols[2]);
+  CTUI_TEST_ASSERT(screen->cells[3 * cols + 4].bg == CTUI_COLOR_DEFAULT &&
+                       screen->cells[3 * cols + 4].fg == ctui_style_default.fg,
+                   "taken: its text plain, not on the selection's colours");
+  CTUI_TEST_ASSERT(ctui_test_cell(screen, 3, 2) == '@' &&
+                       ctui_test_row_contains(screen, 3, "@ delta") &&
+                       ctui_test_row_contains(screen, 4, "eps"),
+                   "the icon before the name, its text after it; other rows "
+                   "without");
+  t.cell_icon = NULL;
+  t.style = NULL;
+  t.sort_col = 0;
+  t.sort_desc = 0;
 
   t.count = 2;
   ctui_app_render(&app, screen);

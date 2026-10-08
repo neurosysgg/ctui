@@ -137,6 +137,11 @@ void ctui_tabs_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
         continue;
       }
       int sel = i == t->selected;
+      CTUI_CONTROL cursor = {.kind = CTUI_CONTROL_SELECTION};
+      if (sel &&
+          ctui_style_control(st, self, comp, y, 0, self->w, &cursor, st->bg)) {
+        sel = 0; /* plain over the hook's bar */
+      }
       unsigned char fg = sel ? st->sel_fg : st->fg, bg = sel ? st->sel_bg
                                                              : st->bg;
       for (int c = 0; sel && c < self->w; c++) {
@@ -151,11 +156,19 @@ void ctui_tabs_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     int sel = i == t->selected;
     char label[160];
     snprintf(label, sizeof label, " %s ", t->items[i].label);
+    int w = ctui_utf8_width(label);
+    CTUI_CONTROL tab = {.kind = CTUI_CONTROL_TAB, .value = sel};
+    int drawn = x + w <= self->w &&
+                ctui_style_control(st, self, comp, 0, x, w, &tab, st->bg);
+    if (drawn) {
+      sel = 0; /* the hook's tab shows which */
+    }
     x += ctui_widget_puts_cut(self, comp, 0, x, label, self->w - x,
                               sel ? st->sel_fg : st->fg,
                               sel ? st->sel_bg : st->bg);
-    if (i + 1 < t->count && x < self->w) {
-      ctui_widget_putc(self, comp, 0, x++, 0x2502, st->dim_fg, st->bg); /* │ */
+    if (i + 1 < t->count && x < self->w) { /* │, a gap between tabs */
+      ctui_widget_putc(self, comp, 0, x++, drawn ? ' ' : 0x2502, st->dim_fg,
+                       st->bg);
     }
   }
 }

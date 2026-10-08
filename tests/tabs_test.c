@@ -32,6 +32,24 @@ static void click(CTUI_APP *app, CTUI_SCREEN *screen, int row, int col) {
   }
 }
 
+/* a hook taking tabs and the selection, each call kept */
+static CTUI_CONTROL asked[8];
+static int asked_row[8], asked_col[8], asked_cols[8], nasked;
+
+static int draw_chrome(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
+                       int col, int cols, const CTUI_CONTROL *c,
+                       unsigned char bg, void *arg) {
+  (void)self, (void)comp, (void)bg, (void)arg;
+  if (nasked == 8) {
+    return 0;
+  }
+  asked[nasked] = *c;
+  asked_row[nasked] = row;
+  asked_col[nasked] = col;
+  asked_cols[nasked++] = cols;
+  return 1;
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
   int rows = 8, cols = 40;
@@ -125,6 +143,36 @@ int main(void) {
   CTUI_TEST_ASSERT(ctui_tabs_key(&bar, &left) == CTUI_TABS_MOVED &&
                        bar.selected == 2,
                    "bar: left moves");
+
+  /* a hook: the sidebar's selection and the bar's tabs asked */
+  CTUI_STYLE chrome = ctui_style_default;
+  chrome.control = draw_chrome;
+  side.style = bar.style = &chrome;
+  sw.h = 6;
+  side.selected = 2;
+  side.scroll = 0;
+  bar.selected = 1;
+  bar.scroll = 0;
+  nasked = 0;
+  ctui_app_render(&app, screen);
+  CTUI_TEST_ASSERT(nasked == 4 && asked[0].kind == CTUI_CONTROL_SELECTION &&
+                       asked_row[0] == 2 && asked_col[0] == 0 &&
+                       asked_cols[0] == 12 &&
+                       screen->cells[3 * cols + 2].bg == CTUI_COLOR_DEFAULT,
+                   "sidebar: the selection asked across, its label plain "
+                   "(%d; %d at %d+%d)",
+                   nasked, asked_row[0], asked_col[0], asked_cols[0]);
+  CTUI_TEST_ASSERT(asked[1].kind == CTUI_CONTROL_TAB && asked[1].value == 0 &&
+                       asked_col[1] == 0 && asked_cols[1] == 7 &&
+                       asked[2].value == 1 && asked_col[2] == 8 &&
+                       asked_cols[2] == 7 && asked[3].value == 0,
+                   "bar: a tab per label, the shown one says so (%d+%d, "
+                   "%d+%d)",
+                   asked_col[1], asked_cols[1], asked_col[2], asked_cols[2]);
+  CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 0, " Files   Sound   ") &&
+                       screen->cells[0 * cols + 14 + 9].bg ==
+                           CTUI_COLOR_DEFAULT,
+                   "bar: a gap for the separators, the shown label plain");
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

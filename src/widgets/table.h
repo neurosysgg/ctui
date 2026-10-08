@@ -20,7 +20,8 @@
  * other way), a right click on it asks for that column's menu. More rows than
  * fit get a scrollbar in the last column where the style has a control hook
  * (scrollbar.h): scrolling by it takes the cursor along, so it stays on the
- * same line of the view. */
+ * same line of the view. The hook is asked for the column headers
+ * (CTUI_CONTROL_HEADER) and the cursor row (CTUI_CONTROL_SELECTION) too. */
 typedef struct {
   const char *title;
   int width;       /* > 0: that many columns; 0: an even share of the rest */
@@ -48,6 +49,13 @@ typedef struct {
    * (row_fg still wins), the other columns aren't asked. It is a row like
    * any other for the cursor, marks and events. */
   int (*row_span)(void *ctx, int row);
+  /* optional: something of the app's at the start of row's cell in
+   * column col (a file's icon), drawn at line `line` of self from column x
+   * in at most w cells, in the row's pen; returns the cells it took, the
+   * text following them (0: none) */
+  int (*cell_icon)(void *ctx, int row, int col, CTUI_WIDGET *self,
+                   CTUI_COMPOSITOR *comp, int line, int x, int w,
+                   const CTUI_CELL *pen);
   void *ctx;
   const CTUI_STYLE *style;
   int page; /* rows shown by the last render (pgup/pgdn) */

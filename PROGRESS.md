@@ -237,6 +237,20 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Table headers, the cursor row and tabs asking the style's hook;
+  a cell icon slot** (2026-10-09, for ctui-wm's apps in the look v3: the
+  apps' tables, sidebars and tab rows in 95's chrome, ctui-files' file
+  icons). Three kinds appended to `CTUI_CONTROL`, drawn under text:
+  `HEADER` (a table column's title as a button, from its column to the
+  next one's, the last to the table's edge; value = its sort, the ▾▴
+  stay in the text), `TAB` (a bar's tab, value 1 the shown one; the │
+  between tabs a gap then) and `SELECTION` (a table's cursor row or a
+  sidebar's selection: the widget writes it in its plain colours and the
+  hook colours it). `CTUI_TABLE.cell_icon`: something of the app's at the
+  start of a cell (an icon), the text after the cells it took. Without a
+  hook, or one that declines, all as before. table_test (5), tabs_test
+  (3); 914 passed in all.
+
 - [x] **A chip's glyph in its tint** (2026-10-08, for ctui-wm's menus: a
   submenu's ▶ on the selection's accent). `CTUI_LOOK_CTL_CHIP` keeps a
   `tint` now (`CTUI_LOOK_CTL_TINT` set, not `OFF`) and paints its glyph

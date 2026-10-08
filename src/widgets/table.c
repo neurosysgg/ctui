@@ -205,7 +205,22 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                c != t->sort_col ? ""
                : t->sort_desc   ? " \xe2\x96\xbe"   /* ▾ */
                                 : " \xe2\x96\xb4"); /* ▴ */
-      CTUI_CELL pen = ctui_style_cell(st, CTUI_STYLE_TITLE, CTUI_STYLE_BG, 0, 0);
+      /* a header button reaches the next one (the gap its right edge),
+       * the last the table's edge (over the scrollbar's column) */
+      int bx, bw;
+      if (c + 1 < t->column_count) {
+        ctui_table_column_span(t, cols, c + 1, &bx, &bw);
+        bw = bx - x;
+      } else {
+        bw = self->w - x;
+      }
+      CTUI_CONTROL head = {.kind = CTUI_CONTROL_HEADER,
+                           .value = c != t->sort_col ? 0
+                                    : t->sort_desc   ? 2
+                                                     : 1};
+      int drawn = ctui_style_control(st, self, comp, 0, x, bw, &head, st->bg);
+      CTUI_CELL pen = ctui_style_cell(
+          st, drawn ? CTUI_STYLE_FG : CTUI_STYLE_TITLE, CTUI_STYLE_BG, 0, 0);
       draw_cell(self, comp, 0, x, w, title, t->columns[c].align_right, &pen);
     }
     row = 1;
@@ -227,7 +242,12 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     if (fill) {
       bg = CTUI_STYLE_MARK_BG;
     }
-    if (sel) {
+    CTUI_CONTROL cursor = {.kind = CTUI_CONTROL_SELECTION};
+    if (sel &&
+        ctui_style_control(st, self, comp, row, 0, cols, &cursor, st->bg)) {
+      sel = fill = 0; /* the row's own colours over the hook's bar */
+      bg = CTUI_STYLE_BG;
+    } else if (sel) {
       fg = marked && !fill ? CTUI_STYLE_MARK : CTUI_STYLE_SEL_FG;
       bg = CTUI_STYLE_SEL_BG;
     }
@@ -248,7 +268,12 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       ctui_table_column_span(t, cols, c, &x, &w);
       scratch[0] = '\0';
       const char *s = t->cell(t->ctx, r, c, scratch, sizeof scratch);
-      draw_cell(self, comp, row, x, w, s, t->columns[c].align_right, &pen);
+      int took = t->cell_icon && w > 0
+                     ? t->cell_icon(t->ctx, r, c, self, comp, row, x, w, &pen)
+                     : 0;
+      took = took < 0 ? 0 : took > w ? w : took;
+      draw_cell(self, comp, row, x + took, w - took, s,
+                t->columns[c].align_right, &pen);
     }
   }
   if (cols < self->w) {

@@ -12,7 +12,9 @@
  * Keys: up/down (vertical) or left/right (a bar), home/end move the
  * selection; Enter activates it (the app moves its focus into the page).
  * Mouse: a click selects, a right click asks for that item's menu (the
- * selection stays), the wheel moves. */
+ * selection stays), the wheel moves. The style's control hook is asked for
+ * a bar's tabs (CTUI_CONTROL_TAB) and a sidebar's selection
+ * (CTUI_CONTROL_SELECTION). */
 typedef struct {
   const char *label;
   int heading; /* vertical only: a group's title, not selectable */
