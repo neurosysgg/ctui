@@ -497,6 +497,56 @@ static void test_buttons(void) {
   CTUI_TEST_ASSERT(px(p, 18, &l, 0, 0) == 'l', "flat: the light face instead");
 }
 
+/* a 16 x 14 caption button's glyph as 95 draws it: an 8 px grid in the
+ * middle, nothing outside it */
+static int caption_glyph_is(CTUI_LOOK_GLYPH g, const char *art) {
+  CTUI_LOOK l = test_look();
+  CTUI_LOOK_CONTROL c = ctl(CTUI_LOOK_CTL_BUTTON, 0, 0);
+  c.glyph = g;
+  const unsigned char *p = paint(c, &l, 16, 14);
+  int marks = 0;
+  for (int y = 0; y < 8; y++) {
+    for (int x = 0; x < 8; x++) {
+      int t = px(p, 16, &l, 4 + x, 3 + y) == 't';
+      if (t != (art[y * 8 + x] == 't')) {
+        return 0;
+      }
+      marks += t;
+    }
+  }
+  return count(p, 16, 14, &l, 't') == marks;
+}
+
+static void test_caption_glyphs(void) {
+  CTUI_TEST_ASSERT(caption_glyph_is(CTUI_LOOK_GLYPH_MINIMIZE, "........"
+                                                              "........"
+                                                              "........"
+                                                              "........"
+                                                              "........"
+                                                              "........"
+                                                              ".tttttt."
+                                                              ".tttttt."),
+                   "minimize: a bar on the baseline");
+  CTUI_TEST_ASSERT(caption_glyph_is(CTUI_LOOK_GLYPH_MAXIMIZE, "tttttttt"
+                                                              "tttttttt"
+                                                              "t......t"
+                                                              "t......t"
+                                                              "t......t"
+                                                              "t......t"
+                                                              "t......t"
+                                                              "tttttttt"),
+                   "maximize: a window, its title bar 2 px");
+  CTUI_TEST_ASSERT(caption_glyph_is(CTUI_LOOK_GLYPH_RESTORE, "..tttttt"
+                                                             "..tttttt"
+                                                             "tttttt.t"
+                                                             "tttttt.t"
+                                                             "t....t.t"
+                                                             "t....ttt"
+                                                             "t....t.."
+                                                             "tttttt.."),
+                   "restore: a window in front of another");
+}
+
 static void test_scroll(void) {
   CTUI_LOOK l = test_look();
   CTUI_LOOK_CONTROL c = {
@@ -1883,6 +1933,7 @@ int main(void) {
   test_level_signal();
   test_toggles();
   test_buttons();
+  test_caption_glyphs();
   test_scroll();
   test_field();
   test_frame();

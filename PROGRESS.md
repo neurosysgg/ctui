@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A window's caption buttons** (2026-10-09, for ctui-wm's window
+  frames drawn in the look). `CTUI_LOOK_GLYPH_MINIMIZE` (a bar on the
+  baseline), `_MAXIMIZE` (a window, its title bar 2 px from an 8 px
+  grid up) and `_RESTORE` (one in front of another, of the one behind
+  only what shows), appended; with `CLOSE` a caption's three buttons
+  are plain BUTTON controls. At 95's 16 x 14 they come out as its own
+  8 px art. look_test 3 new (the art pixel for pixel); 950 passed.
+
 - [x] **The sample under the pointer, a big graph** (2026-10-09, for
   ctui-wm's ctui-top: a graph's value on hover, a window-sized one).
   `ctui_look_graph_at(c, w, h, x)` (look/control.h): the index of GRAPH

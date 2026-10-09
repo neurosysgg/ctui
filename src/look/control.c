@@ -339,6 +339,15 @@ static void refresh(const GRID *g) {
   }
 }
 
+/* a window as 95's caption buttons draw one: a 1 px frame, its title
+ * bar t px */
+static void window(const GRID *g, int x, int y, int w, int h, int t) {
+  bar(g, x, y, w, t);
+  bar(g, x, y + h - 1, w, 1);
+  bar(g, x, y, 1, h);
+  bar(g, x + w - 1, y, 1, h);
+}
+
 static void glyph(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h, int inset,
                   CTUI_LOOK_GLYPH which, const unsigned char *rgb) {
   int side = min2(w, h);
@@ -408,6 +417,25 @@ static void glyph(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h, int inset,
   case CTUI_LOOK_GLYPH_NEXT:
     skip(&g, 0);
     break;
+  case CTUI_LOOK_GLYPH_MINIMIZE: {
+    int t = n >= 8 ? 2 : 1, w = n - n / 4;
+    bar(&g, (n - w) / 2, n - t, w, t);
+    break;
+  }
+  case CTUI_LOOK_GLYPH_MAXIMIZE:
+    window(&g, 0, 0, n, n, n >= 8 ? 2 : 1);
+    break;
+  case CTUI_LOOK_GLYPH_RESTORE: {
+    /* the front window at the bottom left, of the one behind only what
+     * shows past it */
+    int t = n >= 8 ? 2 : 1, w = n - n / 4, b = n - w;
+    bar(&g, b, 0, w, t);
+    bar(&g, b, 0, 1, b);
+    bar(&g, n - 1, 0, 1, w);
+    bar(&g, w, w - 1, b, 1);
+    window(&g, 0, b, w, w, t);
+    break;
+  }
   default:
     break;
   }

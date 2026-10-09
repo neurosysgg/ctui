@@ -106,6 +106,11 @@ typedef enum {
   CTUI_LOOK_GLYPH_BUSY,    /* … */
   CTUI_LOOK_GLYPH_BACK,    /* ◀ (forward is PLAY's ▶) */
   CTUI_LOOK_GLYPH_DOWN,    /* ▾ */
+  /* a window's caption buttons, 95's: a bar on the baseline, a window,
+   * two windows one behind the other */
+  CTUI_LOOK_GLYPH_MINIMIZE, /* _ */
+  CTUI_LOOK_GLYPH_MAXIMIZE, /* □ */
+  CTUI_LOOK_GLYPH_RESTORE,  /* ❐ */
   CTUI_LOOK_GLYPHS,
 } CTUI_LOOK_GLYPH;
 
