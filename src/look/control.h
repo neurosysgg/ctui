@@ -65,10 +65,13 @@ typedef enum {
   CTUI_LOOK_CTL_BAR,
   /* a level meter's LEDs in a black well: value of max lit, green, the
    * top 30 % amber, the top 5 % red, in every look; span: a held peak
-   * (one more lit, 0 none); CHECKED: clipped (the last one lit red) */
+   * (one more lit, 0 none); CHECKED: clipped (the last one lit red).
+   * Taller than wide: NT Task Manager's usage meter instead, its LEDs
+   * rows lit from the bottom, all green */
   CTUI_LOOK_CTL_METER,
   /* NT Task Manager's history graph: a black well, a dim green grid, the
-   * samples (0-100, the newest at the right) as a bright green line */
+   * samples (0-100, the newest at the right) as a bright green line;
+   * samples2 (as many) a red one over it (its kernel time) */
   CTUI_LOOK_CTL_GRAPH,
   CTUI_LOOK_CTL_KINDS,
 } CTUI_LOOK_CTL_KIND;
@@ -131,6 +134,7 @@ typedef struct {
   /* CTUI_LOOK_CTL_GRAPH's: count samples, oldest first (the caller's;
    * only read while the image is drawn or its key made) */
   const unsigned char *samples;
+  const unsigned char *samples2; /* NULL: one line */
   int count;
 } CTUI_LOOK_CONTROL;
 

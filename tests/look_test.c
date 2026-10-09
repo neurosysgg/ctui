@@ -269,19 +269,19 @@ static void test_slider(void) {
   CTUI_TEST_ASSERT(
       ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER, 51, 100,
                                                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                                 0, 0, NULL, 0},
+                                                 0, 0, NULL, NULL, 0},
                             &l, 40, 20) ==
               ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER,
                                                          50, 100, 0, 0, 0, 0, 0,
-                                                         0, 0, 0, 0, 0, 0, 0, NULL, 0},
+                                                         0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0},
                                     &l, 40, 20) &&
           ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER, 60,
                                                      100, 0, 0, 0, 0, 0, 0, 0,
-                                                     0, 0, 0, 0, 0, NULL, 0},
+                                                     0, 0, 0, 0, 0, NULL, NULL, 0},
                                 &l, 40, 20) !=
               ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER,
                                                          50, 100, 0, 0, 0, 0, 0,
-                                                         0, 0, 0, 0, 0, 0, 0, NULL, 0},
+                                                         0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0},
                                     &l, 40, 20),
       "50 %% and 51 %% are one image, 60 %% another");
 
@@ -346,11 +346,11 @@ static void test_level_signal(void) {
   CTUI_TEST_ASSERT(
       ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SIGNAL, 9, 4, 0,
                                                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                                 0, NULL, 0},
+                                                 0, NULL, NULL, 0},
                             &l, 18, 20) ==
           ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SIGNAL, 4, 4,
                                                      0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                                     0, 0, 0, NULL, 0},
+                                                     0, 0, 0, NULL, NULL, 0},
                                 &l, 18, 20),
       "more than max lit: all of them");
 }
@@ -418,11 +418,11 @@ static void test_toggles(void) {
   CTUI_TEST_ASSERT(
       ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER, 5, 10, 0,
                                                  CTUI_LOOK_CTL_CHECKED, 0, 0, 0,
-                                                 0, 0, 0, 0, 0, 0, 0, NULL, 0},
+                                                 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0},
                             &l, 36, 20) ==
           ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER, 5,
                                                      10, 0, 0, 0, 0, 0, 0, 0, 0,
-                                                     0, 0, 0, 0, NULL, 0},
+                                                     0, 0, 0, 0, NULL, NULL, 0},
                                 &l, 36, 20),
       "a flag a kind doesn't draw doesn't split its images");
 }
@@ -500,7 +500,7 @@ static void test_buttons(void) {
 static void test_scroll(void) {
   CTUI_LOOK l = test_look();
   CTUI_LOOK_CONTROL c = {
-      CTUI_LOOK_CTL_SCROLL, 75, 100, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, 0};
+      CTUI_LOOK_CTL_SCROLL, 75, 100, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0};
   const unsigned char *p = paint(c, &l, 10, 40);
   CTUI_TEST_ASSERT(
       px(p, 10, &l, 0, 0) == 'f' && px(p, 10, &l, 1, 0) == 'h' &&
@@ -511,11 +511,11 @@ static void test_scroll(void) {
   CTUI_TEST_ASSERT(c.value == 30 && c.span == 10 && c.max == 40,
                    "snapped: the thumb's y and length");
   c = (CTUI_LOOK_CONTROL){
-      CTUI_LOOK_CTL_SCROLL, 0, 1000, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, 0};
+      CTUI_LOOK_CTL_SCROLL, 0, 1000, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0};
   ctui_look_control_snap(&c, &l, 40, 10);
   CTUI_TEST_ASSERT(c.span == 10, "horizontal: a thumb never under square");
   c = (CTUI_LOOK_CONTROL){
-      CTUI_LOOK_CTL_SCROLL, 3, 10, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, 0};
+      CTUI_LOOK_CTL_SCROLL, 3, 10, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0};
   p = paint(c, &l, 10, 40);
   CTUI_TEST_ASSERT(px(p, 10, &l, 0, 0) == 'h' && px(p, 10, &l, 9, 39) == 'd',
                    "all of it shown: the thumb fills the track");
@@ -617,7 +617,7 @@ static void test_snap_invariant(void) {
                                  : (v & 2) ? 0x77u
                                            : 0,
                                  0,
-                                 0, NULL, 0};
+                                 0, NULL, NULL, 0};
           if (k == CTUI_LOOK_CTL_GRAPH) {
             static const unsigned char hist[] = {0, 100, 37, 120, 5, 64, 64};
             c.samples = hist;
@@ -1744,6 +1744,73 @@ static void test_meter_graph(void) {
   p = paint(g, &l, 60, 20);
   CTUI_TEST_ASSERT(rgb_is(p, 60, 58, 18, 0, 96, 48),
                    "no samples: the grid alone");
+
+  /* a full graph: the line runs to the left edge (60 px wide, a point
+   * every 2 px from x 58: the last at x 0, past the edge at 1) */
+  static unsigned char flat[40];
+  memset(flat, 50, sizeof flat);
+  CTUI_LOOK_CONTROL fg = {.kind = CTUI_LOOK_CTL_GRAPH, .samples = flat,
+                          .count = 40};
+  p = paint(fg, &l, 60, 20);
+  CTUI_TEST_ASSERT(rgb_is(p, 60, 1, 10, 0, 255, 64) &&
+                       rgb_is(p, 60, 2, 10, 0, 255, 64),
+                   "a full graph's line reaches the well's left edge");
+  fg.count = 3;
+  p = paint(fg, &l, 60, 20);
+  CTUI_TEST_ASSERT(!rgb_is(p, 60, 1, 10, 0, 255, 64) &&
+                       rgb_is(p, 60, 54, 10, 0, 255, 64),
+                   "a short history still starts where its samples do");
+  static unsigned char edge_a[40], edge_b[40];
+  memset(edge_a, 50, sizeof edge_a);
+  memcpy(edge_b, edge_a, sizeof edge_b);
+  edge_b[10] = 90; /* the 30th from the end: the point past the edge */
+  fg.count = 40;
+  fg.samples = edge_a;
+  uint64_t ka = ctui_look_control_key(&fg, &l, 60, 20);
+  fg.samples = edge_b;
+  CTUI_TEST_ASSERT(ka != ctui_look_control_key(&fg, &l, 60, 20),
+                   "the point past the edge keys the picture too");
+
+  /* a second line: kernel time, red over the green */
+  static const unsigned char k1s[] = {0, 0, 0, 10}, k2s[] = {0, 0, 0, 50};
+  g.samples = h1;
+  g.count = 4;
+  g.samples2 = NULL;
+  uint64_t one = ctui_look_control_key(&g, &l, 60, 20);
+  g.samples2 = k1s;
+  uint64_t two = ctui_look_control_key(&g, &l, 60, 20);
+  g.samples2 = k2s;
+  CTUI_TEST_ASSERT(one != two && two != ctui_look_control_key(&g, &l, 60, 20),
+                   "the second line keys the picture too");
+  p = paint(g, &l, 60, 20);
+  /* 50 %: row 1 + 17 - 8 = 10; the green's 30 % a step left at row
+   * 1 + 17 - 5 = 13 (the red one climbs past it at 57-58) */
+  CTUI_TEST_ASSERT(rgb_is(p, 60, 58, 10, 255, 48, 48) &&
+                       rgb_is(p, 60, 56, 13, 0, 255, 64),
+                   "the red line and the green one, each at its level");
+  CTUI_LOOK_CONTROL b2 = ctl(CTUI_LOOK_CTL_METER, 50, 100);
+  b2.samples2 = k1s;
+  CTUI_LOOK_CONTROL b3 = b2;
+  b3.samples2 = NULL;
+  CTUI_TEST_ASSERT(ctui_look_control_key(&b2, &l, 108, 20) ==
+                       ctui_look_control_key(&b3, &l, 108, 20),
+                   "other kinds ignore it");
+
+  /* upright: Task Manager's usage meter, rows of LEDs from the bottom */
+  CTUI_LOOK_CONTROL u = ctl(CTUI_LOOK_CTL_METER, 50, 100);
+  CTUI_LOOK_CONTROL su = u;
+  ctui_look_control_snap(&su, &l, 20, 108);
+  CTUI_TEST_ASSERT(su.max == 34 && su.value == 17,
+                   "upright: its LEDs counted up its height (%d %d)", su.max,
+                   su.value);
+  p = paint(u, &l, 20, 108);
+  int lx = x0 + 1;
+  CTUI_TEST_ASSERT(rgb_is(p, 20, lx, 108 - x0 - 1, 48, 224, 80) &&
+                       rgb_is(p, 20, 20 - x0 - 2, 108 - x0 - 1, 48, 224, 80) &&
+                       rgb_is(p, 20, lx, x0 + 1, 9, 44, 16) &&
+                       rgb_is(p, 20, lx, 108 - x0 - 33 * 3 - 1, 9, 44, 16),
+                   "lit from the bottom in two columns, all green: the top "
+                   "unlit green, not red");
 }
 
 /* a framed box's rows: the place flags, the heading's gap on top only */

@@ -1,5 +1,7 @@
 #include "control.h"
 
+#include <limits.h>
+
 #include "paint.h"
 
 #include <string.h>
@@ -97,7 +99,7 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
   }
   case CTUI_LOOK_CTL_METER: {
     int x0, seg, n;
-    meter_leds(l, w, h, &x0, &seg, &n);
+    meter_leds(l, h > w ? h : w, h > w ? w : h, &x0, &seg, &n);
     int lit = share(c->value, c->max, n);
     int held = c->span > 0 ? max2(1, share(c->span, c->max, n)) : 0;
     c->value = lit;
@@ -189,7 +191,7 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
               c->kind == CTUI_LOOK_CTL_TOGGLE ||
               c->kind == CTUI_LOOK_CTL_RADIO || c->kind == CTUI_LOOK_CTL_METER;
   if (c->kind != CTUI_LOOK_CTL_GRAPH) {
-    c->samples = NULL;
+    c->samples = c->samples2 = NULL;
     c->count = 0;
   }
   if (!button) {
@@ -257,10 +259,15 @@ uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
     }
   }
   /* a graph: the samples it shows, as the rows they land on */
-  int room = h - 2, shown = (w - 2) / graph_step(h) + 1;
+  /* the one past the left edge too: its line runs to the edge */
+  int room = h - 2, shown = (w - 2) / graph_step(h) + 2;
   for (int i = max2(0, s.count - shown); i < s.count && room > 0; i++) {
     int y = min2(s.samples[i], 100) * (room - 1) / 100;
     k = (k ^ (uint64_t)(y + 1)) * 0x100000001b3u;
+    if (s.samples2) {
+      y = min2(s.samples2[i], 100) * (room - 1) / 100;
+      k = (k ^ (uint64_t)(y + 0x10001)) * 0x100000001b3u;
+    }
   }
   return k;
 }
@@ -476,7 +483,8 @@ static const unsigned char WELL[3] = {0, 0, 0}, LED_GREEN[3] = {48, 224, 80},
                            LED_AMBER[3] = {240, 192, 48},
                            LED_RED[3] = {240, 64, 64},
                            GRID_GREEN[3] = {0, 96, 48},
-                           LINE_GREEN[3] = {0, 255, 64};
+                           LINE_GREEN[3] = {0, 255, 64},
+                           LINE_RED[3] = {255, 48, 48};
 
 static void dim(const unsigned char in[3], unsigned char out[3]) {
   for (int k = 0; k < 3; k++) {
@@ -484,8 +492,35 @@ static void dim(const unsigned char in[3], unsigned char out[3]) {
   }
 }
 
+/* Task Manager's: rows of LEDs from the bottom, two columns of them, all
+ * green */
+static void paint_meter_up(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
+                           const CTUI_LOOK *l) {
+  int w = cv->w, h = cv->h, y0, seg, n;
+  meter_leds(l, h, w, &y0, &seg, &n);
+  ctui_look_paint_box(cv, 0, 0, w, h, l, CTUI_LOOK_PAINT_SUNKEN,
+                      max2(l->groove, 1), 0, WELL);
+  int lw = (w - 2 * y0 - 1) / 2;
+  if (lw < 1) {
+    return;
+  }
+  int x1 = y0 + lw + 1;
+  int lit = share(c->value, c->max, n);
+  unsigned char off[3];
+  dim(LED_GREEN, off);
+  for (int i = 0, y = h - y0 - seg; i < n; i++, y -= seg + 1) {
+    const unsigned char *rgb = i < lit ? LED_GREEN : off;
+    ctui_look_paint_rect(cv, y0, y, lw, seg, rgb);
+    ctui_look_paint_rect(cv, x1, y, lw, seg, rgb);
+  }
+}
+
 static void paint_meter(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
                         const CTUI_LOOK *l) {
+  if (cv->h > cv->w) {
+    paint_meter_up(cv, c, l);
+    return;
+  }
   int w = cv->w, h = cv->h, m = margin(h), x0, seg, n;
   meter_leds(l, w, h, &x0, &seg, &n);
   ctui_look_paint_box(cv, 0, m, w, h - 2 * m, l, CTUI_LOOK_PAINT_SUNKEN,
@@ -507,6 +542,35 @@ static void paint_meter(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   }
 }
 
+/* the newest sample at the right edge, a point each step px leftwards,
+ * each joined to the next by a straight line */
+static void graph_line(CTUI_LOOK_CANVAS *cv, const unsigned char *samples,
+                       int count, int x0, int y0, int gw, int gh, int step,
+                       const unsigned char *rgb) {
+  int px = -1, py = -1;
+  /* the point past the left edge still gets its line, cut at the edge:
+   * a full graph reaches it */
+  for (int i = count - 1, x = x0 + gw - 1; i >= 0 && px != INT_MIN;
+       i--, x -= step) {
+    int y = y0 + gh - 1 - min2(samples[i], 100) * (gh - 1) / 100;
+    if (px < 0) {
+      ctui_look_paint_rect(cv, x, y, 1, 1, rgb);
+    } else {
+      int dx = px - x, dy = py - y, n = max2(dx, dy < 0 ? -dy : dy);
+      for (int k = 0; k <= n; k++) {
+        int lx = x + (dx * k + n / 2) / n;
+        if (lx >= x0) {
+          ctui_look_paint_rect(cv, lx,
+                               y + (dy * k + (dy < 0 ? -n : n) / 2) / n, 1,
+                               1, rgb);
+        }
+      }
+    }
+    px = x < x0 ? INT_MIN : x; /* past the edge: that was the last */
+    py = y;
+  }
+}
+
 static void paint_graph(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
                         const CTUI_LOOK *l) {
   int w = cv->w, h = cv->h;
@@ -524,24 +588,11 @@ static void paint_graph(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   for (int x = x0 + gw - 1; x >= x0; x -= sq) {
     ctui_look_paint_rect(cv, x, y0, 1, gh, GRID_GREEN);
   }
-  /* the newest sample at the right edge, a point each step px leftwards,
-   * each joined to the next by a straight line */
-  int step = graph_step(h), px = -1, py = -1;
-  for (int i = c->count - 1, x = x0 + gw - 1; i >= 0 && x >= x0;
-       i--, x -= step) {
-    int y = y0 + gh - 1 - min2(c->samples[i], 100) * (gh - 1) / 100;
-    if (px < 0) {
-      ctui_look_paint_rect(cv, x, y, 1, 1, LINE_GREEN);
-    } else {
-      int dx = px - x, dy = py - y, n = max2(dx, dy < 0 ? -dy : dy);
-      for (int k = 0; k <= n; k++) {
-        ctui_look_paint_rect(cv, x + (dx * k + n / 2) / n,
-                             y + (dy * k + (dy < 0 ? -n : n) / 2) / n, 1, 1,
-                             LINE_GREEN);
-      }
-    }
-    px = x;
-    py = y;
+  graph_line(cv, c->samples, c->count, x0, y0, gw, gh, graph_step(h),
+             LINE_GREEN);
+  if (c->samples2) {
+    graph_line(cv, c->samples2, c->count, x0, y0, gw, gh, graph_step(h),
+               LINE_RED);
   }
 }
 

@@ -237,6 +237,19 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **An upright meter, a graph's second line** (2026-10-09, for
+  ctui-wm's ctui-top: NT Task Manager's performance page).
+  `CTUI_LOOK_CTL_METER` taller than wide is Task Manager's usage meter:
+  rows of LEDs from the bottom in two columns, all green (no amber/red
+  zones, no peak). `CTUI_LOOK_CONTROL.samples2` (appended): a GRAPH's
+  second series, as many as `samples`, a red line over the green one
+  (Task Manager's kernel time; ctui-top's network sent), part of the
+  picture's key; other kinds ignore it. A full graph's line now runs on
+  to the well's left edge (toward the point past it, cut there; that
+  point keys the picture too): on a tall graph a point every h / 10 px
+  had left up to a step bare. look_test 8 new (the positional
+  initializers completed); 937 passed in all.
+
 - [x] **A level meter, a history graph, live images** (2026-10-09, for
   ctui-wm's apps in the look v3 step 4: ctui-audio's record meter,
   ctui-vms' CPU history). `CTUI_LOOK_CTL_METER`: value of max as LEDs in
