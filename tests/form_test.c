@@ -93,6 +93,20 @@ int main(void) {
   ctui_event_register("form", CTUI_VALUE_CHANGED_EVENT, &w, on_value);
 
   ctui_app_render(&app, screen);
+  for (int r = 0, found = 0; r < screen->rows && !found; r++) {
+    for (int c = 0; c + 6 <= screen->cols; c++) {
+      if (screen->cells[r * screen->cols + c].ch == 'L' &&
+          screen->cells[r * screen->cols + c + 1].ch == 'o' &&
+          screen->cells[r * screen->cols + c + 2].ch == 'c') {
+        const CTUI_CELL *l = &screen->cells[r * screen->cols + c];
+        CTUI_TEST_ASSERT((l->attr & CTUI_ATTR_DIM) &&
+                             l->fg == ctui_style_default.dim_fg,
+                         "a disabled row's label: dim and faint");
+        found = 1;
+        break;
+      }
+    }
+  }
   CTUI_TEST_ASSERT(f.focus == 1, "the first row taking focus has it");
   CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 1, "Keyboard") &&
                        ctui_test_row_contains(screen, 2, "› Layout") &&

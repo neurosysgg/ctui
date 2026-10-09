@@ -401,6 +401,10 @@ void ctui_popmenu_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       ctui_style_cell(st, CTUI_STYLE_DIM, CTUI_STYLE_BG, st->dim_fg, st->bg);
   CTUI_CELL sel = ctui_style_cell(st, CTUI_STYLE_SEL_FG, CTUI_STYLE_SEL_BG,
                                   st->sel_fg, st->sel_bg);
+  /* what can't be chosen is faint too: greyed in any terminal, and a
+   * hook re-inking the text under it can tell it from a dim hint */
+  CTUI_CELL off = dim;
+  off.attr |= CTUI_ATTR_DIM;
   for (int k = 0; k < m->depth; k++) {
     const CTUI_POPMENU_LEVEL *l = &m->level[k];
     int y = l->y - self->y, x = l->x - self->x;
@@ -421,7 +425,7 @@ void ctui_popmenu_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     for (int i = 0; i < l->count && i < l->h - 2; i++) {
       const CTUI_CELL *pen = i == l->sel                ? &sel
                              : selectable(&l->items[i]) ? &text
-                                                        : &dim;
+                                                        : &off;
       render_item(self, comp, l, i, y, x, pen, &dim, kw, sub);
     }
   }

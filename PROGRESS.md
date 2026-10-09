@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **What can't be chosen is faint** (2026-10-09, for ctui-wm's
+  looks, where it didn't show). A popmenu item that's OFF and a form's
+  disabled row label are drawn in the dim colour *and* `CTUI_ATTR_DIM`
+  (SGR 2): greyed in any terminal, and an app re-inking the text over a
+  control it drew under it (ctui-wm's look) can tell "off" from a dim
+  hint (a menu's keys, a label). popmenu_test, form_test 1 new each;
+  939 passed in all; ctui-mus: 1228/0, its dumps identical.
+
 - [x] **An upright meter, a graph's second line** (2026-10-09, for
   ctui-wm's ctui-top: NT Task Manager's performance page).
   `CTUI_LOOK_CTL_METER` taller than wide is Task Manager's usage meter:

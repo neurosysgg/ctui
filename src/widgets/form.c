@@ -400,8 +400,12 @@ void ctui_form_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                        st->bg); /* › */
     }
     if (r->kind != CTUI_FORM_BUTTON) {
-      ctui_widget_puts_cut(self, comp, y, 2, r->label, f->control_col - 3,
-                           r->disabled ? st->dim_fg : st->fg, st->bg);
+      /* a disabled row's label faint too (popmenu.c's off items) */
+      CTUI_CELL pen = {.fg = r->disabled ? st->dim_fg : st->fg,
+                       .bg = st->bg,
+                       .attr = r->disabled ? CTUI_ATTR_DIM : 0};
+      ctui_widget_puts_cut_cell(self, comp, y, 2, r->label, f->control_col - 3,
+                                &pen);
     }
     render_control(self, comp, y, f->control_col, self->w - f->control_col,
                    bar, r, focused, st);

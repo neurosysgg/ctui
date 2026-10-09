@@ -146,6 +146,12 @@ int main(void) {
                    "only its letter");
   CTUI_TEST_ASSERT(ctui_test_cell(screen, 4, 5) == 0x2713,
                    "a checked item's mark");
+  int off_row = find_row(screen, "Remove");
+  CTUI_TEST_ASSERT(off_row > 0 && (cell(screen, off_row, 7)->attr & CTUI_ATTR_DIM) &&
+                       cell(screen, off_row, 7)->fg == ctui_style_default.dim_fg &&
+                       !(cell(screen, 3, 8)->attr & CTUI_ATTR_DIM),
+                   "an item that can't be chosen: dim and faint (greyed in "
+                   "any terminal), the others not");
   CTUI_TEST_ASSERT(ctui_test_cell(screen, 5, 4) == 0x2500 &&
                        ctui_test_cell(screen, 5, 24) == 0x2500,
                    "a separator across");
