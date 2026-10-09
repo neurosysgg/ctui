@@ -58,6 +58,21 @@ typedef enum {
   CTUI_LOOK_PICTO_IMAGE,      /* 🖼 a page's picture not (yet) there: a torn
                                * sheet, a sun and a hill (its hill in the
                                * accent: tint it green) */
+  CTUI_LOOK_PICTO_ENVELOPE,  /* ✉ a mail not read yet */
+  CTUI_LOOK_PICTO_STAR,      /* ★ flagged, starred (in warm) */
+  CTUI_LOOK_PICTO_REPLY,     /* ↩ answered */
+  CTUI_LOOK_PICTO_FORWARDED, /* ↪ passed on */
+  CTUI_LOOK_PICTO_FOLDER,    /* 📁 1 of 1: open */
+  CTUI_LOOK_PICTO_INBOX,     /* 📥 */
+  CTUI_LOOK_PICTO_SENT,      /* 📤 */
+  CTUI_LOOK_PICTO_DRAFTS,    /* 📝 */
+  CTUI_LOOK_PICTO_ARCHIVE,   /* 🗃 */
+  CTUI_LOOK_PICTO_JUNK,      /* an envelope crossed in the accent */
+  CTUI_LOOK_PICTO_TRASH,     /* 🗑 */
+  CTUI_LOOK_PICTO_DOT,       /* ● a light in the accent (tint it: recording
+                              * red, a running machine green); 0 of 1: a
+                              * ring (armed) */
+  CTUI_LOOK_PICTO_EXPANDER,  /* ⊞ a tree's box: 1 of 1 open (⊟) */
   CTUI_LOOK_PICTOS,
 } CTUI_LOOK_PICTO;
 

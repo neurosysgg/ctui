@@ -788,6 +788,49 @@ static void test_pictos(void) {
                        opaque(off, 18, 20) == rune,
                    "bluetooth off: the rune alone, greyed");
 
+  /* the two-state ones: a dot or a ring, a plus or a minus, a folder shut
+   * or open */
+  int dot[3];
+  for (int v = 0; v < 3; v++) {
+    CTUI_LOOK_CONTROL c = picto(CTUI_LOOK_PICTO_DOT, v, v == 2 ? 0 : 1, 0);
+    ctui_look_control_snap(&c, &l, 18, 20);
+    dot[v] = count(paint(c, &l, 18, 20), 18, 20, &l, 'a');
+  }
+  CTUI_TEST_ASSERT(dot[1] == dot[0] + 52 && dot[2] == dot[1] && dot[0] > 30,
+                   "dot: 0 of 1 a ring, 1 of 1 or no state filled (%d %d %d)",
+                   dot[0], dot[1], dot[2]);
+  CTUI_LOOK_CONTROL plus = picto(CTUI_LOOK_PICTO_EXPANDER, 0, 1, 0);
+  CTUI_LOOK_CONTROL minus = picto(CTUI_LOOK_PICTO_EXPANDER, 1, 1, 0);
+  const unsigned char *pl = paint(plus, &l, 18, 20);
+  int plus_t = count(pl, 18, 20, &l, 't');
+  const unsigned char *mi = paint(minus, &l, 18, 20);
+  CTUI_TEST_ASSERT(count(mi, 18, 20, &l, 't') == plus_t - 4,
+                   "expander: closed a plus, open a minus (%d px of ink)",
+                   plus_t);
+  /* bare: in a look with a panel, nothing behind it */
+  CTUI_LOOK w95;
+  ctui_look_builtin("win95", &w95);
+  CTUI_LOOK_CONTROL star = picto(CTUI_LOOK_PICTO_STAR, 0, 0, 0);
+  int panel_px = opaque(paint(star, &w95, 18, 20), 18, 20);
+  star.flags = CTUI_LOOK_CTL_BARE;
+  int bare_px = opaque(paint(star, &w95, 18, 20), 18, 20);
+  CTUI_LOOK_CONTROL bare_flat = star, flat = picto(CTUI_LOOK_PICTO_STAR, 0, 0, 0);
+  CTUI_TEST_ASSERT(w95.panel && panel_px == 18 * 20 && bare_px < 18 * 20 / 2 &&
+                       bare_px > 50 &&
+                       ctui_look_control_key(&bare_flat, &l, 18, 20) ==
+                           ctui_look_control_key(&flat, &l, 18, 20),
+                   "bare: win95's face left out behind it (%d of %d px); in a "
+                   "look without a panel the same image",
+                   bare_px, panel_px);
+  CTUI_LOOK_CONTROL shut = picto(CTUI_LOOK_PICTO_FOLDER, 0, 1, 0);
+  CTUI_LOOK_CONTROL open = picto(CTUI_LOOK_PICTO_FOLDER, 1, 1, 0);
+  int shut_w = count(paint(shut, &l, 18, 20), 18, 20, &l, 'w');
+  int open_w = count(paint(open, &l, 18, 20), 18, 20, &l, 'w');
+  CTUI_TEST_ASSERT(shut_w == 78 && open_w == 53,
+                   "folder: open, its front flap down over less of it (%d / "
+                   "%d px)",
+                   open_w, shut_w);
+
   CTUI_LOOK_CONTROL k1 = picto(CTUI_LOOK_PICTO_SPEAKER, 40, 100, 0);
   CTUI_LOOK_CONTROL k2 = picto(CTUI_LOOK_PICTO_SPEAKER, 60, 100, 0);
   CTUI_LOOK_CONTROL k3 = picto(CTUI_LOOK_PICTO_SPEAKER, 70, 100, 0);

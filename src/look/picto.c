@@ -4,7 +4,8 @@
 
 /* The art: 16 rows of 16 role letters (paint.h). Beyond the roles, a
  * template may hold '1'-'3' (the speaker's waves: shown up to its value)
- * and '*' (the battery's inside: accent up to its value, else groove). */
+ * and '*' (the battery's inside: accent up to its value, else groove);
+ * '+' and '|' are the dot's and the expander's (at their art). */
 
 #define N CTUI_LOOK_PICTO_GRID
 #define BIG CTUI_LOOK_PICTO_GRID_BIG
@@ -921,6 +922,247 @@ ART(IMAGE, "................"
            "................"
            "................");
 
+ART(ENVELOPE, "................"
+              "................"
+              "................"
+              "tttttttttttttttt"
+              "tthhhhhhhhhhhhtt"
+              "ththhhhhhhhhhtht"
+              "thhthhhhhhhhthht"
+              "thhhthhhhhhthhht"
+              "thhhhthhhhthhhht"
+              "thhhhhtttthhhhht"
+              "thhhhhhhhhhhhhst"
+              "thhhhhhhhhhhhhst"
+              "tsssssssssssssst"
+              "tttttttttttttttt"
+              "................"
+              "................");
+
+ART(STAR, "................"
+          ".......tt......."
+          "......twwt......"
+          "......thwt......"
+          ".....twwwwt....."
+          "tttttwwwwwwttttt"
+          ".twwwwwwwwwwwwt."
+          "..twwwwwwwwwwt.."
+          "...twwwwwwwwt..."
+          "....twwwwwwt...."
+          "....twwwwwwt...."
+          "...twwwttwwwt..."
+          "...twwt..twwt..."
+          "..twt......twt.."
+          "..tt........tt.."
+          "................");
+
+ART(REPLY, "................"
+           "................"
+           ".....t.........."
+           "....tt.........."
+           "...tat.........."
+           "..taattttttt...."
+           ".taaaaaaaaaatt.."
+           "taaaaaaaaaaaaat."
+           ".taaaaaaaaaaaaat"
+           "..taatttttttaaat"
+           "...tat......taat"
+           "....tt......taat"
+           ".....t.....taat."
+           "..........taat.."
+           ".........ttt...."
+           "................");
+
+ART(FORWARDED, "................"
+               "................"
+               "..........t....."
+               "..........tt...."
+               "..........tat..."
+               "....tttttttaat.."
+               "..ttaaaaaaaaaat."
+               ".taaaaaaaaaaaaat"
+               "taaaaaaaaaaaaat."
+               "taaatttttttaat.."
+               "taat......tat..."
+               "taat......tt...."
+               ".taat.....t....."
+               "..taat.........."
+               "....ttt........."
+               "................");
+
+ART(FOLDER, "................"
+            "................"
+            "................"
+            ".tttttt........."
+            "thhhhhht........"
+            "thwwwwwwttttttt."
+            "thwwwwwwwwwwwwst"
+            "thwwwwwwwwwwwwst"
+            "thwwwwwwwwwwwwst"
+            "thwwwwwwwwwwwwst"
+            "thwwwwwwwwwwwwst"
+            "thwwwwwwwwwwwwst"
+            "tsssssssssssssst"
+            "tttttttttttttttt"
+            "................"
+            "................");
+
+/* the same open: its front flap down */
+ART(FOLDER_OPEN, "................"
+                 "................"
+                 "................"
+                 ".tttttt........."
+                 "thhhhhht........"
+                 "thsssssstttttt.."
+                 "thsssssssssssst."
+                 "thsttttttttttttt"
+                 "thtwwwwwwwwwwwt."
+                 "thtwwwwwwwwwwt.."
+                 "ttwwwwwwwwwwwt.."
+                 "twwwwwwwwwwwt..."
+                 "twwwwwwwwwwst..."
+                 "tttttttttttt...."
+                 "................"
+                 "................");
+
+ART(INBOX, "......tttt......"
+           "......taat......"
+           "......taat......"
+           "...ttttaatttt..."
+           "....taaaaaat...."
+           ".....taaaat....."
+           "......taat......"
+           ".......tt......."
+           "t......tt......t"
+           "th............st"
+           "thhhhhggggghhhst"
+           "thhhhhhhhhhhhhst"
+           "thhhhhhhhhhhhhst"
+           "tsssssssssssssst"
+           "tttttttttttttttt"
+           "................");
+
+ART(SENT, ".......tt......."
+          "......taat......"
+          ".....taaaat....."
+          "....taaaaaat...."
+          "...ttttaatttt..."
+          "......taat......"
+          "......taat......"
+          "......taat......"
+          "t.....taat.....t"
+          "th............st"
+          "thhhhhggggghhhst"
+          "thhhhhhhhhhhhhst"
+          "thhhhhhhhhhhhhst"
+          "tsssssssssssssst"
+          "tttttttttttttttt"
+          "................");
+
+ART(DRAFTS, "..ttttttttttt..."
+            "..thhhhhhhhst..."
+            "..thttttthhst..."
+            "..thhhhhhhhst..."
+            "..thtttttthst..."
+            "..thhhhhhhhst..."
+            "..thttttthhst.tt"
+            "..thhhhhhhhsttat"
+            "..thtttttttat..."
+            "..thhhhhhtatt..."
+            "..thhhhhtatst..."
+            "..thhhhtathst..."
+            "..thhhtthhhst..."
+            "..tsssssssssst.."
+            "..ttttttttttt..."
+            "................");
+
+ART(ARCHIVE, "................"
+             "................"
+             ".tttttttttttttt."
+             ".thhhhhhhhhhhst."
+             ".tsssssssssssst."
+             "..thhhhhhhhhst.."
+             "..thhhhhhhhhst.."
+             "..thhhggggghst.."
+             "..thhhhhhhhhst.."
+             "..thhhhhhhhhst.."
+             "..thhhhhhhhhst.."
+             "..thhhhhhhhhst.."
+             "..tssssssssssst."
+             "..ttttttttttttt."
+             "................"
+             "................");
+
+ART(JUNK, "................"
+          "................"
+          "................"
+          "tttttttttttttttt"
+          "tthhhhhhhhhhhhtt"
+          "ththhhhhhhhhhtht"
+          "thhthhhhhhhhthht"
+          "thhhthhhhhhthhht"
+          "thhhhthhhaahhhaa"
+          "thhhhhttttaahaat"
+          "thhhhhhhhhhaaast"
+          "thhhhhhhhhhaaast"
+          "tsssssssssaasaat"
+          "tttttttttaatttaa"
+          "................"
+          "................");
+
+ART(TRASH, "................"
+           "......tttt......"
+           ".tttttttttttttt."
+           ".thhhhhhhhhhhst."
+           ".tttttttttttttt."
+           "..thhthhthhtst.."
+           "..thhthhthhtst.."
+           "..thhthhthhtst.."
+           "..thhthhthhtst.."
+           "..thhthhthhtst.."
+           "..thhthhthhtst.."
+           "..thhthhthhtst.."
+           "..thhthhthhtst.."
+           "..tssssssssssst."
+           "...tttttttttt..."
+           "................");
+
+/* '+' is filled unless it is a ring (0 of 1) */
+ART(DOT, "................"
+         "................"
+         ".....tttttt....."
+         "...ttaaaaaatt..."
+         "..taaaaaaaaaat.."
+         "..taa++++++aat.."
+         ".taa++++++++aat."
+         ".taa++++++++aat."
+         ".taa++++++++aat."
+         ".taa++++++++aat."
+         ".taa++++++++aat."
+         "..taa++++++aat.."
+         "..taaaaaaaaaat.."
+         "...ttaaaaaatt..."
+         ".....tttttt....."
+         "................");
+
+/* '|' is the plus's upright, gone when open */
+ART(EXPANDER, "................"
+              "................"
+              "................"
+              "...ttttttttt...."
+              "...thhhhhhht...."
+              "...thhh|hhht...."
+              "...thhh|hhht...."
+              "...thtttttht...."
+              "...thhh|hhht...."
+              "...thhh|hhht...."
+              "...thhhhhhht...."
+              "...ttttttttt...."
+              "................"
+              "................"
+              "................"
+              "................");
+
 static const char *const ARTS[CTUI_LOOK_PICTOS] = {
     [CTUI_LOOK_PICTO_SPEAKER] = SPEAKER,
     [CTUI_LOOK_PICTO_MIC] = MIC,
@@ -957,6 +1199,19 @@ static const char *const ARTS[CTUI_LOOK_PICTOS] = {
     [CTUI_LOOK_PICTO_WARNING] = WARNING,
     [CTUI_LOOK_PICTO_ERROR] = ERROR,
     [CTUI_LOOK_PICTO_IMAGE] = IMAGE,
+    [CTUI_LOOK_PICTO_ENVELOPE] = ENVELOPE,
+    [CTUI_LOOK_PICTO_STAR] = STAR,
+    [CTUI_LOOK_PICTO_REPLY] = REPLY,
+    [CTUI_LOOK_PICTO_FORWARDED] = FORWARDED,
+    [CTUI_LOOK_PICTO_FOLDER] = FOLDER,
+    [CTUI_LOOK_PICTO_INBOX] = INBOX,
+    [CTUI_LOOK_PICTO_SENT] = SENT,
+    [CTUI_LOOK_PICTO_DRAFTS] = DRAFTS,
+    [CTUI_LOOK_PICTO_ARCHIVE] = ARCHIVE,
+    [CTUI_LOOK_PICTO_JUNK] = JUNK,
+    [CTUI_LOOK_PICTO_TRASH] = TRASH,
+    [CTUI_LOOK_PICTO_DOT] = DOT,
+    [CTUI_LOOK_PICTO_EXPANDER] = EXPANDER,
 };
 
 /* a busy logo's lines of output: as long as these eighths of its screen,
@@ -1026,6 +1281,10 @@ void ctui_look_picto_snap(CTUI_LOOK_PICTO p, int off, int *value, int *max) {
     /* any level shows a wave; each third another */
     *value = (int)(((long long)v * WAVES + m - 1) / m);
     *max = WAVES;
+  } else if (p == CTUI_LOOK_PICTO_FOLDER || p == CTUI_LOOK_PICTO_DOT ||
+             p == CTUI_LOOK_PICTO_EXPANDER) {
+    *value = v > 0;
+    *max = 1;
   } else if (p == CTUI_LOOK_PICTO_BATTERY) {
     *value = (int)(((long long)v * CHARGE_COLS + m / 2) / m);
     *max = CHARGE_COLS;
@@ -1064,7 +1323,9 @@ void ctui_look_picto_paint(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
     return;
   }
   int n = grid_for(p, w, h), big = n == BIG;
-  const char *art = big ? ctui_look_picto_big[p] : ARTS[p];
+  const char *art = big ? ctui_look_picto_big[p]
+                   : p == CTUI_LOOK_PICTO_FOLDER && value > 0 ? FOLDER_OPEN
+                                                              : ARTS[p];
   if (p == CTUI_LOOK_PICTO_KEY && off) {
     /* broken, in colour: what it says isn't "disabled" */
     paint(c, x, y, w, h, big ? ctui_look_picto_big_key_broken : KEY_BROKEN, n,
@@ -1082,6 +1343,10 @@ void ctui_look_picto_paint(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
     } else if (ch == '*') {
       int lit = max > 0 ? value * in_w / CHARGE_COLS : 0;
       ch = i % n - in_x < lit ? 'a' : 'g';
+    } else if (ch == '+') {
+      ch = max > 0 && !value ? '.' : 'a';
+    } else if (ch == '|') {
+      ch = max > 0 && value ? 'h' : 't';
     } else if (ch == 'a' && off &&
                (p == CTUI_LOOK_PICTO_BLUETOOTH || p == CTUI_LOOK_PICTO_LAMP)) {
       ch = '.';

@@ -237,6 +237,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Pictograms for mail, feeds and trees; a bare control**
+  (2026-10-09, for ctui-wm's apps in the look v3 step 3). Thirteen
+  pictograms appended: `ENVELOPE`, `STAR`, `REPLY`, `FORWARDED`,
+  `FOLDER` (1 of 1 open), `INBOX`, `SENT`, `DRAFTS`, `ARCHIVE`, `JUNK`,
+  `TRASH`, `DOT` (a light in the accent, tinted by its user; 0 of 1 a
+  ring) and `EXPANDER` (a tree's box, 1 of 1 a minus). Two template
+  marks in picto.c's art: `+` (the dot's fill) and `|` (the plus's
+  upright). `CTUI_LOOK_CTL_BARE`: nothing behind a control where the
+  look would paint its panel (win95's face), for a pictogram in an app's
+  list on that list's own background; dropped from the key where it
+  changes nothing. look_test (4); 918 passed in all.
+
 - [x] **Table headers, the cursor row and tabs asking the style's hook;
   a cell icon slot** (2026-10-09, for ctui-wm's apps in the look v3: the
   apps' tables, sidebars and tab rows in 95's chrome, ctui-files' file

@@ -176,6 +176,9 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
   if (!(c->under & CTUI_LOOK_CTL_TINT)) {
     c->under = 0;
   }
+  if (!l->panel || c->under || c->kind == CTUI_LOOK_CTL_BOX) {
+    c->flags &= ~(unsigned)CTUI_LOOK_CTL_BARE; /* changes nothing then */
+  }
   if (c->kind != CTUI_LOOK_CTL_CHIP) {
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_HOVER;
   }
@@ -879,7 +882,8 @@ void ctui_look_control_paint(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
                                 (unsigned char)(c->under >> 8),
                                 (unsigned char)c->under};
     ctui_look_paint_rect(&cv, 0, 0, w, h, u);
-  } else if (l->panel && c->kind != CTUI_LOOK_CTL_BOX) {
+  } else if (l->panel && c->kind != CTUI_LOOK_CTL_BOX &&
+             !(c->flags & CTUI_LOOK_CTL_BARE)) {
     /* (a frame's icon is over its box: clear round it) */
     ctui_look_paint_rect(&cv, 0, 0, w, h, role(l, CTUI_LOOK_FACE));
   }

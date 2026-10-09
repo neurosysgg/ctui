@@ -76,6 +76,9 @@ typedef enum {
    * carry it: 95's dotted rectangle round it; a button's inside its
    * bevel */
   CTUI_LOOK_CTL_FOCUSED = 16,
+  /* nothing behind it where the look would put its panel (a pictogram in
+   * an app's list, on the list's own background) */
+  CTUI_LOOK_CTL_BARE = 32,
 } CTUI_LOOK_CTL_FLAG;
 
 typedef enum {
