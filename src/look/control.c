@@ -38,6 +38,18 @@ static void level_area(const CTUI_LOOK *l, int w, int *x0, int *len) {
 
 static int signal_bars(int max) { return max <= 0 ? 4 : min2(max, 8); }
 
+/* a meter's LEDs: inside its well's edge (*x0 in from each side), *n of
+ * them *seg px wide with a px between */
+static void meter_leds(const CTUI_LOOK *l, int w, int h, int *x0, int *seg,
+                       int *n) {
+  *x0 = max2(l->groove, 1) + 1;
+  *seg = max2(2, h / 10);
+  *n = max2(0, (w - 2 * *x0 + 1) / (*seg + 1));
+}
+
+/* a graph's points: one each step px, inside a 1 px edge */
+static int graph_step(int h) { return max2(2, h / 10); }
+
 /* a scrollbar's length along its axis and its thumb's smallest length */
 static void scroll_axis(int w, int h, int *len, int *least) {
   int vertical = h >= w;
@@ -83,6 +95,19 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
     }
     break;
   }
+  case CTUI_LOOK_CTL_METER: {
+    int x0, seg, n;
+    meter_leds(l, w, h, &x0, &seg, &n);
+    int lit = share(c->value, c->max, n);
+    int held = c->span > 0 ? max2(1, share(c->span, c->max, n)) : 0;
+    c->value = lit;
+    c->span = held > lit ? held : 0;
+    c->max = n;
+    break;
+  }
+  case CTUI_LOOK_CTL_GRAPH:
+    c->value = c->max = c->span = 0;
+    break;
   case CTUI_LOOK_CTL_SIGNAL:
     c->max = signal_bars(c->max);
     c->value = clamp(c->value, 0, c->max);
@@ -161,7 +186,12 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
   int button = c->kind == CTUI_LOOK_CTL_BUTTON ||
                c->kind == CTUI_LOOK_CTL_CHIP || c->kind == CTUI_LOOK_CTL_FIELD;
   int check = c->kind == CTUI_LOOK_CTL_CHECK ||
-              c->kind == CTUI_LOOK_CTL_TOGGLE || c->kind == CTUI_LOOK_CTL_RADIO;
+              c->kind == CTUI_LOOK_CTL_TOGGLE ||
+              c->kind == CTUI_LOOK_CTL_RADIO || c->kind == CTUI_LOOK_CTL_METER;
+  if (c->kind != CTUI_LOOK_CTL_GRAPH) {
+    c->samples = NULL;
+    c->count = 0;
+  }
   if (!button) {
     c->glyph = CTUI_LOOK_GLYPH_NONE;
   }
@@ -225,6 +255,12 @@ uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
     for (int b = 0; b < 4; b++) {
       k = (k ^ ((f[i] >> (8 * b)) & 0xff)) * 0x100000001b3u;
     }
+  }
+  /* a graph: the samples it shows, as the rows they land on */
+  int room = h - 2, shown = (w - 2) / graph_step(h) + 1;
+  for (int i = max2(0, s.count - shown); i < s.count && room > 0; i++) {
+    int y = min2(s.samples[i], 100) * (room - 1) / 100;
+    k = (k ^ (uint64_t)(y + 1)) * 0x100000001b3u;
   }
   return k;
 }
@@ -432,6 +468,80 @@ static void paint_signal(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
       ctui_look_paint_box(cv, x, y, bw, bh, l, CTUI_LOOK_PAINT_SUNKEN,
                           min2(l->groove, 1), 0, role(l, CTUI_LOOK_GROOVE));
     }
+  }
+}
+
+/* the meter's and the graph's colours: an instrument's, in every look */
+static const unsigned char WELL[3] = {0, 0, 0}, LED_GREEN[3] = {48, 224, 80},
+                           LED_AMBER[3] = {240, 192, 48},
+                           LED_RED[3] = {240, 64, 64},
+                           GRID_GREEN[3] = {0, 96, 48},
+                           LINE_GREEN[3] = {0, 255, 64};
+
+static void dim(const unsigned char in[3], unsigned char out[3]) {
+  for (int k = 0; k < 3; k++) {
+    out[k] = (unsigned char)(in[k] / 5);
+  }
+}
+
+static void paint_meter(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
+                        const CTUI_LOOK *l) {
+  int w = cv->w, h = cv->h, m = margin(h), x0, seg, n;
+  meter_leds(l, w, h, &x0, &seg, &n);
+  ctui_look_paint_box(cv, 0, m, w, h - 2 * m, l, CTUI_LOOK_PAINT_SUNKEN,
+                      max2(l->groove, 1), 0, WELL);
+  int y = m + x0, lh = h - 2 * m - 2 * x0;
+  int clip = (c->flags & CTUI_LOOK_CTL_CHECKED) != 0;
+  /* snapped or not: the same LEDs (snap's own rule) */
+  int lit = share(c->value, c->max, n);
+  int held = c->span > 0 ? max2(1, share(c->span, c->max, n)) : 0;
+  for (int i = 0, x = x0; i < n; i++, x += seg + 1) {
+    /* its zone by where it ends: 20 of 1 is red from the 20th */
+    const unsigned char *z = (i + 1) * 100 > n * 95   ? LED_RED
+                             : (i + 1) * 100 > n * 70 ? LED_AMBER
+                                                      : LED_GREEN;
+    unsigned char off[3];
+    dim(z, off);
+    int on = i < lit || i + 1 == held || (clip && i == n - 1);
+    ctui_look_paint_rect(cv, x, y, seg, lh, on ? z : off);
+  }
+}
+
+static void paint_graph(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
+                        const CTUI_LOOK *l) {
+  int w = cv->w, h = cv->h;
+  ctui_look_paint_box(cv, 0, 0, w, h, l, CTUI_LOOK_PAINT_SUNKEN, 1, 0, WELL);
+  int x0 = 1, y0 = 1, gw = w - 2, gh = h - 2;
+  if (gw < 2 || gh < 2) {
+    return;
+  }
+  /* the grid's squares, a sixth of its height (Task Manager's 12 px at
+   * 72), from the bottom right */
+  int sq = max2(4, gh / 3);
+  for (int y = y0 + gh - 1; y >= y0; y -= sq) {
+    ctui_look_paint_rect(cv, x0, y, gw, 1, GRID_GREEN);
+  }
+  for (int x = x0 + gw - 1; x >= x0; x -= sq) {
+    ctui_look_paint_rect(cv, x, y0, 1, gh, GRID_GREEN);
+  }
+  /* the newest sample at the right edge, a point each step px leftwards,
+   * each joined to the next by a straight line */
+  int step = graph_step(h), px = -1, py = -1;
+  for (int i = c->count - 1, x = x0 + gw - 1; i >= 0 && x >= x0;
+       i--, x -= step) {
+    int y = y0 + gh - 1 - min2(c->samples[i], 100) * (gh - 1) / 100;
+    if (px < 0) {
+      ctui_look_paint_rect(cv, x, y, 1, 1, LINE_GREEN);
+    } else {
+      int dx = px - x, dy = py - y, n = max2(dx, dy < 0 ? -dy : dy);
+      for (int k = 0; k <= n; k++) {
+        ctui_look_paint_rect(cv, x + (dx * k + n / 2) / n,
+                             y + (dy * k + (dy < 0 ? -n : n) / 2) / n, 1, 1,
+                             LINE_GREEN);
+      }
+    }
+    px = x;
+    py = y;
   }
 }
 
@@ -896,6 +1006,12 @@ void ctui_look_control_paint(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
     break;
   case CTUI_LOOK_CTL_SIGNAL:
     paint_signal(&cv, c, l);
+    break;
+  case CTUI_LOOK_CTL_METER:
+    paint_meter(&cv, c, l);
+    break;
+  case CTUI_LOOK_CTL_GRAPH:
+    paint_graph(&cv, c, l);
     break;
   case CTUI_LOOK_CTL_CHECK:
     paint_check(&cv, c, l);

@@ -93,6 +93,62 @@ unsigned int ctui_drawn_id(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
   return ctui_icon_id_box(path, cols, rows);
 }
 
+static unsigned g_live_slots;
+
+static void live_path(const CTUI_DRAWN_LIVE *lv, int flip, char *out,
+                      size_t cap) {
+  snprintf(out, cap, "%s/live-%ld-%u-%d.png", ctui_drawn_dir(),
+           (long)getpid(), lv->slot, flip);
+}
+
+unsigned int ctui_drawn_live_id(CTUI_DRAWN_LIVE *lv, const CTUI_LOOK_CONTROL *c,
+                                const CTUI_LOOK *l, int cols, int rows) {
+  int cw, ch;
+  if (!ctui_icon_enabled() || cols <= 0 || rows <= 0 ||
+      ctui_drawn_cell_px(&cw, &ch) != 0) {
+    return 0;
+  }
+  if (!lv->slot) {
+    lv->slot = ++g_live_slots;
+  }
+  int w = cols * cw, h = rows * ch;
+  uint64_t key = ctui_look_control_key(c, l, w, h);
+  char path[4096];
+  if (key == lv->key && cols == lv->cols && rows == lv->rows) {
+    live_path(lv, lv->flip, path, sizeof path);
+    return ctui_icon_id_box(path, cols, rows);
+  }
+  /* the other file: kitty may not have read the last one yet */
+  int flip = !lv->flip;
+  live_path(lv, flip, path, sizeof path);
+  mkdir(ctui_drawn_dir(), 0700);
+  unsigned char *rgba = malloc((size_t)w * (size_t)h * 4);
+  ctui_look_control_paint(c, l, rgba, w, h);
+  int r = ctui_look_png_write(path, rgba, w, h);
+  free(rgba);
+  if (r != 0) {
+    ctui_logf(E_WRN, "[CTUI:DRAWN] - can't write %s\n", path);
+    return 0;
+  }
+  lv->key = key;
+  lv->flip = flip;
+  lv->cols = cols;
+  lv->rows = rows;
+  return ctui_icon_id_again(path, cols, rows);
+}
+
+void ctui_drawn_live_free(CTUI_DRAWN_LIVE *lv) {
+  if (!lv->slot) {
+    return;
+  }
+  char path[4096];
+  for (int f = 0; f < 2; f++) {
+    live_path(lv, f, path, sizeof path);
+    unlink(path);
+  }
+  *lv = (CTUI_DRAWN_LIVE){0};
+}
+
 void ctui_drawn_put(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row, int col,
                     unsigned int id, int cols, int rows, unsigned char bg) {
   if (id) {

@@ -237,6 +237,22 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A level meter, a history graph, live images** (2026-10-09, for
+  ctui-wm's apps in the look v3 step 4: ctui-audio's record meter,
+  ctui-vms' CPU history). `CTUI_LOOK_CTL_METER`: value of max as LEDs in
+  a black well (2 px each and a gap at 20 px high), green, the top 30 %
+  amber, the top 5 % red in every look; span a held peak, CHECKED
+  clipped (the last LED red); snapped to LEDs. `CTUI_LOOK_CTL_GRAPH`: NT
+  Task Manager's history (black well, dim green grid, a bright green
+  line through the samples, newest at the right); `samples` + `count`
+  appended to `CTUI_LOOK_CONTROL`, keyed by the rows the shown points
+  land on. `CTUI_DRAWN_LIVE` (drawn.h): a control whose pictures don't
+  come back in one image id and two files of its own, painted and placed
+  again (`ctui_icon_id_again()`) when the picture changes, the files
+  removed by `ctui_drawn_live_free()` -- no file per picture piling up.
+  look_test (11; the positional initializers there gained the two new
+  fields); 929 passed in all.
+
 - [x] **Pictograms for mail, feeds and trees; a bare control**
   (2026-10-09, for ctui-wm's apps in the look v3 step 3). Thirteen
   pictograms appended: `ENVELOPE`, `STAR`, `REPLY`, `FORWARDED`,

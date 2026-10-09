@@ -47,6 +47,39 @@ unsigned int ctui_icon_id_box(const char *path, int cols, int rows) {
   return ctui_icon_id_placed(path, cols, rows, &placed);
 }
 
+/* the slot of path, or -1 */
+static int find(const char *path, unsigned long h) {
+  for (int i = 0; i < g_count; i++) {
+    if (g_slots[i].hash == h && strcmp(g_slots[i].path, path) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+static void place(unsigned int id, const char *path, int cols, int rows) {
+  char prepared[4096];
+  ctui_gfx_kitty_place_file(
+      id,
+      g_prepare && g_prepare(path, cols, rows, prepared, sizeof prepared)
+          ? prepared
+          : path,
+      cols, rows);
+}
+
+unsigned int ctui_icon_id_again(const char *path, int cols, int rows) {
+  if (!g_enabled || !path || !path[0]) {
+    return 0;
+  }
+  int i = find(path, hash_path(path));
+  if (i < 0) {
+    return ctui_icon_id_box(path, cols, rows);
+  }
+  g_slots[i].used = ++g_clock;
+  place((unsigned int)i + 1, path, cols, rows);
+  return (unsigned int)i + 1;
+}
+
 unsigned int ctui_icon_id_placed(const char *path, int cols, int rows,
                                  int *placed) {
   *placed = 0;
@@ -75,13 +108,7 @@ unsigned int ctui_icon_id_placed(const char *path, int cols, int rows,
   }
   g_slots[i] = (SLOT){.path = strdup(path), .hash = h, .used = ++g_clock};
   unsigned int id = (unsigned int)i + 1;
-  char prepared[4096];
-  ctui_gfx_kitty_place_file(
-      id,
-      g_prepare && g_prepare(path, cols, rows, prepared, sizeof prepared)
-          ? prepared
-          : path,
-      cols, rows);
+  place(id, path, cols, rows);
   *placed = 1;
   return id;
 }

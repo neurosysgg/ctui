@@ -36,6 +36,10 @@ unsigned int ctui_icon_id_box(const char *path, int cols, int rows);
 unsigned int ctui_icon_id_placed(const char *path, int cols, int rows,
                                  int *placed);
 
+/* the same, the file at path placed again under its id even when it was
+ * placed before (its pixels changed: drawn.h's live images) */
+unsigned int ctui_icon_id_again(const char *path, int cols, int rows);
+
 /* draws the icon (CTUI_ICON_COLS cells) at (row, col) over bg; nothing
  * for id 0 */
 void ctui_icon_put(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row, int col,

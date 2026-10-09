@@ -63,6 +63,13 @@ typedef enum {
    * sides set (1 << top, right, bottom, left: the box's order) -- the edges
    * facing the screen; none: the face alone */
   CTUI_LOOK_CTL_BAR,
+  /* a level meter's LEDs in a black well: value of max lit, green, the
+   * top 30 % amber, the top 5 % red, in every look; span: a held peak
+   * (one more lit, 0 none); CHECKED: clipped (the last one lit red) */
+  CTUI_LOOK_CTL_METER,
+  /* NT Task Manager's history graph: a black well, a dim green grid, the
+   * samples (0-100, the newest at the right) as a bright green line */
+  CTUI_LOOK_CTL_GRAPH,
   CTUI_LOOK_CTL_KINDS,
 } CTUI_LOOK_CTL_KIND;
 
@@ -121,6 +128,10 @@ typedef struct {
   /* CTUI_LOOK_CTL_BOX's top row: its edge left open over gap_cols cells
    * from cell gap (a group box's heading, a window's title on it) */
   uint16_t gap, gap_cols;
+  /* CTUI_LOOK_CTL_GRAPH's: count samples, oldest first (the caller's;
+   * only read while the image is drawn or its key made) */
+  const unsigned char *samples;
+  int count;
 } CTUI_LOOK_CONTROL;
 
 #define CTUI_LOOK_CTL_TINT 0x1000000u

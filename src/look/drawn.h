@@ -23,6 +23,24 @@ const char *ctui_drawn_dir(void);
 unsigned int ctui_drawn_id(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
                            int cols, int rows);
 
+/* A live image: a control whose pictures don't come back (a graph of a
+ * history) in one file and one image id of its own, painted and placed
+ * again when its picture changes, instead of a cached file per picture.
+ * Zeroed to begin; ctui_drawn_live_free() removes its files. */
+typedef struct {
+  uint64_t key;  /* the picture shown; 0 none yet */
+  unsigned slot; /* its number in this process, from 1 */
+  int flip;      /* which of its two files was written last */
+  int cols, rows;
+} CTUI_DRAWN_LIVE;
+
+/* the image id showing c over cols x rows cells in l: the picture painted
+ * and placed again when it changed (into the file kitty didn't read
+ * last); 0 when icons are off or the cell size is unknown */
+unsigned int ctui_drawn_live_id(CTUI_DRAWN_LIVE *lv, const CTUI_LOOK_CONTROL *c,
+                                const CTUI_LOOK *l, int cols, int rows);
+void ctui_drawn_live_free(CTUI_DRAWN_LIVE *lv);
+
 /* the look controls are drawn in (lookconf.h: a config's "look"), copied;
  * NULL = none: the widgets draw their glyphs as text */
 void ctui_drawn_set_look(const CTUI_LOOK *l);
