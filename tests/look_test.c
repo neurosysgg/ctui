@@ -1770,20 +1770,47 @@ static void test_meter_graph(void) {
   fg.samples = edge_b;
   CTUI_TEST_ASSERT(ka != ctui_look_control_key(&fg, &l, 60, 20),
                    "the point past the edge keys the picture too");
-  CTUI_TEST_ASSERT(ctui_look_graph_at(40, 60, 20, 58) == 39 &&
-                       ctui_look_graph_at(40, 60, 20, 56) == 38 &&
-                       ctui_look_graph_at(40, 60, 20, 57) == 38 &&
-                       ctui_look_graph_at(40, 60, 20, 1) == 10,
+  CTUI_LOOK_CONTROL at = {.kind = CTUI_LOOK_CTL_GRAPH, .samples = flat,
+                          .count = 40};
+  CTUI_TEST_ASSERT(ctui_look_graph_at(&at, 60, 20, 58) == 39 &&
+                       ctui_look_graph_at(&at, 60, 20, 56) == 38 &&
+                       ctui_look_graph_at(&at, 60, 20, 57) == 38 &&
+                       ctui_look_graph_at(&at, 60, 20, 1) == 10,
                    "the sample under a column: the nearest point (a point "
                    "every 2 px from x 58)");
-  CTUI_TEST_ASSERT(ctui_look_graph_at(40, 60, 20, 0) == -1 &&
-                       ctui_look_graph_at(40, 60, 20, 59) == -1 &&
-                       ctui_look_graph_at(3, 60, 20, 54) == 0 &&
-                       ctui_look_graph_at(3, 60, 20, 52) == -1 &&
-                       ctui_look_graph_at(0, 60, 20, 58) == -1 &&
-                       ctui_look_graph_at(5, 3, 20, 1) == -1,
+  CTUI_LOOK_CONTROL few = at, none = at;
+  few.count = 3;
+  none.count = 0;
+  CTUI_TEST_ASSERT(ctui_look_graph_at(&at, 60, 20, 0) == -1 &&
+                       ctui_look_graph_at(&at, 60, 20, 59) == -1 &&
+                       ctui_look_graph_at(&few, 60, 20, 54) == 0 &&
+                       ctui_look_graph_at(&few, 60, 20, 52) == -1 &&
+                       ctui_look_graph_at(&none, 60, 20, 58) == -1 &&
+                       ctui_look_graph_at(&few, 3, 20, 1) == -1,
                    "none on the frame, left of the oldest, without samples "
                    "or room");
+
+  /* a big graph: span points across it, however tall (60 px high is a
+   * point every 6 px; 15 across 60: one every 4) */
+  static unsigned char many[240];
+  memset(many, 50, sizeof many);
+  CTUI_LOOK_CONTROL big = {.kind = CTUI_LOOK_CTL_GRAPH, .samples = many,
+                           .count = 240, .span = 15};
+  CTUI_TEST_ASSERT(ctui_look_graph_at(&big, 62, 60, 60) == 239 &&
+                       ctui_look_graph_at(&big, 62, 60, 56) == 238 &&
+                       ctui_look_graph_at(&big, 62, 60, 4) == 225,
+                   "span: a point every 4 px across 60, 15 of them");
+  p = paint(big, &l, 62, 60);
+  CTUI_TEST_ASSERT(rgb_is(p, 62, 56, 30, 0, 255, 64) &&
+                       rgb_is(p, 62, 4, 30, 0, 255, 64),
+                   "... and the line drawn so, to the left edge");
+  CTUI_LOOK_CONTROL big2 = big;
+  big2.span = 14; /* 60 / 14 = 4 as well */
+  CTUI_TEST_ASSERT(ctui_look_control_key(&big, &l, 62, 60) ==
+                           ctui_look_control_key(&big2, &l, 62, 60) &&
+                       ctui_look_control_key(&big, &l, 62, 60) !=
+                           ctui_look_control_key(&at, &l, 62, 60),
+                   "spans making the same step key alike");
 
   /* a second line: kernel time, red over the green */
   static const unsigned char k1s[] = {0, 0, 0, 10}, k2s[] = {0, 0, 0, 50};

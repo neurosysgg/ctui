@@ -71,7 +71,9 @@ typedef enum {
   CTUI_LOOK_CTL_METER,
   /* NT Task Manager's history graph: a black well, a dim green grid, the
    * samples (0-100, the newest at the right) as a bright green line;
-   * samples2 (as many) a red one over it (its kernel time) */
+   * samples2 (as many) a red one over it (its kernel time); a point every
+   * tenth of its height in px, or with span > 0 span points across it
+   * (a big graph holding minutes) */
   CTUI_LOOK_CTL_GRAPH,
   CTUI_LOOK_CTL_KINDS,
 } CTUI_LOOK_CTL_KIND;
@@ -201,11 +203,11 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
 uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
                                int w, int h);
 
-/* the sample of a CTUI_LOOK_CTL_GRAPH of count samples, drawn w x h px,
- * whose point is nearest px column x (from the box's left): its index,
- * or -1 on the frame, left of the oldest, or too small to draw (what a
- * pointer over the graph is over) */
-int ctui_look_graph_at(int count, int w, int h, int x);
+/* the sample of GRAPH c drawn w x h px whose point is nearest px column
+ * x (from the box's left): its index in c->samples, or -1 on the frame,
+ * left of the oldest, or too small to draw (what a pointer over the
+ * graph is over) */
+int ctui_look_graph_at(const CTUI_LOOK_CONTROL *c, int w, int h, int x);
 
 /* paints c into rgba (w x h, cleared first: what the control doesn't
  * cover stays transparent, or the face with the look's panel) */

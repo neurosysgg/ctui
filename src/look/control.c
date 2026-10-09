@@ -50,7 +50,11 @@ static void meter_leds(const CTUI_LOOK *l, int w, int h, int *x0, int *seg,
 }
 
 /* a graph's points: one each step px, inside a 1 px edge */
-static int graph_step(int h) { return max2(2, h / 10); }
+/* a graph's points apart in px: as many as span says across the well,
+ * else Task Manager's (a tenth of the height) */
+static int graph_step(const CTUI_LOOK_CONTROL *c, int w, int h) {
+  return c->span > 0 ? max2(1, (w - 2) / c->span) : max2(2, h / 10);
+}
 
 /* a scrollbar's length along its axis and its thumb's smallest length */
 static void scroll_axis(int w, int h, int *len, int *least) {
@@ -107,9 +111,6 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
     c->max = n;
     break;
   }
-  case CTUI_LOOK_CTL_GRAPH:
-    c->value = c->max = c->span = 0;
-    break;
   case CTUI_LOOK_CTL_SIGNAL:
     c->max = signal_bars(c->max);
     c->value = clamp(c->value, 0, c->max);
@@ -158,6 +159,12 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
     c->value = c->max = c->span = 0;
     c->flags = 0;
     c->sides &= 0xf;
+    break;
+  case CTUI_LOOK_CTL_GRAPH:
+    /* the span giving the same step (the most points that step fits):
+     * spans spacing the points alike look alike */
+    c->value = c->max = 0;
+    c->span = c->span > 0 ? max2(1, (w - 2) / graph_step(c, w, h)) : 0;
     break;
   default:
     c->value = c->max = c->span = 0;
@@ -260,7 +267,7 @@ uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
   }
   /* a graph: the samples it shows, as the rows they land on */
   /* the one past the left edge too: its line runs to the edge */
-  int room = h - 2, shown = (w - 2) / graph_step(h) + 2;
+  int room = h - 2, shown = (w - 2) / graph_step(c, w, h) + 2;
   for (int i = max2(0, s.count - shown); i < s.count && room > 0; i++) {
     int y = min2(s.samples[i], 100) * (room - 1) / 100;
     k = (k ^ (uint64_t)(y + 1)) * 0x100000001b3u;
@@ -588,17 +595,17 @@ static void paint_graph(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   for (int x = x0 + gw - 1; x >= x0; x -= sq) {
     ctui_look_paint_rect(cv, x, y0, 1, gh, GRID_GREEN);
   }
-  graph_line(cv, c->samples, c->count, x0, y0, gw, gh, graph_step(h),
+  graph_line(cv, c->samples, c->count, x0, y0, gw, gh, graph_step(c, w, h),
              LINE_GREEN);
   if (c->samples2) {
-    graph_line(cv, c->samples2, c->count, x0, y0, gw, gh, graph_step(h),
+    graph_line(cv, c->samples2, c->count, x0, y0, gw, gh, graph_step(c, w, h),
                LINE_RED);
   }
 }
 
-int ctui_look_graph_at(int count, int w, int h, int x) {
+int ctui_look_graph_at(const CTUI_LOOK_CONTROL *c, int w, int h, int x) {
   /* graph_line()'s points: the newest at x gw, one each step leftwards */
-  int gw = w - 2, step = graph_step(h);
+  int gw = w - 2, step = graph_step(c, w, h), count = c->count;
   if (count <= 0 || gw < 2 || h - 2 < 2 || x < 1 || x > gw) {
     return -1;
   }

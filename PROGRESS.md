@@ -237,12 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
-- [x] **The sample under the pointer** (2026-10-09, for ctui-wm's
-  ctui-top: a graph's value on hover). `ctui_look_graph_at(count, w, h,
-  x)` (look/control.h): the index of the GRAPH's sample whose point is
-  nearest pixel column x, -1 on the frame or left of the oldest --
-  graph_line()'s own spacing (a point every max(2, h / 10) px from the
-  right), so a caller never copies it. look_test 2 new; 941 passed.
+- [x] **The sample under the pointer, a big graph** (2026-10-09, for
+  ctui-wm's ctui-top: a graph's value on hover, a window-sized one).
+  `ctui_look_graph_at(c, w, h, x)` (look/control.h): the index of GRAPH
+  c's sample whose point is nearest pixel column x, -1 on the frame or
+  left of the oldest -- graph_line()'s own spacing, so a caller never
+  copies it. A GRAPH's `span` > 0: that many points across the well
+  (a point every (w - 2) / span px) instead of one every tenth of the
+  height, which on a tall graph left room for a few dozen; snapped to
+  the most points the same step fits, so spans that look alike key
+  alike. look_test 5 new; 944 passed.
 
 - [x] **What can't be chosen is faint** (2026-10-09, for ctui-wm's
   looks, where it didn't show). A popmenu item that's OFF and a form's
