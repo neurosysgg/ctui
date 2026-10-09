@@ -201,6 +201,12 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
 uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
                                int w, int h);
 
+/* the sample of a CTUI_LOOK_CTL_GRAPH of count samples, drawn w x h px,
+ * whose point is nearest px column x (from the box's left): its index,
+ * or -1 on the frame, left of the oldest, or too small to draw (what a
+ * pointer over the graph is over) */
+int ctui_look_graph_at(int count, int w, int h, int x);
+
 /* paints c into rgba (w x h, cleared first: what the control doesn't
  * cover stays transparent, or the face with the look's panel) */
 void ctui_look_control_paint(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,

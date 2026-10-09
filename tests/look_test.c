@@ -1770,6 +1770,20 @@ static void test_meter_graph(void) {
   fg.samples = edge_b;
   CTUI_TEST_ASSERT(ka != ctui_look_control_key(&fg, &l, 60, 20),
                    "the point past the edge keys the picture too");
+  CTUI_TEST_ASSERT(ctui_look_graph_at(40, 60, 20, 58) == 39 &&
+                       ctui_look_graph_at(40, 60, 20, 56) == 38 &&
+                       ctui_look_graph_at(40, 60, 20, 57) == 38 &&
+                       ctui_look_graph_at(40, 60, 20, 1) == 10,
+                   "the sample under a column: the nearest point (a point "
+                   "every 2 px from x 58)");
+  CTUI_TEST_ASSERT(ctui_look_graph_at(40, 60, 20, 0) == -1 &&
+                       ctui_look_graph_at(40, 60, 20, 59) == -1 &&
+                       ctui_look_graph_at(3, 60, 20, 54) == 0 &&
+                       ctui_look_graph_at(3, 60, 20, 52) == -1 &&
+                       ctui_look_graph_at(0, 60, 20, 58) == -1 &&
+                       ctui_look_graph_at(5, 3, 20, 1) == -1,
+                   "none on the frame, left of the oldest, without samples "
+                   "or room");
 
   /* a second line: kernel time, red over the green */
   static const unsigned char k1s[] = {0, 0, 0, 10}, k2s[] = {0, 0, 0, 50};

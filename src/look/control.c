@@ -596,6 +596,16 @@ static void paint_graph(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   }
 }
 
+int ctui_look_graph_at(int count, int w, int h, int x) {
+  /* graph_line()'s points: the newest at x gw, one each step leftwards */
+  int gw = w - 2, step = graph_step(h);
+  if (count <= 0 || gw < 2 || h - 2 < 2 || x < 1 || x > gw) {
+    return -1;
+  }
+  int i = count - 1 - (gw - x + step / 2) / step;
+  return i >= 0 ? i : -1;
+}
+
 static void edge_run(CTUI_LOOK_CANVAS *cv, int box, int across, int at,
                      int from, int to, const unsigned char *rgb);
 

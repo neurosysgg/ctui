@@ -237,6 +237,13 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The sample under the pointer** (2026-10-09, for ctui-wm's
+  ctui-top: a graph's value on hover). `ctui_look_graph_at(count, w, h,
+  x)` (look/control.h): the index of the GRAPH's sample whose point is
+  nearest pixel column x, -1 on the frame or left of the oldest --
+  graph_line()'s own spacing (a point every max(2, h / 10) px from the
+  right), so a caller never copies it. look_test 2 new; 941 passed.
+
 - [x] **What can't be chosen is faint** (2026-10-09, for ctui-wm's
   looks, where it didn't show). A popmenu item that's OFF and a form's
   disabled row label are drawn in the dim colour *and* `CTUI_ATTR_DIM`
