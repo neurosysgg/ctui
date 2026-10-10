@@ -84,10 +84,15 @@ void ctui_app_free(CTUI_APP *app) {
   ctui_logf(E_INF, "[CTUI:APP] - freeing app @ tick %d\n",
             ctui_tick_advance());
   free(app->handlers);
+  app->handlers = NULL;
+  app->handler_count = app->handler_cap = 0;
   ctui_timer_reset();
   ctui_io_reset();
   ctui_widget_gfx_reset();
-  ctui_compositor_free(app->comp);
+  if (app->comp) {
+    ctui_compositor_free(app->comp);
+  }
+  app->comp = NULL; /* freed again (after a failed init): nothing to do */
 }
 
 void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen) {

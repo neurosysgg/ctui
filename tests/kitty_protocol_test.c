@@ -164,6 +164,9 @@ static void test_app_init_validation(void) {
     CTUI_TEST_ASSERT(ctui_app_init(&app, widgets, 1, rows, cols) == -1,
                      "ctui_app_init() hard-fails a CTUI_GFX_KITTY widget "
                      "when TRUECOLOR (not KITTY) was negotiated");
+    CTUI_TEST_ASSERT(!app.comp && !app.handlers && !app.handler_count,
+                     "a failed init leaves nothing dangling");
+    ctui_app_free(&app); /* a caller freeing on error: no double free */
   }
 
   /* same widget, but CTUI_GFX_KITTY actually was negotiated: passes */

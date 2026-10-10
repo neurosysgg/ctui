@@ -53,7 +53,9 @@ typedef struct {
  * GFX_DESIGN.md's Phase 4. */
 int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
                   int cols);
-void ctui_app_free(CTUI_APP *app); /* frees app->comp and app->handlers */
+/* frees app->comp and app->handlers and NULLs them: a second call (a
+ * caller freeing after a failed init too) does nothing */
+void ctui_app_free(CTUI_APP *app);
 void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen);
 /* blocks until ESC (see quit_on_esc) or ctui_app_quit(); tick_ms is
  * passed straight through to

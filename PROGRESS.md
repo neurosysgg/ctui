@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A free after a failed `ctui_app_init()` was a double free**
+  (2026-10-10, found by ctui-wm's cross-file analyzer run). A top-level
+  widget wanting a gfx mode that wasn't negotiated makes init free the
+  app and return -1; `ctui_app_free()` left `comp` and `handlers`
+  pointing at what it had freed, so a caller that also freed on error
+  freed them twice. It NULLs them now (and the handler counts), and a
+  NULL compositor is skipped: a second call does nothing.
+  kitty_protocol_test 1 new (nothing dangling, then the caller's free;
+  the old code aborts with "free(): invalid pointer"); 952 passed.
+
 - [x] **The input loop spun on a hung-up terminal** (2026-10-10, found
   by ctui-wm: a zone whose kitty went away first ran at 80 % CPU, and
   with logging on wrote 30 MB/s of "waiting" lines). At EOF read()
