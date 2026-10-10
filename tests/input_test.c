@@ -15,8 +15,10 @@
 
 #include "ctui_test.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -817,6 +819,29 @@ static void test_headless_run(void) {
   ctui_app_free(&app);
 }
 
+/* stdin at EOF (what a hung-up tty's read() gives too, once its terminal
+ * is gone) ends the loop, even with an EINTR left in errno from an
+ * earlier interrupted select(): read() leaves errno alone at EOF, and the
+ * loop took that for an interrupted read and spun on the dead tty. In a
+ * child with an alarm, so the bug fails the test rather than hanging it.
+ * Last: stdin's writer is closed for good */
+static void test_eof_stale_errno(void) {
+  close(g_stdin_w);
+  pid_t pid = fork();
+  if (pid == 0) {
+    alarm(2);
+    CTUI_EVENT ev;
+    errno = EINTR;
+    _exit(ctui_input_loop(&ev, 0) == 0 ? 0 : 1);
+  }
+  int status = 0;
+  waitpid(pid, &status, 0);
+  CTUI_TEST_ASSERT(WIFEXITED(status) && WEXITSTATUS(status) == 0,
+                   "EOF with a stale EINTR in errno: the loop ends (status "
+                   "0x%x)",
+                   status);
+}
+
 int main(void) {
   ctui_log_init(E_WRN | E_ERR);
 
@@ -847,6 +872,7 @@ int main(void) {
 
   ctui_app_free(&app);
   test_headless_run();
+  test_eof_stale_errno();
   ctui_log_shutdown();
   return ctui_test_summary();
 }

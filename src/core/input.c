@@ -648,10 +648,13 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
       }
     }
 
-    if (input_read(&c) == 1) {
+    ssize_t n = input_read(&c);
+    if (n == 1) {
       break;
     }
-    if (errno == EINTR) {
+    /* only a failed read sets errno: at EOF (a hung-up tty's read() too)
+     * it's whatever an earlier call left, an EINTR as like as not */
+    if (n < 0 && errno == EINTR) {
       /* almost certainly SIGWINCH; loop back to the pending-resize check */
       continue;
     }

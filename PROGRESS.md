@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The input loop spun on a hung-up terminal** (2026-10-10, found
+  by ctui-wm: a zone whose kitty went away first ran at 80 % CPU, and
+  with logging on wrote 30 MB/s of "waiting" lines). At EOF read()
+  returns 0 and leaves errno alone, and a hung-up tty reads as EOF;
+  `ctui_input_loop()` then tested errno for EINTR and found the one an
+  earlier interrupted select() (SIGWINCH, the hangup's SIGHUP) had left
+  -- so it looped forever on a stdin that's always readable. errno only
+  counts after a read that failed now. input_test 1 new (EOF with
+  errno = EINTR beforehand, in a child with an alarm); 951 passed.
+
 - [x] **A window's caption buttons** (2026-10-09, for ctui-wm's window
   frames drawn in the look). `CTUI_LOOK_GLYPH_MINIMIZE` (a bar on the
   baseline), `_MAXIMIZE` (a window, its title bar 2 px from an 8 px
