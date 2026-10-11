@@ -175,6 +175,13 @@ else.
   hand-edited configs (`json`): `#include "json/json.h"`, and in-place
   edits of such a config that keep its comments and layout (`jsonedit`:
   set / remove / insert / swap a member, saved with a `.bak`).
+- `src/query/` — a search over records an app describes: foobar2000's
+  keywords (`artist HAS x`, `AND OR NOT`, `SORT BY`) plus short forms
+  (`ext:flac,mp3`, `size>10M`, `age<7d`, `is:link`, `-word`), typed
+  values (sizes, lengths, dates, ages), UTF-8 case folding, an AND's
+  terms cheapest first: `#include "query/query.h"`. libc only (`make
+  query-alone` checks), so a headless core can link it. Came from
+  ctui-mus's library query for ctui-files' search.
 - `src/look/` — drawn controls: a "look" (colour roles and shape
   parameters, built-ins and from a config's JSON), the controls and
   pictograms painted from it in device pixels, period filters, and

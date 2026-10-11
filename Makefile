@@ -2,8 +2,8 @@ CC = cc
 CFLAGS = -Wall -Wextra -std=c11 -Isrc -g
 LDLIBS = -lm
 
-CORE_SRC = $(wildcard src/*.c src/core/*.c src/widgets/*.c src/json/*.c src/look/*.c)
-CORE_HDR = $(wildcard src/*.h src/core/*.h src/widgets/*.h src/json/*.h src/look/*.h)
+CORE_SRC = $(wildcard src/*.c src/core/*.c src/widgets/*.c src/json/*.c src/look/*.c src/query/*.c)
+CORE_HDR = $(wildcard src/*.h src/core/*.h src/widgets/*.h src/json/*.h src/look/*.h src/query/*.h)
 
 TEST_SRC = $(wildcard tests/*.c)
 TEST_BIN = $(patsubst tests/%.c,test-%,$(TEST_SRC))
@@ -50,7 +50,13 @@ all: ctui-demo examples
 test-%: $(CORE_SRC) $(CORE_HDR) tests/%.c tools/ctui_test.h
 	$(CC) $(CFLAGS) -Itools -o $@ $(CORE_SRC) tests/$*.c $(LDLIBS)
 
-test: $(TEST_BIN)
+# src/query/ is libc only (ctui-mus's headless core links it): it must
+# compile with nothing of ctui's on the include path
+query-alone:
+	@$(CC) -Wall -Wextra -std=c11 -fsyntax-only $(wildcard src/query/*.c) || \
+		{ echo "src/query/ reaches outside itself: it must stay libc only"; exit 1; }
+
+test: $(TEST_BIN) query-alone
 	@for t in $(TEST_BIN); do echo "-- $$t --"; ./$$t || exit 1; done
 
 coverage: $(CORE_SRC) $(CORE_HDR) $(TEST_SRC) tools/ctui_test.h tools/coverage.sh
@@ -60,4 +66,4 @@ clean:
 	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN)
 	rm -rf coverage
 
-.PHONY: clean examples all test coverage
+.PHONY: query-alone clean examples all test coverage

@@ -237,6 +237,29 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`query/`: a search over records** (2026-10-11, for ctui-wm's
+  ctui-files search, notes/files-search.md f0 there; ctui-mus's
+  `src/library/query.c` made generic). The app gives a field table
+  (`CTUI_QUERY_FIELD`: name, kind -- text / number / size / duration /
+  date / age / flag --, `CTUI_QUERY_BARE` / `CTUI_QUERY_EXACT`, a cost)
+  and a getter; `ctui_query_compile()` parses foobar2000's keywords as
+  ctui-mus had them plus short forms (`field:x` HAS or IS, `field=x`,
+  `>` `<` `>=` `<=`, `a..b` ranges, `a,b` lists, globs, `is:flag`,
+  `-term`), typed values (sizes in 1024s, `1h30m` / `3:30`, a date as
+  its whole period), `age<7d` as its date field's range from `now`.
+  Matching allocates nothing and writes nothing to the query (a
+  scratch on the caller's stack): one compiled query for any number of
+  threads. An AND's terms run cheapest first (by the fields' costs);
+  `ctui_query_fields()` says what a query reads (a search's columns);
+  `ctui_query_run()` sorts with its context in each hit (no global, no
+  qsort_r). Case folding is Unicode's simple folding over UTF-8
+  (`src/query/casefold.h` from `tools/gen_casefold.py`, Unicode 17);
+  bytes that aren't UTF-8 (an overlong NUL, a surrogate) stay bytes --
+  ctui-wm's fuzzer found folding twice changed them. Split by concern:
+  query.c (parsing), match.c, values.c, fold.c. `make query-alone`: the
+  directory compiles with nothing of ctui's on the include path (ctui-mus's
+  headless library links it). tests/query_test.c 61; 1043 passed.
+
 - [x] **Hover in the app widgets** (2026-10-11, ctui-wm's hover h1). With
   `CTUI_MOUSE_TRACK_ANY` the widgets follow what's under the pointer and
   say so through its shape (`ctui_pointer_shape()`): the table's row gets
