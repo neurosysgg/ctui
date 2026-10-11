@@ -1163,6 +1163,24 @@ ART(EXPANDER, "................"
               "................"
               "................");
 
+/* '+': the accent, or nothing for 0 of 1 (the dot's) */
+ART(SHIELD, "................"
+            "......tttt......"
+            "...ttt++++ttt..."
+            "..t++++++++++t.."
+            "..t++++++++++t.."
+            "..t++++++++++t.."
+            "..t++++++++++t.."
+            "..t++++++++++t.."
+            "..t++++++++++t.."
+            "...t++++++++t..."
+            "...t++++++++t..."
+            "....t++++++t...."
+            ".....t++++t....."
+            "......t++t......"
+            ".......tt......."
+            "................");
+
 static const char *const ARTS[CTUI_LOOK_PICTOS] = {
     [CTUI_LOOK_PICTO_SPEAKER] = SPEAKER,
     [CTUI_LOOK_PICTO_MIC] = MIC,
@@ -1212,6 +1230,7 @@ static const char *const ARTS[CTUI_LOOK_PICTOS] = {
     [CTUI_LOOK_PICTO_TRASH] = TRASH,
     [CTUI_LOOK_PICTO_DOT] = DOT,
     [CTUI_LOOK_PICTO_EXPANDER] = EXPANDER,
+    [CTUI_LOOK_PICTO_SHIELD] = SHIELD,
 };
 
 /* a busy logo's lines of output: as long as these eighths of its screen,
@@ -1282,7 +1301,7 @@ void ctui_look_picto_snap(CTUI_LOOK_PICTO p, int off, int *value, int *max) {
     *value = (int)(((long long)v * WAVES + m - 1) / m);
     *max = WAVES;
   } else if (p == CTUI_LOOK_PICTO_FOLDER || p == CTUI_LOOK_PICTO_DOT ||
-             p == CTUI_LOOK_PICTO_EXPANDER) {
+             p == CTUI_LOOK_PICTO_EXPANDER || p == CTUI_LOOK_PICTO_SHIELD) {
     *value = v > 0;
     *max = 1;
   } else if (p == CTUI_LOOK_PICTO_BATTERY) {

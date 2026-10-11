@@ -237,6 +237,12 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A shield pictogram** (2026-10-11, for ctui-wm's `vpn` widget).
+  `CTUI_LOOK_PICTO_SHIELD` appended, 16 and 24 px art (a top bar's):
+  0 of 1 outlined (the tunnel down), 1 of 1 or no state filled in the
+  accent through the dot's `+` mark, off greyed (the daemon stopped).
+  look_test (1; the 24 px count 27 -> 28); 953 passed in all.
+
 - [x] **A free after a failed `ctui_app_init()` was a double free**
   (2026-10-10, found by ctui-wm's cross-file analyzer run). A top-level
   widget wanting a gfx mode that wasn't negotiated makes init free the

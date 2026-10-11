@@ -73,6 +73,9 @@ typedef enum {
                               * red, a running machine green); 0 of 1: a
                               * ring (armed) */
   CTUI_LOOK_PICTO_EXPANDER,  /* ⊞ a tree's box: 1 of 1 open (⊟) */
+  CTUI_LOOK_PICTO_SHIELD,    /* 🛡 a VPN: 0 of 1 outlined (no tunnel), 1 of 1
+                              * or no state filled in the accent (up); off:
+                              * greyed (the daemon stopped) */
   CTUI_LOOK_PICTOS,
 } CTUI_LOOK_PICTO;
 

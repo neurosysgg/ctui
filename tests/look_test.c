@@ -763,7 +763,7 @@ static void test_pictos(void) {
       fprintf(stderr, "picto %d at 28x30: %d px (%d at 18x20)\n", p, n, n18);
     }
   }
-  CTUI_TEST_ASSERT(big_fit && bigs == 27,
+  CTUI_TEST_ASSERT(big_fit && bigs == 28,
                    "2 cells of 14x30: %d pictograms on their 24x24 grid, "
                    "the rest as before",
                    bigs);
@@ -862,6 +862,22 @@ static void test_pictos(void) {
   CTUI_TEST_ASSERT(count(mi, 18, 20, &l, 't') == plus_t - 4,
                    "expander: closed a plus, open a minus (%d px of ink)",
                    plus_t);
+  int shield_a[2], shield_t = 0;
+  for (int v = 0; v < 2; v++) {
+    CTUI_LOOK_CONTROL c = picto(CTUI_LOOK_PICTO_SHIELD, v, 1, 0);
+    const unsigned char *px = paint(c, &l, 18, 20);
+    shield_a[v] = count(px, 18, 20, &l, 'a');
+    shield_t = count(px, 18, 20, &l, 't');
+  }
+  CTUI_LOOK_CONTROL down = picto(CTUI_LOOK_PICTO_SHIELD, 0, 1, 0);
+  down.flags = CTUI_LOOK_CTL_OFF;
+  const unsigned char *dn = paint(down, &l, 18, 20);
+  CTUI_TEST_ASSERT(shield_a[0] == 0 && shield_a[1] > 80 && shield_t > 30 &&
+                       count(dn, 18, 20, &l, 'x') == shield_t &&
+                       count(dn, 18, 20, &l, 't') == 0,
+                   "shield: 0 of 1 outlined, 1 of 1 filled (%d px of accent, "
+                   "%d of ink), off greyed",
+                   shield_a[1], shield_t);
   /* bare: in a look with a panel, nothing behind it */
   CTUI_LOOK w95;
   ctui_look_builtin("win95", &w95);
