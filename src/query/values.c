@@ -23,7 +23,9 @@ static size_t number_at(const char *s, size_t len, double *v) {
 }
 
 static long long clamp(double x) {
-  return x >= (double)CTUI_QUERY_BIG ? CTUI_QUERY_BIG : x <= -(double)CTUI_QUERY_BIG ? -CTUI_QUERY_BIG : (long long)x;
+  return x >= (double)CTUI_QUERY_BIG    ? CTUI_QUERY_BIG
+         : x <= -(double)CTUI_QUERY_BIG ? -CTUI_QUERY_BIG
+                                        : (long long)x;
 }
 
 int ctui_query_word_is(const char *s, size_t len, const char *w) {
@@ -102,9 +104,9 @@ int ctui_query_parse_duration(const char *s, size_t len, long long *out) {
   static const struct {
     const char *name;
     double secs;
-  } UNITS[] = {{"s", 1},          {"sec", 1},       {"m", 60},
-               {"min", 60},       {"h", 3600},      {"d", 86400},
-               {"w", 604800},     {"mo", 2592000},  {"y", 31536000}};
+  } UNITS[] = {{"s", 1},      {"sec", 1},      {"m", 60},
+               {"min", 60},   {"h", 3600},     {"d", 86400},
+               {"w", 604800}, {"mo", 2592000}, {"y", 31536000}};
   double total = 0;
   for (size_t i = 0; i < len;) {
     double x;
@@ -114,7 +116,8 @@ int ctui_query_parse_duration(const char *s, size_t len, long long *out) {
     }
     i += k;
     size_t u = i;
-    while (u < len && ((s[u] >= 'a' && s[u] <= 'z') || (s[u] >= 'A' && s[u] <= 'Z'))) {
+    while (u < len &&
+           ((s[u] >= 'a' && s[u] <= 'z') || (s[u] >= 'A' && s[u] <= 'Z'))) {
       u++;
     }
     double mul = u == i ? 1 : 0;
@@ -135,8 +138,7 @@ int ctui_query_parse_duration(const char *s, size_t len, long long *out) {
 
 /* YYYY[-MM[-DD[THH:MM[:SS]]]], local time: the period it names, [*lo,
  * *hi] */
-static int parse_date(const char *s, size_t len, long long *lo,
-                      long long *hi) {
+static int parse_date(const char *s, size_t len, long long *lo, long long *hi) {
   int f[6] = {0, 1, 1, 0, 0, 0}, nf = 0;
   static const char SEP[] = "--T::";
   size_t i = 0;
@@ -197,7 +199,7 @@ static int parse_date(const char *s, size_t len, long long *lo,
 
 /* one value of kind as the period it stands for: [*lo, *hi] */
 int ctui_query_parse_typed(CTUI_QUERY_KIND kind, const char *s, size_t len,
-                       long long *lo, long long *hi) {
+                           long long *lo, long long *hi) {
   int rc;
   switch (kind) {
   case CTUI_QUERY_NUMBER:
@@ -218,4 +220,3 @@ int ctui_query_parse_typed(CTUI_QUERY_KIND kind, const char *s, size_t len,
   *hi = *lo;
   return rc;
 }
-

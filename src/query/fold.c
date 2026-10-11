@@ -14,8 +14,8 @@ static uint32_t fold_cp(uint32_t cp) {
   if (cp < 0x80) {
     return cp >= 'A' && cp <= 'Z' ? cp + 32 : cp;
   }
-  int lo = 0, hi = (int)(sizeof ctui_casefold_table /
-                         sizeof *ctui_casefold_table) - 1;
+  int lo = 0,
+      hi = (int)(sizeof ctui_casefold_table / sizeof *ctui_casefold_table) - 1;
   while (lo <= hi) {
     int mid = lo + (hi - lo) / 2;
     if (cp < ctui_casefold_table[mid].first) {
@@ -36,9 +36,15 @@ static uint32_t fold_cp(uint32_t cp) {
 /* one codepoint from s (*len bytes of it), 0 on a byte that starts none
  * (it's copied as it is) */
 static uint32_t decode(const unsigned char *s, int *len) {
-  int n = s[0] < 0x80 ? 1 : (s[0] & 0xE0) == 0xC0 ? 2 : (s[0] & 0xF0) == 0xE0 ? 3
-                        : (s[0] & 0xF8) == 0xF0 ? 4 : 0;
-  uint32_t cp = n == 1 ? s[0] : n == 2 ? s[0] & 0x1Fu : n == 3 ? s[0] & 0x0Fu : s[0] & 0x07u;
+  int n = s[0] < 0x80             ? 1
+          : (s[0] & 0xE0) == 0xC0 ? 2
+          : (s[0] & 0xF0) == 0xE0 ? 3
+          : (s[0] & 0xF8) == 0xF0 ? 4
+                                  : 0;
+  uint32_t cp = n == 1   ? s[0]
+                : n == 2 ? s[0] & 0x1Fu
+                : n == 3 ? s[0] & 0x0Fu
+                         : s[0] & 0x07u;
   for (int i = 1; i < n; i++) {
     if ((s[i] & 0xC0) != 0x80) {
       n = 0;
@@ -143,4 +149,3 @@ int ctui_query_glob(const char *pat, const char *s) {
   }
   return !*pat;
 }
-

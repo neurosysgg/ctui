@@ -12,7 +12,7 @@
 #include <string.h>
 #include <time.h>
 
-#define MAX_DEPTH 64 /* parentheses and NOTs nested */
+#define MAX_DEPTH 64  /* parentheses and NOTs nested */
 #define IS_FIELD (-2) /* "is:" names a flag field */
 
 typedef enum {
@@ -45,8 +45,8 @@ typedef enum {
 } KEYWORD;
 
 static const char *const KEYWORDS[] = {
-    "",    "HAS", "IS", "GREATER", "LESS",      "MISSING",   "PRESENT", "AND",
-    "OR",  "NOT", "ALL", "SORT",   "BY",        "ASCENDING", "DESCENDING"};
+    "",   "HAS", "IS",  "GREATER", "LESS", "MISSING",   "PRESENT",   "AND",
+    "OR", "NOT", "ALL", "SORT",    "BY",   "ASCENDING", "DESCENDING"};
 
 /* the operators: ':' '=' '>' '<', 'g' >=, 'l' <= */
 typedef struct {
@@ -54,9 +54,9 @@ typedef struct {
   KEYWORD kw;
   const char *s; /* its text in the source (a string's, without quotes) */
   size_t len;
-  size_t at; /* its byte in the source */
-  int field; /* T_SHORT's */
-  char op;   /* T_SHORT's */
+  size_t at;  /* its byte in the source */
+  int field;  /* T_SHORT's */
+  char op;    /* T_SHORT's */
   int quoted; /* T_SHORT's value was quoted */
 } TOKEN;
 
@@ -205,8 +205,8 @@ static int tokenize(PARSER *p) {
         t->quoted = 1;
         i = end + 1;
       } else {
-        while (end < n && !is_space(s[end]) && s[end] != ')' &&
-               s[end] != '"' && s[end] != '\'') {
+        while (end < n && !is_space(s[end]) && s[end] != ')' && s[end] != '"' &&
+               s[end] != '\'') {
           end++;
         }
         if (end == v) {
@@ -310,8 +310,8 @@ static int add_parent(PARSER *p, NODE_KIND kind, int *kids, int n) {
   }
   if (kind == N_AND) {
     for (int i = 1; i < n; i++) {
-      for (int j = i; j > 0 && q->nodes[kids[j]].cost < q->nodes[kids[j - 1]].cost;
-           j--) {
+      for (int j = i;
+           j > 0 && q->nodes[kids[j]].cost < q->nodes[kids[j - 1]].cost; j--) {
         int t = kids[j];
         kids[j] = kids[j - 1];
         kids[j - 1] = t;
@@ -423,7 +423,8 @@ static int typed_node(PARSER *p, size_t at, int field, char op, const char *s,
     if (alen && ctui_query_parse_typed(kind, s, alen, &a_lo, &a_hi) != 0) {
       return typed_fail(p, at, field, s, alen);
     }
-    if (blen && ctui_query_parse_typed(kind, dots + 2, blen, &b_lo, &b_hi) != 0) {
+    if (blen &&
+        ctui_query_parse_typed(kind, dots + 2, blen, &b_lo, &b_hi) != 0) {
       return typed_fail(p, at, field, dots + 2, blen);
     }
     lo = alen ? a_lo : -CTUI_QUERY_BIG;
@@ -465,7 +466,8 @@ static int typed_node(PARSER *p, size_t at, int field, char op, const char *s,
     lo = dlo;
     hi = dhi;
   }
-  return add_leaf(p, (NODE){.kind = N_RANGE, .field = field, .lo = lo, .hi = hi});
+  return add_leaf(p,
+                  (NODE){.kind = N_RANGE, .field = field, .lo = lo, .hi = hi});
 }
 
 static int has_wild(const char *s, size_t len) {
@@ -514,9 +516,11 @@ static int value_node(PARSER *p, size_t at, int field, char op, const char *s,
     return add_leaf(p, n);
   }
   if (kind == CTUI_QUERY_FLAG) {
-    int on = ctui_query_word_is(s, len, "yes") || ctui_query_word_is(s, len, "true") ||
+    int on = ctui_query_word_is(s, len, "yes") ||
+             ctui_query_word_is(s, len, "true") ||
              ctui_query_word_is(s, len, "1");
-    int off = ctui_query_word_is(s, len, "no") || ctui_query_word_is(s, len, "false") ||
+    int off = ctui_query_word_is(s, len, "no") ||
+              ctui_query_word_is(s, len, "false") ||
               ctui_query_word_is(s, len, "0");
     if ((!on && !off) || (op != ':' && op != '=')) {
       char what[96];
@@ -621,7 +625,10 @@ static int keyword_node(PARSER *p, int field, KEYWORD op, size_t op_at) {
     }
     return add_leaf(p, n);
   }
-  char sop = op == K_GREATER ? '>' : op == K_LESS ? '<' : op == K_IS ? '=' : ':';
+  char sop = op == K_GREATER ? '>'
+             : op == K_LESS  ? '<'
+             : op == K_IS    ? '='
+                             : ':';
   rc = value_node(p, op_at, field, sop, text, strlen(text));
   free(text);
   return rc;
@@ -671,7 +678,8 @@ static int parse_primary(PARSER *p) {
   }
   if (t->kind == T_STRING || (t->kind == T_WORD && !t->kw)) {
     p->pos++;
-    NODE n = {.kind = N_BARE, .field = -1, .text = ctui_query_fold_dup(t->s, t->len)};
+    NODE n = {
+        .kind = N_BARE, .field = -1, .text = ctui_query_fold_dup(t->s, t->len)};
     if (!n.text) {
       return fail(p, t->at, "no memory");
     }
@@ -843,4 +851,3 @@ int ctui_query_compile(const CTUI_QUERY_SCHEMA *schema, const char *src,
   *out = p.q;
   return 0;
 }
-

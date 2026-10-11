@@ -45,7 +45,10 @@ static int textcmp(const char *v, const NODE *n) {
   } else {
     c = strcmp(v, n->text);
   }
-  return n->op == '>' ? c > 0 : n->op == '<' ? c < 0 : n->op == 'g' ? c >= 0 : c <= 0;
+  return n->op == '>'   ? c > 0
+         : n->op == '<' ? c < 0
+         : n->op == 'g' ? c >= 0
+                        : c <= 0;
 }
 
 static int eval(const CTUI_QUERY *q, int i, const void *rec, SCRATCH *sc) {
@@ -72,9 +75,9 @@ static int eval(const CTUI_QUERY *q, int i, const void *rec, SCRATCH *sc) {
   case N_MISSING:
   case N_PRESENT:
     get(q, n->field, rec, &v, sc);
-    return (q->schema->fields[n->field].kind == CTUI_QUERY_TEXT ? v.s[0] != '\0'
-                                                                 : v.has) ==
-           (n->kind == N_PRESENT);
+    return (q->schema->fields[n->field].kind == CTUI_QUERY_TEXT
+                ? v.s[0] != '\0'
+                : v.has) == (n->kind == N_PRESENT);
   case N_BARE:
     for (int f = 0; f < q->schema->nfields; f++) {
       if ((q->schema->fields[f].flags & CTUI_QUERY_BARE) &&
@@ -158,7 +161,8 @@ typedef struct {
  * else their folded bytes */
 static int key_cmp(const char *a, const char *b) {
   long long x, y;
-  if (ctui_query_leading_number(a, &x) && ctui_query_leading_number(b, &y) && x != y) {
+  if (ctui_query_leading_number(a, &x) && ctui_query_leading_number(b, &y) &&
+      x != y) {
     return x < y ? -1 : 1;
   }
   int c = strcmp(a, b);

@@ -28,8 +28,8 @@ typedef enum {
 typedef struct {
   NODE_KIND kind;
   int field;
-  char op;    /* N_TEXTCMP's */
-  char *text; /* folded for HAS / IS / GLOB / BARE; as given for TEXTCMP */
+  char op;     /* N_TEXTCMP's */
+  char *text;  /* folded for HAS / IS / GLOB / BARE; as given for TEXTCMP */
   int numeric; /* N_TEXTCMP: the text is a number */
   long long number;
   long long lo, hi; /* N_RANGE: inclusive */
@@ -48,7 +48,8 @@ struct CTUI_QUERY {
   int keys;
 };
 
-#define CTUI_QUERY_BIG 4000000000000000000LL /* past any value: saturates there */
+#define CTUI_QUERY_BIG                                                         \
+  4000000000000000000LL /* past any value: saturates there */
 
 /* query.c: a value's leading integer: 1 if it has one (an optional '-',
  * digits) */

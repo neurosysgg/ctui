@@ -20,8 +20,19 @@ typedef struct {
   int link;
 } REC;
 
-enum { F_NAME, F_EXT, F_ARTIST, F_DATE, F_SIZE, F_LENGTH, F_MODIFIED, F_AGE,
-       F_YEAR, F_LINK, F_COUNT };
+enum {
+  F_NAME,
+  F_EXT,
+  F_ARTIST,
+  F_DATE,
+  F_SIZE,
+  F_LENGTH,
+  F_MODIFIED,
+  F_AGE,
+  F_YEAR,
+  F_LINK,
+  F_COUNT
+};
 
 static const CTUI_QUERY_FIELD FIELDS[] = {
     {"name", CTUI_QUERY_TEXT, CTUI_QUERY_BARE, 0, 0},
@@ -143,8 +154,9 @@ static int fails_with(const char *src, const char *want) {
 }
 
 static void test_keywords(void) {
-  CTUI_TEST_ASSERT(is("artist HAS pink", "01") && is("artist HAS pink floyd", "01"),
-                   "HAS: contains, any case; the text runs to the next keyword");
+  CTUI_TEST_ASSERT(
+      is("artist HAS pink", "01") && is("artist HAS pink floyd", "01"),
+      "HAS: contains, any case; the text runs to the next keyword");
   CTUI_TEST_ASSERT(is("ext IS FLAC", "01") && is("ext IS fla", ""),
                    "IS: the whole value, any case");
   CTUI_TEST_ASSERT(is("date GREATER 1975", "24") && is("date LESS 1974", "01"),
@@ -161,12 +173,14 @@ static void test_keywords(void) {
 }
 
 static void test_words_and_logic(void) {
-  CTUI_TEST_ASSERT(is("breathe", "1") && is("FLOYD", "01") && is("untagged", "3"),
+  CTUI_TEST_ASSERT(is("breathe", "1") && is("FLOYD", "01") &&
+                       is("untagged", "3"),
                    "bare words: the BARE fields, any case");
-  CTUI_TEST_ASSERT(is("pink speak", "0") && is("pink aria", ""), "two words: both");
+  CTUI_TEST_ASSERT(is("pink speak", "0") && is("pink aria", ""),
+                   "two words: both");
   CTUI_TEST_ASSERT(is("ext IS mp3 OR ext IS wav", "234"), "OR");
-  CTUI_TEST_ASSERT(is("NOT ext IS flac", "234") && is("NOT NOT ext IS flac", "01"),
-                   "NOT");
+  CTUI_TEST_ASSERT(
+      is("NOT ext IS flac", "234") && is("NOT NOT ext IS flac", "01"), "NOT");
   CTUI_TEST_ASSERT(is("ext IS mp3 OR ext IS flac AND year IS 1973", "0124"),
                    "AND binds tighter than OR");
   CTUI_TEST_ASSERT(is("(ext IS mp3 OR ext IS flac) AND year IS 1998", "2"),
@@ -175,7 +189,8 @@ static void test_words_and_logic(void) {
 }
 
 static void test_short_forms(void) {
-  CTUI_TEST_ASSERT(is("artist:floyd", "01") && is("artist=\"pink floyd\"", "01") &&
+  CTUI_TEST_ASSERT(is("artist:floyd", "01") &&
+                       is("artist=\"pink floyd\"", "01") &&
                        is("artist=floyd", ""),
                    "field:x is HAS, field=x IS");
   CTUI_TEST_ASSERT(is("ext:fla", "") && is("ext:FLAC", "01"),
@@ -190,10 +205,12 @@ static void test_short_forms(void) {
   CTUI_TEST_ASSERT(is("is:link", "3") && is("-is:link", "0124") &&
                        is("link:no", "0124"),
                    "flags");
-  CTUI_TEST_ASSERT(is("artist:floyd SORT BY name", "01") && is("ext:mp3 artist:band", "4"),
+  CTUI_TEST_ASSERT(is("artist:floyd SORT BY name", "01") &&
+                       is("ext:mp3 artist:band", "4"),
                    "short forms next to keywords and each other");
-  CTUI_TEST_ASSERT(is("(artist:floyd)", "01") && is("artist:\"die ä\"", "2"),
-                   "a value ends at a parenthesis; a quoted one may hold spaces");
+  CTUI_TEST_ASSERT(
+      is("(artist:floyd)", "01") && is("artist:\"die ä\"", "2"),
+      "a value ends at a parenthesis; a quoted one may hold spaces");
 }
 
 static void test_typed(void) {
@@ -203,21 +220,25 @@ static void test_typed(void) {
                        is("size<1k", "") && is("size<1.5K", "4"),
                    "sizes: units in 1024s, any case, decimals; ranges include "
                    "their ends");
-  CTUI_TEST_ASSERT(is("length>3m", "24") && is("length:2:43", "1") &&
-                       is("length:1m30s", "0") && is("length<=0:30", "3") &&
-                       is("length:..1m30", "03"),
-                   "lengths: 3m, m:ss, 1m30s, a bare number in seconds, open ranges");
+  CTUI_TEST_ASSERT(
+      is("length>3m", "24") && is("length:2:43", "1") &&
+          is("length:1m30s", "0") && is("length<=0:30", "3") &&
+          is("length:..1m30", "03"),
+      "lengths: 3m, m:ss, 1m30s, a bare number in seconds, open ranges");
   CTUI_TEST_ASSERT(is("year>1990", "24") && is("year:1973", "01") &&
                        is("year:1990..", "24"),
                    "numbers");
-  CTUI_TEST_ASSERT(is("modified:2025-12", "013") && is("modified>2025-12-22", "03"),
+  CTUI_TEST_ASSERT(is("modified:2025-12", "013") &&
+                       is("modified>2025-12-22", "03"),
                    "dates: their whole period (> is after the day)");
-  CTUI_TEST_ASSERT(is("modified>=2025-12-22", "013") && is("modified<2025", "2") &&
-                       is("modified:2024..2025-11", "24") &&
-                       is("modified:2025-12-31T23:00", "3"),
-                   "dates: from a day's start, before a year, ranges, to the minute");
-  CTUI_TEST_ASSERT(is("age<7d", "03") && is("age>1y", "2") && is("age:1d..2w", "01") &&
-                       is("age<=2h", "3") && is("age>=1w AND age<2mo", "14"),
+  CTUI_TEST_ASSERT(
+      is("modified>=2025-12-22", "013") && is("modified<2025", "2") &&
+          is("modified:2024..2025-11", "24") &&
+          is("modified:2025-12-31T23:00", "3"),
+      "dates: from a day's start, before a year, ranges, to the minute");
+  CTUI_TEST_ASSERT(is("age<7d", "03") && is("age>1y", "2") &&
+                       is("age:1d..2w", "01") && is("age<=2h", "3") &&
+                       is("age>=1w AND age<2mo", "14"),
                    "ages: compared with modified, now minus the age");
   CTUI_TEST_ASSERT(is("NOT age<7d", "124") && is("modified PRESENT", "01234") &&
                        is("age PRESENT", "01234"),
@@ -225,9 +246,11 @@ static void test_typed(void) {
 }
 
 static void test_fold(void) {
-  CTUI_TEST_ASSERT(is("ärger", "2") && is("ÄRGER", "2") && is("artist:ärzte", "2"),
+  CTUI_TEST_ASSERT(is("ärger", "2") && is("ÄRGER", "2") &&
+                       is("artist:ärzte", "2"),
                    "case folding beyond ASCII (Ä/ä)");
-  CTUI_TEST_ASSERT(is("σοφια", "4") && is("name:\"σοφ\"", "4"), "and Greek (Σ/σ)");
+  CTUI_TEST_ASSERT(is("σοφια", "4") && is("name:\"σοφ\"", "4"),
+                   "and Greek (Σ/σ)");
   char out[64];
   ctui_query_fold("ǅungla İ Ω ẞ", out, sizeof out);
   CTUI_TEST_ASSERT(!strcmp(out, "ǆungla İ ω ß"),
@@ -240,8 +263,11 @@ static void test_fold(void) {
   CTUI_TEST_ASSERT(!strcmp(out, "ä"), "cut at a codepoint (%s)", out);
   ctui_query_fold("a\xff\xc3", out, sizeof out);
   CTUI_TEST_ASSERT(!strcmp(out, "a\xff\xc3"), "bytes that aren't UTF-8 kept");
-  ctui_query_fold("\xc0\x80" "A\xed\xa0\x80\xf4\x90\x80\x80", out, sizeof out);
-  CTUI_TEST_ASSERT(!strcmp(out, "\xc0\x80" "a\xed\xa0\x80\xf4\x90\x80\x80"),
+  ctui_query_fold("\xc0\x80"
+                  "A\xed\xa0\x80\xf4\x90\x80\x80",
+                  out, sizeof out);
+  CTUI_TEST_ASSERT(!strcmp(out, "\xc0\x80"
+                                "a\xed\xa0\x80\xf4\x90\x80\x80"),
                    "an overlong NUL, a surrogate, past U+10FFFF: kept as bytes "
                    "(the fuzzer's: folding twice changed them)");
 }
@@ -251,9 +277,10 @@ static void test_errors(void) {
                    "an operator without a text, at its column");
   CTUI_TEST_ASSERT(fails_with("HAS x", "col 1: HAS needs a field before it"),
                    "an operator without a field");
-  CTUI_TEST_ASSERT(fails_with("(ext:flac", "col 1: a parenthesis isn't closed") &&
-                       fails_with("ext:flac)", "col 9: a parenthesis closes nothing"),
-                   "parentheses that don't pair");
+  CTUI_TEST_ASSERT(
+      fails_with("(ext:flac", "col 1: a parenthesis isn't closed") &&
+          fails_with("ext:flac)", "col 9: a parenthesis closes nothing"),
+      "parentheses that don't pair");
   CTUI_TEST_ASSERT(fails_with("été \"x", "col 5: a quote isn't closed") &&
                        fails_with("name:\"x", "col 6: a quote isn't closed"),
                    "columns count code points");
@@ -261,15 +288,17 @@ static void test_errors(void) {
                    "an unknown field in a short form");
   CTUI_TEST_ASSERT(fails_with("artist:", "artist: needs a value"),
                    "a short form without a value");
-  CTUI_TEST_ASSERT(fails_with("size>huge", "size takes a size (10M, 1.5G), not \"huge\"") &&
-                       fails_with("size>10Q", "not \"10Q\"") &&
-                       fails_with("length:3:", "length takes") &&
-                       fails_with("year:x", "year takes a number"),
-                   "a typed value that isn't one");
-  CTUI_TEST_ASSERT(fails_with("modified<7d", "an age is age<7d") &&
-                       fails_with("modified:2026-13", "modified takes a date") &&
-                       fails_with("modified:2026-1-1", "modified takes a date"),
-                   "a date: an age given to it names the age field");
+  CTUI_TEST_ASSERT(
+      fails_with("size>huge", "size takes a size (10M, 1.5G), not \"huge\"") &&
+          fails_with("size>10Q", "not \"10Q\"") &&
+          fails_with("length:3:", "length takes") &&
+          fails_with("year:x", "year takes a number"),
+      "a typed value that isn't one");
+  CTUI_TEST_ASSERT(
+      fails_with("modified<7d", "an age is age<7d") &&
+          fails_with("modified:2026-13", "modified takes a date") &&
+          fails_with("modified:2026-1-1", "modified takes a date"),
+      "a date: an age given to it names the age field");
   CTUI_TEST_ASSERT(fails_with("age:7d", "age takes <, > or a range (age<7d)"),
                    "an age on its own is no period");
   CTUI_TEST_ASSERT(fails_with("is:artist", "is: takes a flag: link") &&
@@ -280,14 +309,16 @@ static void test_errors(void) {
   CTUI_TEST_ASSERT(fails_with("a AND", "a search ends too soon") &&
                        fails_with("a OR OR b", "\"OR\" isn't expected here"),
                    "a missing term");
-  CTUI_TEST_ASSERT(fails_with("ALL SORT date", "SORT needs BY") &&
-                       fails_with("ALL SORT BY", "SORT BY needs a field") &&
-                       fails_with("ALL SORT BY artsit", "no such field to sort by"),
-                   "SORT BY's mistakes");
+  CTUI_TEST_ASSERT(
+      fails_with("ALL SORT date", "SORT needs BY") &&
+          fails_with("ALL SORT BY", "SORT BY needs a field") &&
+          fails_with("ALL SORT BY artsit", "no such field to sort by"),
+      "SORT BY's mistakes");
   char deep[300];
   memset(deep, '(', 100);
   snprintf(deep + 100, sizeof deep - 100, "a");
-  CTUI_TEST_ASSERT(fails_with(deep, "nested too deeply"), "nesting has a limit");
+  CTUI_TEST_ASSERT(fails_with(deep, "nested too deeply"),
+                   "nesting has a limit");
   memset(deep, '-', 100);
   snprintf(deep + 100, sizeof deep - 100, "a");
   CTUI_TEST_ASSERT(fails_with(deep, "nested too deeply"), "so do NOTs");
@@ -301,7 +332,8 @@ static void test_errors(void) {
 /* an AND's terms run cheapest first; the fields a query reads */
 static void test_cost_and_fields(void) {
   CTUI_QUERY *q;
-  ctui_query_compile(&SCHEMA, "artist:floyd ext:wav", NOW, &q, g_err, sizeof g_err);
+  ctui_query_compile(&SCHEMA, "artist:floyd ext:wav", NOW, &q, g_err,
+                     sizeof g_err);
   memset(g_gets, 0, sizeof g_gets);
   for (int i = 0; i < NRECS; i++) {
     ctui_query_match(q, &RECS[i]);
@@ -311,12 +343,12 @@ static void test_cost_and_fields(void) {
                    "(%d, %d)",
                    g_gets[F_EXT], g_gets[F_ARTIST]);
   ctui_query_free(q);
-  ctui_query_compile(&SCHEMA, "pink age<7d OR size>1G SORT BY year, artist", NOW, &q,
-                     g_err, sizeof g_err);
+  ctui_query_compile(&SCHEMA, "pink age<7d OR size>1G SORT BY year, artist",
+                     NOW, &q, g_err, sizeof g_err);
   int f[16];
   int n = ctui_query_fields(q, f, 16);
-  CTUI_TEST_ASSERT(n == 5 && f[0] == F_NAME && f[1] == F_ARTIST && f[2] == F_MODIFIED &&
-                       f[3] == F_SIZE && f[4] == F_YEAR,
+  CTUI_TEST_ASSERT(n == 5 && f[0] == F_NAME && f[1] == F_ARTIST &&
+                       f[2] == F_MODIFIED && f[3] == F_SIZE && f[4] == F_YEAR,
                    "fields read: the bare ones, an age's date, then SORT BY's "
                    "(%d)",
                    n);
@@ -348,9 +380,10 @@ static void test_run(void) {
   CTUI_TEST_ASSERT(!strcmp(order("ALL SORT BY size"), "42013") &&
                        !strcmp(order("ALL SORT BY size DESCENDING"), "31024"),
                    "a typed key");
-  CTUI_TEST_ASSERT(!strcmp(order("ALL SORT BY year, length DESCENDING"), "31024"),
-                   "two keys; a missing value first (%s)",
-                   order("ALL SORT BY year, length DESCENDING"));
+  CTUI_TEST_ASSERT(
+      !strcmp(order("ALL SORT BY year, length DESCENDING"), "31024"),
+      "two keys; a missing value first (%s)",
+      order("ALL SORT BY year, length DESCENDING"));
   CTUI_TEST_ASSERT(!strcmp(order("ALL SORT BY artist, name"), "34210"),
                    "text keys folded: Band, Die Ärzte, Pink Floyd (%s)",
                    order("ALL SORT BY artist, name"));
