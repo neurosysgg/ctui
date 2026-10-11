@@ -13,6 +13,7 @@ static int step(CTUI_DIALOG *d, int by) {
 
 static int finish(CTUI_DIALOG *d, int what) {
   d->open = 0;
+  d->hover = 0; /* opened again, no button lit until the pointer says */
   return what;
 }
 
@@ -45,17 +46,25 @@ int ctui_dialog_key(CTUI_DIALOG *d, const CTUI_KEYPRESS_EVENT_DATA *kp) {
 }
 
 int ctui_dialog_mouse(CTUI_DIALOG *d, const CTUI_MOUSE_EVENT_DATA *m) {
-  if (!d->open || m->action != CTUI_MOUSE_PRESS || m->button != 0 ||
-      m->row != d->button_row) {
+  if (!d->open) {
     return CTUI_DIALOG_NONE;
   }
-  for (int i = 0; i < d->button_count; i++) {
+  int on = -1;
+  for (int i = 0; m->row == d->button_row && i < d->button_count; i++) {
     if (m->col >= d->button_from[i] && m->col < d->button_to[i]) {
-      d->focus = i;
-      return finish(d, CTUI_DIALOG_CHOSEN);
+      on = i;
     }
   }
-  return CTUI_DIALOG_NONE;
+  int hovered = on + 1 != d->hover;
+  d->hover = on + 1;
+  if (on >= 0) {
+    ctui_pointer_shape("pointer");
+  }
+  if (m->action != CTUI_MOUSE_PRESS || m->button != 0 || on < 0) {
+    return hovered ? CTUI_DIALOG_REDRAW : CTUI_DIALOG_NONE;
+  }
+  d->focus = on;
+  return finish(d, CTUI_DIALOG_CHOSEN);
 }
 
 static int text_lines(const char *s, int w) {
@@ -164,7 +173,9 @@ void ctui_dialog_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       int focused = i == d->focus;
       d->button_from[i] = self->x + col;
       int lw = ctui_utf8_width(label);
-      CTUI_CONTROL b = {.kind = CTUI_CONTROL_BUTTON, .focused = focused};
+      CTUI_CONTROL b = {.kind = CTUI_CONTROL_BUTTON,
+                        .focused = focused,
+                        .hover = d->hover == i + 1};
       if (lw <= x + w - 2 - col &&
           ctui_style_control(st, self, comp, row, col, lw, &b, bg)) {
         col += ctui_widget_puts_cut(self, comp, row, col, label, lw, fg, bg);

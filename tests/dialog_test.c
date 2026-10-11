@@ -245,6 +245,29 @@ int main(void) {
                    frames, fields, buttons, focused, glyphs);
   ctui_test_key(&app, screen, CTUI_KEY_ESC, 0);
 
+  /* hover: a button under the pointer lit (the hook asked so), the
+   * hand; off it the arrow */
+  u.open = 1;
+  ctui_app_render(&app, screen);
+  int hr = find_row(screen, " OK    Cancel ");
+  int hc = hr >= 0 ? find_col(screen, hr, 'C') : -1;
+  under_n = 0;
+  int lit = ctui_test_mouse(&app, screen, CTUI_MOUSE_MOTION, -1, hr, hc);
+  int lit_asked = 0;
+  for (int i = 0; i < under_n; i++) {
+    lit_asked += under_asked[i].kind == CTUI_CONTROL_BUTTON &&
+                 under_asked[i].hover;
+  }
+  CTUI_TEST_ASSERT(lit && u.hover == 2 && u.open && lit_asked == 1 &&
+                       strcmp(ctui_pointer_current(), "pointer") == 0,
+                   "over Cancel: lit (a redraw, the hook asked for one), "
+                   "the hand");
+  lit = ctui_test_mouse(&app, screen, CTUI_MOUSE_MOTION, -1, 0, 0);
+  CTUI_TEST_ASSERT(lit && u.hover == 0 &&
+                       strcmp(ctui_pointer_current(), "default") == 0,
+                   "off it: unlit, the arrow");
+  ctui_test_key(&app, screen, CTUI_KEY_ESC, 0);
+
   ctui_app_free(&app);
   ctui_screen_free(screen);
   return ctui_test_summary();

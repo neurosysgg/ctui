@@ -115,9 +115,10 @@ int main(void) {
       "a right click asks for that item's menu, the selection kept");
   right.row = 4;
   side.menu_item = -1;
-  CTUI_TEST_ASSERT(ctui_tabs_mouse(&side, &sw, &right) == CTUI_TABS_NONE &&
-                       side.menu_item == -1,
-                   "a right click on a heading: nothing");
+  CTUI_TEST_ASSERT(ctui_tabs_mouse(&side, &sw, &right) == CTUI_TABS_HOVER &&
+                       side.menu_item == -1 && side.hover == 0,
+                   "a right click on a heading: no menu (the pointer off "
+                   "item 4: a redraw)");
 
   sw.h = 2;
   side.selected = 5;
@@ -173,6 +174,23 @@ int main(void) {
                        screen->cells[0 * cols + 14 + 9].bg ==
                            CTUI_COLOR_DEFAULT,
                    "bar: a gap for the separators, the shown label plain");
+
+  /* hover: the hand over an item, a bar's tab lit, a heading nothing */
+  ctui_test_mouse(&app, screen, CTUI_MOUSE_MOTION, -1, 0, 16);
+  CTUI_TEST_ASSERT(bar.hover == 1 &&
+                       strcmp(ctui_pointer_current(), "pointer") == 0,
+                   "over a bar's tab: the hand, it lit (%d)", bar.hover);
+  ctui_test_mouse(&app, screen, CTUI_MOUSE_MOTION, -1, 1, 4);
+  CTUI_TEST_ASSERT(bar.hover == 0 && side.hover == 0 &&
+                       strcmp(ctui_pointer_current(), "default") == 0,
+                   "over a heading: the arrow, nothing lit");
+  int moved = ctui_test_mouse(&app, screen, CTUI_MOUSE_MOTION, -1, 3, 4);
+  CTUI_TEST_ASSERT(moved && side.hover == side.scroll + 3 &&
+                       strcmp(ctui_pointer_current(), "pointer") == 0,
+                   "over a sidebar's item: the hand, a redraw (%d)",
+                   side.hover);
+  CTUI_TEST_ASSERT(!ctui_test_mouse(&app, screen, CTUI_MOUSE_MOTION, -1, 3, 5),
+                   "along the same item: nothing to redraw");
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

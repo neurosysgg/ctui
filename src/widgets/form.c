@@ -174,17 +174,65 @@ static int slider_width(const CTUI_FORM *f, int w) {
   return bar > SLIDER_MAX ? SLIDER_MAX : bar;
 }
 
+/* the pointer's shape over row i, col cells into its control (< 0: on the
+ * label): what a click there would do */
+static const char *shape_at(const CTUI_FORM *f, int i, int col, int room) {
+  const CTUI_FORM_ROW *r = &f->rows[i];
+  if (r->kind == CTUI_FORM_HEADING) {
+    return NULL;
+  }
+  if (r->disabled) {
+    return "not-allowed";
+  }
+  if (col < 0) {
+    return NULL;
+  }
+  switch (r->kind) {
+  case CTUI_FORM_ENTRY:
+    return "text";
+  case CTUI_FORM_TOGGLE:
+    return col < 3 ? "pointer" : NULL;
+  case CTUI_FORM_CHOICE:
+    return col < choice_width(r) + 4 ? "pointer" : NULL;
+  case CTUI_FORM_SLIDER:
+    return col < slider_width(f, room) ? "grab" : NULL;
+  case CTUI_FORM_BUTTON:
+    return col < ctui_utf8_width(r->label) + 4 ? "pointer" : NULL;
+  default:
+    return NULL;
+  }
+}
+
+/* what's under the pointer followed (its shape claimed): 1 if the row
+ * under it changed */
+static int hover(CTUI_FORM *f, const CTUI_WIDGET *self,
+                 const CTUI_MOUSE_EVENT_DATA *m, int col, int room) {
+  int i = ctui_widget_contains(self, m->row, m->col)
+              ? f->scroll + m->row - self->y
+              : -1;
+  i = i >= 0 && i < f->count ? i : -1;
+  if (f->drag >= 0 && m->action != CTUI_MOUSE_RELEASE) {
+    ctui_pointer_shape("grabbing");
+  } else if (i >= 0) {
+    ctui_pointer_shape(shape_at(f, i, col, room));
+  }
+  int changed = i + 1 != f->hover;
+  f->hover = i + 1;
+  return changed;
+}
+
 int ctui_form_mouse(CTUI_FORM *f, const CTUI_WIDGET *self,
                     const CTUI_MOUSE_EVENT_DATA *m) {
-  if (m->action == CTUI_MOUSE_RELEASE) {
-    f->drag = -1;
-    return CTUI_FORM_NONE;
-  }
   int col = m->col - self->x - f->control_col;
   int room = self->w - f->control_col;
+  int hovered = hover(f, self, m, col, room);
+  if (m->action == CTUI_MOUSE_RELEASE) {
+    f->drag = -1;
+    return hovered ? CTUI_FORM_HOVER : CTUI_FORM_NONE;
+  }
   if (m->action == CTUI_MOUSE_MOTION) {
     if (f->drag < 0 || f->drag != f->focus || m->button != 0) {
-      return CTUI_FORM_NONE;
+      return hovered ? CTUI_FORM_HOVER : CTUI_FORM_NONE;
     }
     CTUI_FORM_ROW *r = &f->rows[f->drag];
     int bar = slider_width(f, room);
@@ -238,6 +286,7 @@ int ctui_form_mouse(CTUI_FORM *f, const CTUI_WIDGET *self,
       int bar = slider_width(f, room);
       if (bar >= 2 && col < bar) {
         f->drag = i;
+        ctui_pointer_shape("grabbing");
         what = slider_set(r, r->min + (r->max - r->min) * col / (bar - 1));
       }
       break;
@@ -255,7 +304,7 @@ int ctui_form_mouse(CTUI_FORM *f, const CTUI_WIDGET *self,
 
 static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
                            int x, int w, int bar, CTUI_FORM_ROW *r,
-                           int focused, const CTUI_STYLE *st) {
+                           int focused, int hover, const CTUI_STYLE *st) {
   unsigned char fg = r->disabled ? st->dim_fg : st->fg, bg = st->bg;
   unsigned char hfg = focused ? st->sel_fg : fg, hbg = focused ? st->sel_bg
                                                                : bg;
@@ -274,7 +323,8 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
                       .value = !!r->value,
                       .max = 1,
                       .focused = focused,
-                      .disabled = r->disabled};
+                      .disabled = r->disabled,
+                      .hover = hover};
     if (w >= 3 && ctui_style_control(st, self, comp, y, x, 3, &c, hbg)) {
       used = 3;
       break;
@@ -293,7 +343,8 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
                       .value = r->value,
                       .max = r->option_count > 0 ? r->option_count - 1 : 0,
                       .focused = focused,
-                      .disabled = r->disabled};
+                      .disabled = r->disabled,
+                      .hover = hover};
     if (cw <= w && ctui_style_control(st, self, comp, y, x, cw, &c, bg)) {
       /* a cell in: the drop button takes the field's right end */
       ctui_widget_puts_cut(self, comp, y, x + 1, v, cw - 4, fg, bg);
@@ -315,7 +366,8 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
                         .value = span > 0 ? r->value - r->min : 0,
                         .max = span > 0 ? span : 0,
                         .focused = focused,
-                        .disabled = r->disabled};
+                        .disabled = r->disabled,
+                        .hover = hover};
     int drawn = ctui_style_control(st, self, comp, y, x, bar, &ctl, bg);
     for (int c = 0; c < bar && !drawn; c++) {
       uint32_t ch = c == at ? 0x25cf : c < at ? 0x2501 : 0x2500; /* ● ━ ─ */
@@ -334,7 +386,8 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
     int bw = ctui_utf8_width(r->label) + 4;
     CTUI_CONTROL c = {.kind = CTUI_CONTROL_BUTTON,
                       .focused = focused,
-                      .disabled = r->disabled};
+                      .disabled = r->disabled,
+                      .hover = hover};
     if (bw <= w && ctui_style_control(st, self, comp, y, x, bw, &c, bg)) {
       used = 2 + ctui_widget_puts_cut(self, comp, y, x + 2, r->label, bw - 4,
                                       fg, bg) +
@@ -408,7 +461,7 @@ void ctui_form_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                                 &pen);
     }
     render_control(self, comp, y, f->control_col, self->w - f->control_col,
-                   bar, r, focused, st);
+                   bar, r, focused, f->hover == i + 1, st);
   }
 }
 
@@ -416,7 +469,7 @@ static int emit(CTUI_WIDGET *self, int what) {
   if (what == CTUI_FORM_NONE) {
     return 0;
   }
-  if (what == CTUI_FORM_MOVED) {
+  if (what == CTUI_FORM_MOVED || what == CTUI_FORM_HOVER) {
     return 1;
   }
   CTUI_FORM *f = self->widget_data;

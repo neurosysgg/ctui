@@ -82,16 +82,11 @@ int ctui_tabs_key(CTUI_TABS *t, const CTUI_KEYPRESS_EVENT_DATA *kp) {
   return CTUI_TABS_NONE;
 }
 
-int ctui_tabs_mouse(CTUI_TABS *t, const CTUI_WIDGET *self,
-                    const CTUI_MOUSE_EVENT_DATA *m) {
+/* the item at the pointer, -1 for none (a heading, past the last) */
+static int item_at(const CTUI_TABS *t, const CTUI_WIDGET *self,
+                   const CTUI_MOUSE_EVENT_DATA *m) {
   if (!ctui_widget_contains(self, m->row, m->col)) {
-    return CTUI_TABS_NONE;
-  }
-  if (m->action == CTUI_MOUSE_SCROLL_UP || m->action == CTUI_MOUSE_SCROLL_DOWN) {
-    return move(t, m->action == CTUI_MOUSE_SCROLL_UP ? -1 : 1, t->selected);
-  }
-  if (m->action != CTUI_MOUSE_PRESS || (m->button != 0 && m->button != 2)) {
-    return CTUI_TABS_NONE;
+    return -1;
   }
   int hit = -1;
   if (t->vertical) {
@@ -106,8 +101,26 @@ int ctui_tabs_mouse(CTUI_TABS *t, const CTUI_WIDGET *self,
       x += w;
     }
   }
-  if (!selectable(t, hit)) {
-    return CTUI_TABS_NONE;
+  return selectable(t, hit) ? hit : -1;
+}
+
+int ctui_tabs_mouse(CTUI_TABS *t, const CTUI_WIDGET *self,
+                    const CTUI_MOUSE_EVENT_DATA *m) {
+  int hit = item_at(t, self, m);
+  int hovered = hit + 1 != t->hover;
+  t->hover = hit + 1;
+  if (hit >= 0) {
+    ctui_pointer_shape("pointer");
+  }
+  if (!ctui_widget_contains(self, m->row, m->col)) {
+    return hovered ? CTUI_TABS_HOVER : CTUI_TABS_NONE;
+  }
+  if (m->action == CTUI_MOUSE_SCROLL_UP || m->action == CTUI_MOUSE_SCROLL_DOWN) {
+    return move(t, m->action == CTUI_MOUSE_SCROLL_UP ? -1 : 1, t->selected);
+  }
+  if (m->action != CTUI_MOUSE_PRESS || (m->button != 0 && m->button != 2) ||
+      hit < 0) {
+    return hovered ? CTUI_TABS_HOVER : CTUI_TABS_NONE;
   }
   if (m->button == 2) {
     t->menu_item = hit;
@@ -138,9 +151,12 @@ void ctui_tabs_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       }
       int sel = i == t->selected;
       CTUI_CONTROL cursor = {.kind = CTUI_CONTROL_SELECTION};
+      CTUI_CONTROL under = {.kind = CTUI_CONTROL_HOVER};
       if (sel &&
           ctui_style_control(st, self, comp, y, 0, self->w, &cursor, st->bg)) {
         sel = 0; /* plain over the hook's bar */
+      } else if (!sel && i + 1 == t->hover) {
+        ctui_style_control(st, self, comp, y, 0, self->w, &under, st->bg);
       }
       unsigned char fg = sel ? st->sel_fg : st->fg, bg = sel ? st->sel_bg
                                                              : st->bg;
@@ -157,7 +173,8 @@ void ctui_tabs_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     char label[160];
     snprintf(label, sizeof label, " %s ", t->items[i].label);
     int w = ctui_utf8_width(label);
-    CTUI_CONTROL tab = {.kind = CTUI_CONTROL_TAB, .value = sel};
+    CTUI_CONTROL tab = {
+        .kind = CTUI_CONTROL_TAB, .value = sel, .hover = i + 1 == t->hover};
     int drawn = x + w <= self->w &&
                 ctui_style_control(st, self, comp, 0, x, w, &tab, st->bg);
     if (drawn) {
@@ -174,8 +191,8 @@ void ctui_tabs_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
 }
 
 static int emit(CTUI_WIDGET *self, int what) {
-  if (what == CTUI_TABS_NONE) {
-    return 0;
+  if (what == CTUI_TABS_NONE || what == CTUI_TABS_HOVER) {
+    return what == CTUI_TABS_HOVER; /* a redraw, nothing to tell */
   }
   CTUI_TABS *t = self->widget_data;
   const char *name = what == CTUI_TABS_MOVED      ? "moved"

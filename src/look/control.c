@@ -218,7 +218,7 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
   if (!l->panel || c->under || c->kind == CTUI_LOOK_CTL_BOX) {
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_BARE; /* changes nothing then */
   }
-  if (c->kind != CTUI_LOOK_CTL_CHIP) {
+  if (c->kind != CTUI_LOOK_CTL_CHIP && c->kind != CTUI_LOOK_CTL_BUTTON) {
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_HOVER;
   }
   if (c->kind != CTUI_LOOK_CTL_BOX) {
@@ -748,10 +748,18 @@ static void paint_button(CTUI_LOOK_CANVAS *whole, const CTUI_LOOK_CONTROL *c,
   }
   if (c->kind == CTUI_LOOK_CTL_BUTTON) {
     int latched = !!(c->flags & CTUI_LOOK_CTL_CHECKED);
+    /* under the pointer: the face lit, a third of the way to the light */
+    const unsigned char *face = role(l, CTUI_LOOK_FACE);
+    const unsigned char *light = role(l, CTUI_LOOK_LIGHT);
+    unsigned char lit[3];
+    for (int i = 0; i < 3; i++) {
+      lit[i] = (unsigned char)(face[i] + (light[i] - face[i]) / 3);
+    }
+    int hover = (c->flags & CTUI_LOOK_CTL_HOVER) && !pressed && !latched;
     ctui_look_paint_box(cv, 0, 0, cv->w, cv->h, l,
                         pressed || latched ? CTUI_LOOK_PAINT_SUNKEN
                                            : CTUI_LOOK_PAINT_RAISED,
-                        depth, l->outline, role(l, CTUI_LOOK_FACE));
+                        depth, l->outline, hover ? lit : face);
     if (latched) {
       checker(cv, inset, cv->w - inset, cv->h - inset, l);
     }

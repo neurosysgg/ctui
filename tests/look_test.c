@@ -451,6 +451,21 @@ static void test_buttons(void) {
   CTUI_TEST_ASSERT(px(p, 18, &l, 0, 0) == 's' &&
                        count(p, 18, 20, &l, 't') == marks,
                    "pressed: sunken, the same glyph");
+  c.flags = 0;
+  p = paint(c, &l, 18, 20);
+  char face = px(p, 18, &l, 4, 4);
+  c.flags = CTUI_LOOK_CTL_HOVER;
+  p = paint(c, &l, 18, 20);
+  const unsigned char *lit = p + ((size_t)4 * 18 + 4) * 4;
+  const unsigned char *f = l.color[CTUI_LOOK_FACE];
+  const unsigned char *li = l.color[CTUI_LOOK_LIGHT];
+  CTUI_TEST_ASSERT(px(p, 18, &l, 0, 0) == 'h' &&
+                       lit[0] == (unsigned char)(f[0] + (li[0] - f[0]) / 3) &&
+                       lit[2] == (unsigned char)(f[2] + (li[2] - f[2]) / 3) &&
+                       count(p, 18, 20, &l, 't') == marks,
+                   "under the pointer: raised still, the face lit a third "
+                   "of the way to the light (was %c)",
+                   face);
 
   int seen[CTUI_LOOK_GLYPHS][2] = {{0}};
   for (int g = CTUI_LOOK_GLYPH_CLOSE; g < CTUI_LOOK_GLYPHS; g++) {

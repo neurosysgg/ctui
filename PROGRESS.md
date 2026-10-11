@@ -237,6 +237,23 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Hover in the app widgets** (2026-10-11, ctui-wm's hover h1). With
+  `CTUI_MOUSE_TRACK_ANY` the widgets follow what's under the pointer and
+  say so through its shape (`ctui_pointer_shape()`): the table's row gets
+  the hook's faint bar (`CTUI_CONTROL_HOVER`, a new kind; the cursor
+  stays), a header is lit (`CTUI_CONTROL.hover`, appended) with the hand;
+  tabs lit (a sidebar's row the faint bar) with the hand; a dialog's
+  button lit with the hand; a form's pointer says what a click would do
+  (`text` over an entry, the hand over a toggle / choice / button,
+  `grab` / `grabbing` on a slider, `not-allowed` over a disabled row), a
+  button lit; the scrollbar's thumb `grab` / `grabbing`. Each keeps
+  `hover` (1 + the item, 0 none, appended) and reports a change alone as
+  `CTUI_TABLE_HOVER` / `CTUI_TABS_HOVER` / `CTUI_FORM_HOVER` (appended)
+  or the dialog's `REDRAW` -- a redraw, no event. The look lights a
+  BUTTON under the pointer (its face a third of the way to the light).
+  `ctui_test_mouse()` in tools/ctui_test.h. Tests: table 5, tabs 4,
+  dialog 2, form 10, look 1; 982 passed.
+
 - [x] **The mouse pointer's shape** (2026-10-11, for ctui-wm's hover
   work: notes/hover.md there). `ctui_pointer_shape(name)` (term.h):
   kitty's OSC 22 with CSS cursor names, claimed by a widget's

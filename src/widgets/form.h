@@ -21,7 +21,11 @@
  * entry edits (entry.h) and presses on Enter. Mouse: a click focuses a row
  * and works its control (a toggle flips, a choice's ‹ › step, a slider
  * jumps to the click and follows a drag, a button presses, an entry
- * places its cursor); the wheel moves the focus. */
+ * places its cursor); the wheel moves the focus. The pointer's shape says
+ * what a click would do (with CTUI_MOUSE_TRACK_ANY for hover): an I-beam
+ * over an entry, a hand over a toggle, a choice, a button, `grab` over a
+ * slider (`grabbing` while dragged), `not-allowed` over a disabled row; a
+ * button under it is lit. */
 typedef enum {
   CTUI_FORM_HEADING,
   CTUI_FORM_ENTRY,
@@ -53,6 +57,7 @@ typedef struct {
   /* the last render: rows shown, where the controls start, the dragged
    * slider (-1 = none) */
   int page, control_col, drag;
+  int hover; /* 1 + the row under the pointer (0: none) */
 } CTUI_FORM;
 
 enum {
@@ -60,6 +65,7 @@ enum {
   CTUI_FORM_MOVED,   /* the focus moved, or an entry's cursor */
   CTUI_FORM_CHANGED, /* rows[focus]'s value / text changed */
   CTUI_FORM_PRESSED, /* rows[focus]: a button, or Enter in an entry */
+  CTUI_FORM_HOVER,   /* only what's under the pointer changed: redraw */
 };
 
 /* focuses the first row that takes it at or after row (for a fresh page) */

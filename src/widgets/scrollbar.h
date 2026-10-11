@@ -14,7 +14,8 @@
  * Mouse: a drag on the thumb scrolls with it, a click above or below it
  * moves a page less one. One thumb is held at a time (the pointer's):
  * ctui_scrollbar_held() tells an app routing reports by where they are
- * that they belong to the view holding it. */
+ * that they belong to the view holding it. The pointer's shape over the
+ * thumb is `grab`, while it's held `grabbing` (ctui_pointer_shape()). */
 typedef struct {
   int dragging; /* the thumb is held */
   int grab;     /* where, in cells from its top */

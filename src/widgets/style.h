@@ -36,6 +36,9 @@ typedef enum {
   CTUI_CONTROL_SELECTION, /* a list's cursor row, its text over it: the
                            * widget writes that in its plain colours (the
                            * hook gives them the selection's) */
+  CTUI_CONTROL_HOVER,     /* a list's row under the pointer (not the
+                           * cursor), its text over it in its own
+                           * colours: a faint bar, the hook's or none */
 } CTUI_CONTROL_KIND;
 
 typedef struct {
@@ -47,6 +50,7 @@ typedef struct {
   /* GROUP's, FRAME's: the columns of its top row the heading / title
    * takes (from col: its edge left open there); label_cols 0 = none */
   int label, label_cols;
+  int hover; /* the pointer is over it (a button, a tab, a header lit) */
 } CTUI_CONTROL;
 
 /* Draws c over the cols cells from (row, col) of self (widget

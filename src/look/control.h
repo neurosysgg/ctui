@@ -80,7 +80,8 @@ typedef enum {
 
 typedef enum {
   CTUI_LOOK_CTL_OFF = 1,     /* muted, disabled: marks in the disabled role */
-  CTUI_LOOK_CTL_HOVER = 2,   /* the pointer is over it */
+  CTUI_LOOK_CTL_HOVER = 2,   /* the pointer is over it: a chip raised, a
+                              * button's face lit */
   CTUI_LOOK_CTL_PRESSED = 4, /* held down */
   CTUI_LOOK_CTL_CHECKED = 8, /* a check or toggle that is on, a button
                               * latched down */

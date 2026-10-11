@@ -385,6 +385,40 @@ int main(void) {
                        ctui_test_row_contains(screen, 4, "eps"),
                    "the icon before the name, its text after it; other rows "
                    "without");
+
+  /* hover: the row under the pointer asked for its faint bar, the cursor
+   * where it was; a header lit, the hand over it; the thumb's grab */
+  nasked = 0;
+  click(&app, screen, 1 + 3, 5, -1, CTUI_MOUSE_MOTION);
+  int hovered = -1;
+  for (int i = 0; i < nasked; i++) {
+    hovered = asked[i].kind == CTUI_CONTROL_HOVER ? asked_row[i] : hovered;
+  }
+  CTUI_TEST_ASSERT(t.hover == 5 && t.selected == 3 && hovered == 3 &&
+                       strcmp(ctui_pointer_current(), "default") == 0,
+                   "over a row: its faint bar asked (line %d), the cursor "
+                   "kept, the arrow",
+                   hovered);
+  nasked = 0;
+  click(&app, screen, 1, 5, -1, CTUI_MOUSE_MOTION);
+  CTUI_TEST_ASSERT(t.hover == 0 && t.hover_head == 1 && nasked >= 2 &&
+                       asked[0].hover && !asked[1].hover &&
+                       strcmp(ctui_pointer_current(), "pointer") == 0,
+                   "over a header: it lit, the hand");
+  CTUI_MOUSE_EVENT_DATA still = {
+      .action = CTUI_MOUSE_MOTION, .button = -1, .row = 1, .col = 6};
+  CTUI_TEST_ASSERT(ctui_table_mouse(&t, &w, &still) == CTUI_TABLE_NONE,
+                   "moving within it: nothing to redraw");
+  int at, len;
+  ctui_scrollbar_thumb(5, N, 5, t.scroll, &at, &len);
+  click(&app, screen, 2 + at, 21, -1, CTUI_MOUSE_MOTION);
+  CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "grab") == 0,
+                   "over the scrollbar's thumb: grab (%s)",
+                   ctui_pointer_current());
+  click(&app, screen, 9, 0, -1, CTUI_MOUSE_MOTION);
+  CTUI_TEST_ASSERT(t.hover == 0 && t.hover_head == 0 &&
+                       strcmp(ctui_pointer_current(), "default") == 0,
+                   "off the table: nothing lit, the arrow");
   t.cell_icon = NULL;
   t.style = NULL;
   t.sort_col = 0;

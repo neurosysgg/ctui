@@ -67,10 +67,17 @@ int ctui_scrollbar_mouse(CTUI_SCROLLBAR *sb, const CTUI_WIDGET *self, int row,
     return -1;
   }
   ctui_scrollbar_thumb(rows, total, span, first, &at, &len);
+  int on_thumb = m->col == self->x + col && y >= at && y < at + len;
+  int grabbing = sb->dragging || (on_thumb && m->action == CTUI_MOUSE_PRESS &&
+                                  m->button == 0);
+  if (grabbing || on_thumb) {
+    ctui_pointer_shape(grabbing ? "grabbing" : "grab");
+  }
   if (sb->dragging) {
     if (m->action == CTUI_MOUSE_RELEASE) {
       sb->dragging = 0;
       g_held = NULL;
+      ctui_pointer_shape(on_thumb ? "grab" : NULL);
       return first;
     }
     if (m->action != CTUI_MOUSE_MOTION) {

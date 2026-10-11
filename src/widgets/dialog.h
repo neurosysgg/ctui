@@ -31,11 +31,15 @@ typedef struct {
   /* the last render's button cells, for clicks */
   int button_row, button_from[CTUI_DIALOG_MAX_BUTTONS],
       button_to[CTUI_DIALOG_MAX_BUTTONS];
+  /* 1 + the button under the pointer (0: none): lit (CTUI_MOUSE_TRACK_ANY),
+   * the pointer a hand */
+  int hover;
 } CTUI_DIALOG;
 
 enum {
   CTUI_DIALOG_NONE = 0,
-  CTUI_DIALOG_REDRAW, /* focus moved or the entry changed */
+  CTUI_DIALOG_REDRAW, /* focus moved, the entry changed, or the pointer
+                       * went onto or off a button */
   CTUI_DIALOG_CHOSEN, /* buttons[focus] picked; closed */
   CTUI_DIALOG_CANCEL, /* Esc; closed */
 };

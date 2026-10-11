@@ -14,7 +14,9 @@
  * Mouse: a click selects, a right click asks for that item's menu (the
  * selection stays), the wheel moves. The style's control hook is asked for
  * a bar's tabs (CTUI_CONTROL_TAB) and a sidebar's selection
- * (CTUI_CONTROL_SELECTION). */
+ * (CTUI_CONTROL_SELECTION). Hover (with CTUI_MOUSE_TRACK_ANY): the tab
+ * under the pointer is lit (a sidebar's row gets the hook's faint bar,
+ * CTUI_CONTROL_HOVER) and the pointer is a hand over it. */
 typedef struct {
   const char *label;
   int heading; /* vertical only: a group's title, not selectable */
@@ -29,6 +31,7 @@ typedef struct {
   const CTUI_STYLE *style;
   int page; /* the last render's rows (vertical) */
   int menu_item; /* the item the last right click was on */
+  int hover;     /* 1 + the item under the pointer (0: none) */
 } CTUI_TABS;
 
 enum {
@@ -36,6 +39,7 @@ enum {
   CTUI_TABS_MOVED,    /* selected changed: show that page */
   CTUI_TABS_ACTIVATE, /* Enter on it */
   CTUI_TABS_MENU,     /* a right click: menu_item's menu asked for */
+  CTUI_TABS_HOVER,    /* only what's under the pointer changed: redraw */
 };
 
 /* selects item i, or the next selectable one after it */

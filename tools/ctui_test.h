@@ -70,6 +70,29 @@ static inline int ctui_test_key(CTUI_APP *app, CTUI_SCREEN *screen,
   return changed;
 }
 
+/* a mouse report at (row, col) through the same ctui_handle_event() path
+ * the run loop takes (the pointer's shape settled after it, as there),
+ * re-rendering on a change; button -1 for a motion with none held */
+static inline int ctui_test_mouse(CTUI_APP *app, CTUI_SCREEN *screen,
+                                  CTUI_MOUSE_ACTION action, int button,
+                                  int row, int col) {
+  CTUI_MOUSE_EVENT_DATA m = {.action = action,
+                             .button = button,
+                             .row = row,
+                             .col = col,
+                             .px = -1,
+                             .py = -1};
+  CTUI_EVENT ev = {.type = CTUI_MOUSE_EVENT,
+                   .scope = CTUI_EVENT_SCOPE_GLOBAL,
+                   .ev_source = "input",
+                   .event_data = &m};
+  int changed = ctui_handle_event(&ev);
+  if (changed) {
+    ctui_app_render(app, screen);
+  }
+  return changed;
+}
+
 /* same real path ctui_app_resize() takes on a real SIGWINCH (reallocate,
  * re-run every widget's layout(), dispatch CTUI_RESIZE_EVENT), then
  * re-renders so screen->cells is ready to assert against at the new size. */

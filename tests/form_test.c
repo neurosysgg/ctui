@@ -283,6 +283,40 @@ int main(void) {
   CTUI_TEST_ASSERT(frows[5].value == 1,
                    "a click in a drawn choice's wider field steps it");
 
+  /* the pointer says what a click would do: rows at 1 + i, controls from
+   * column 18 */
+  static const struct {
+    int row, col;
+    const char *shape;
+  } shapes[] = {
+      {2, 19, "text"},        /* the entry */
+      {3, 19, "grab"},        /* the slider */
+      {4, 19, "not-allowed"}, /* the disabled toggle */
+      {5, 18, "pointer"},     /* a toggle */
+      {6, 19, "pointer"},     /* a choice */
+      {7, 19, "pointer"},     /* the button */
+      {5, 3, "default"},      /* a label */
+  };
+  for (size_t i = 0; i < sizeof shapes / sizeof *shapes; i++) {
+    ctui_test_mouse(&app, screen, CTUI_MOUSE_MOTION, -1, shapes[i].row,
+                    shapes[i].col);
+    CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), shapes[i].shape) == 0,
+                     "the pointer at (%d, %d): %s (%s)", shapes[i].row,
+                     shapes[i].col, shapes[i].shape, ctui_pointer_current());
+  }
+  CTUI_TEST_ASSERT(f.hover == 5, "the row under the pointer kept (%d)",
+                   f.hover);
+  ctui_test_mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 3, 19);
+  CTUI_TEST_ASSERT(f.drag == 2 &&
+                       strcmp(ctui_pointer_current(), "grabbing") == 0,
+                   "a press on the slider: grabbing");
+  ctui_test_mouse(&app, screen, CTUI_MOUSE_MOTION, 0, 8, 2);
+  CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "grabbing") == 0,
+                   "dragged off the form: still grabbing");
+  ctui_test_mouse(&app, screen, CTUI_MOUSE_RELEASE, 0, 8, 2);
+  CTUI_TEST_ASSERT(f.drag < 0 && strcmp(ctui_pointer_current(), "default") == 0,
+                   "let go off it: the arrow");
+
   ctui_app_free(&app);
   ctui_screen_free(screen);
   return ctui_test_summary();

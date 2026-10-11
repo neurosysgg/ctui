@@ -115,9 +115,48 @@ void ctui_table_column_span(const CTUI_TABLE *t, int w, int i, int *x,
   }
 }
 
+/* the row (1 + it) and the header column (1 + it) at (row, col) of the
+ * table's own cells, 0 where none is */
+static void at(const CTUI_TABLE *t, int cols, int row, int col, int *r,
+               int *head) {
+  *r = *head = 0;
+  if (row < 0 || col < 0 || col >= cols) {
+    return;
+  }
+  if (t->header && row == 0) {
+    for (int c = 0; c < t->column_count; c++) {
+      int x, w;
+      ctui_table_column_span(t, cols, c, &x, &w);
+      if (col >= x && col < x + w) {
+        *head = c + 1;
+      }
+    }
+    return;
+  }
+  int i = t->scroll + row - (t->header ? 1 : 0);
+  *r = i >= 0 && i < t->count ? i + 1 : 0;
+}
+
+/* what's under the pointer followed: 1 if that changed */
+static int hover(CTUI_TABLE *t, const CTUI_WIDGET *self, int cols,
+                 const CTUI_MOUSE_EVENT_DATA *m) {
+  int r = 0, head = 0;
+  if (ctui_widget_contains(self, m->row, m->col)) {
+    at(t, cols, m->row - self->y, m->col - self->x, &r, &head);
+  }
+  if (head) {
+    ctui_pointer_shape("pointer"); /* a header click sorts */
+  }
+  int changed = r != t->hover || head != t->hover_head;
+  t->hover = r;
+  t->hover_head = head;
+  return changed;
+}
+
 int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
                      const CTUI_MOUSE_EVENT_DATA *m) {
   int cols = ctui_table_width(t, self->w, self->h);
+  int hovered = hover(t, self, cols, m);
   if (cols < self->w) {
     t->page = body_rows(t, self->h);
     int first = ctui_scrollbar_mouse(&t->bar, self, t->header ? 1 : 0, cols,
@@ -129,7 +168,7 @@ int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
     }
   }
   if (!ctui_widget_contains(self, m->row, m->col)) {
-    return CTUI_TABLE_NONE;
+    return hovered ? CTUI_TABLE_HOVER : CTUI_TABLE_NONE;
   }
   t->page = body_rows(t, self->h);
   if (m->action == CTUI_MOUSE_SCROLL_UP) {
@@ -139,7 +178,7 @@ int ctui_table_mouse(CTUI_TABLE *t, const CTUI_WIDGET *self,
     return move(t, t->selected + 3);
   }
   if (m->action != CTUI_MOUSE_PRESS || (m->button != 0 && m->button != 2)) {
-    return CTUI_TABLE_NONE;
+    return hovered ? CTUI_TABLE_HOVER : CTUI_TABLE_NONE;
   }
   int row = m->row - self->y, col = m->col - self->x;
   if (t->header && row == 0) {
@@ -217,7 +256,8 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       CTUI_CONTROL head = {.kind = CTUI_CONTROL_HEADER,
                            .value = c != t->sort_col ? 0
                                     : t->sort_desc   ? 2
-                                                     : 1};
+                                                     : 1,
+                           .hover = t->hover_head == c + 1};
       int drawn = ctui_style_control(st, self, comp, 0, x, bw, &head, st->bg);
       CTUI_CELL pen = ctui_style_cell(
           st, drawn ? CTUI_STYLE_FG : CTUI_STYLE_TITLE, CTUI_STYLE_BG, 0, 0);
@@ -243,6 +283,7 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
       bg = CTUI_STYLE_MARK_BG;
     }
     CTUI_CONTROL cursor = {.kind = CTUI_CONTROL_SELECTION};
+    CTUI_CONTROL under = {.kind = CTUI_CONTROL_HOVER};
     if (sel &&
         ctui_style_control(st, self, comp, row, 0, cols, &cursor, st->bg)) {
       sel = fill = 0; /* the row's own colours over the hook's bar */
@@ -250,6 +291,9 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     } else if (sel) {
       fg = marked && !fill ? CTUI_STYLE_MARK : CTUI_STYLE_SEL_FG;
       bg = CTUI_STYLE_SEL_BG;
+    } else if (r + 1 == t->hover && !fill) {
+      /* under the pointer: the hook's faint bar, the text as it is */
+      ctui_style_control(st, self, comp, row, 0, cols, &under, st->bg);
     }
     CTUI_CELL pen = ctui_style_cell(st, fg, bg, own, 0);
     if (sel || fill) {
@@ -286,8 +330,8 @@ static const char *const action_names[] = {
     "", "moved", "activate", "mark", "sort", "menu", "header_menu"};
 
 static int emit(CTUI_WIDGET *self, int what) {
-  if (what == CTUI_TABLE_NONE) {
-    return 0;
+  if (what == CTUI_TABLE_NONE || what == CTUI_TABLE_HOVER) {
+    return what == CTUI_TABLE_HOVER; /* a redraw, nothing to tell */
   }
   CTUI_TABLE *t = self->widget_data;
   ctui_logf(E_INF, "[CTUI:TABLE] - %s @ tick %d (row %d of %d)\n",
