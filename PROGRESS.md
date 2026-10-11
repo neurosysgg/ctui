@@ -250,7 +250,7 @@ terminal resize.
   `hover` (1 + the item, 0 none, appended) and reports a change alone as
   `CTUI_TABLE_HOVER` / `CTUI_TABS_HOVER` / `CTUI_FORM_HOVER` (appended)
   or the dialog's `REDRAW` -- a redraw, no event. The look lights a
-  BUTTON under the pointer (its face a third of the way to the light).
+  BUTTON under the pointer (its face a third of the way to the highlight).
   `ctui_test_mouse()` in tools/ctui_test.h. Tests: table 5, tabs 4,
   dialog 2, form 10, look 1; 982 passed.
 

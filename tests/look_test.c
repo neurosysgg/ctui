@@ -458,13 +458,13 @@ static void test_buttons(void) {
   p = paint(c, &l, 18, 20);
   const unsigned char *lit = p + ((size_t)4 * 18 + 4) * 4;
   const unsigned char *f = l.color[CTUI_LOOK_FACE];
-  const unsigned char *li = l.color[CTUI_LOOK_LIGHT];
+  const unsigned char *li = l.color[CTUI_LOOK_HIGHLIGHT];
   CTUI_TEST_ASSERT(px(p, 18, &l, 0, 0) == 'h' &&
                        lit[0] == (unsigned char)(f[0] + (li[0] - f[0]) / 3) &&
                        lit[2] == (unsigned char)(f[2] + (li[2] - f[2]) / 3) &&
                        count(p, 18, 20, &l, 't') == marks,
                    "under the pointer: raised still, the face lit a third "
-                   "of the way to the light (was %c)",
+                   "of the way to the highlight (was %c)",
                    face);
 
   int seen[CTUI_LOOK_GLYPHS][2] = {{0}};

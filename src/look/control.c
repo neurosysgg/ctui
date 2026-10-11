@@ -748,9 +748,10 @@ static void paint_button(CTUI_LOOK_CANVAS *whole, const CTUI_LOOK_CONTROL *c,
   }
   if (c->kind == CTUI_LOOK_CTL_BUTTON) {
     int latched = !!(c->flags & CTUI_LOOK_CTL_CHECKED);
-    /* under the pointer: the face lit, a third of the way to the light */
+    /* under the pointer: the face lit, a third of the way to the bevel's
+     * highlight */
     const unsigned char *face = role(l, CTUI_LOOK_FACE);
-    const unsigned char *light = role(l, CTUI_LOOK_LIGHT);
+    const unsigned char *light = role(l, CTUI_LOOK_HIGHLIGHT);
     unsigned char lit[3];
     for (int i = 0; i < 3; i++) {
       lit[i] = (unsigned char)(face[i] + (light[i] - face[i]) / 3);
