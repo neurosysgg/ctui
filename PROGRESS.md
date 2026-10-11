@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The mouse pointer's shape** (2026-10-11, for ctui-wm's hover
+  work: notes/hover.md there). `ctui_pointer_shape(name)` (term.h):
+  kitty's OSC 22 with CSS cursor names, claimed by a widget's
+  `CTUI_MOUSE_EVENT` handler and settled by `ctui_handle_event()` after
+  the outermost mouse event (the last claim wins, none = the default,
+  `=` sent only on a change), so widgets sharing a terminal don't fight
+  over it; outside a mouse event set at once. Nothing written unless the
+  mouse is on; the default put back at suspend and shutdown.
+  `ctui_pointer_current()` for tests. event_test 6 new; 959 passed.
+
 - [x] **A shield pictogram** (2026-10-11, for ctui-wm's `vpn` widget).
   `CTUI_LOOK_PICTO_SHIELD` appended, 16 and 24 px art (a top bar's):
   0 of 1 outlined (the tunnel down), 1 of 1 or no state filled in the

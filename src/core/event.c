@@ -238,6 +238,12 @@ int ctui_handle_event(CTUI_EVENT *ev) {
     ctui_log(E_WRN, "[CTUI:EVENT] - no app registered, dropping event\n");
     return 0;
   }
+  /* the pointer's shape: claimed by this mouse event's handlers, settled
+   * after them (only the outermost one: a handler may dispatch others) */
+  int pointer = ev->type == CTUI_MOUSE_EVENT && g_dispatch_depth == 0;
+  if (pointer) {
+    ctui_pointer_begin();
+  }
   g_dispatch_depth++;
   if (ev->scope == CTUI_EVENT_SCOPE_BUBBLE) {
     changed = ctui_event_dispatch_bubble(ev);
@@ -255,6 +261,9 @@ int ctui_handle_event(CTUI_EVENT *ev) {
   }
   if (--g_dispatch_depth == 0 && g_tombstones) {
     compact_handlers();
+  }
+  if (pointer) {
+    ctui_pointer_end();
   }
   ctui_logf(E_INF, "[CTUI:EVENT] - event dispatched @ tick %d (changed=%d)\n",
             ctui_tick_advance(), changed);

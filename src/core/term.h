@@ -66,6 +66,22 @@ void ctui_focus_enable(void);
  * ctui_shutdown() restores the previous mode. */
 void ctui_kitty_keys_enable(void);
 
+/* the mouse pointer's shape over the window (kitty's OSC 22; CSS cursor
+ * names: "pointer", "text", "grab", "grabbing", "ew-resize",
+ * "not-allowed", "wait", "crosshair", ...). Claimed by a widget while a
+ * CTUI_MOUSE_EVENT is dispatched -- where the pointer is, what it's
+ * over -- and settled once that event's handlers are done: the last
+ * claim wins, no claim means the default arrow, and the terminal hears
+ * only of a change. So widgets sharing a terminal never fight over it:
+ * whichever is under the pointer says. Outside a mouse event's dispatch
+ * it is set at once (a busy "wait" from a timer). NULL or "" = the
+ * default. Written only while mouse reporting is on (ctui_mouse_enable());
+ * reset to the default at ctui_suspend() and ctui_shutdown(). Terminals
+ * without the protocol ignore it. */
+void ctui_pointer_shape(const char *name);
+/* the shape as last settled ("default" before any) */
+const char *ctui_pointer_current(void);
+
 /* hand the terminal to a child for a while (an editor, a pager, a shell):
  * ctui_suspend() leaves the alternate screen, turns the mouse/focus/
  * keyboard modes off and puts the terminal back as ctui_init() found it;

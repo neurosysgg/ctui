@@ -13,6 +13,7 @@
 
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -23,6 +24,15 @@ static int g_mouse_enabled = 0;
 int ctui_g_mouse_pixels = 0;
 static int g_focus_enabled = 0;
 static int g_kitty_keys_enabled = 0;
+
+/* the pointer's shape: what the terminal was last told ("" = unknown:
+ * told nothing yet, or since a suspend) and, while a mouse event is
+ * dispatched, what its handlers claimed */
+#define POINTER_NAME 32
+static char g_pointer_sent[POINTER_NAME];
+static char g_pointer_shown[POINTER_NAME] = "default";
+static char g_pointer_claim[POINTER_NAME];
+static int g_pointer_claiming = 0;
 
 volatile sig_atomic_t ctui_g_resize_pending = 0;
 unsigned int ctui_g_gfx_mode = 0;
@@ -154,9 +164,52 @@ static void modes_off(void) {
   printf("\x1b[?25h\x1b[?1049l");
 }
 
+/* the shape told to the terminal when it differs from what it was last
+ * told (only while the mouse is ours: a test or a pipe gets no bytes) */
+static void pointer_send(const char *name) {
+  snprintf(g_pointer_shown, sizeof g_pointer_shown, "%s",
+           name && *name ? name : "default");
+  if (!g_mouse_enabled || strcmp(g_pointer_sent, g_pointer_shown) == 0) {
+    return;
+  }
+  snprintf(g_pointer_sent, sizeof g_pointer_sent, "%s", g_pointer_shown);
+  printf("\x1b]22;=%s\x1b\\", g_pointer_sent);
+  fflush(stdout);
+}
+
+/* back to the default arrow before the terminal goes to someone else */
+static void pointer_reset(void) {
+  if (g_pointer_sent[0] && strcmp(g_pointer_sent, "default") != 0) {
+    printf("\x1b]22;=default\x1b\\");
+  }
+  g_pointer_sent[0] = '\0';
+}
+
+void ctui_pointer_shape(const char *name) {
+  if (g_pointer_claiming) {
+    snprintf(g_pointer_claim, sizeof g_pointer_claim, "%s",
+             name && *name ? name : "default");
+    return;
+  }
+  pointer_send(name);
+}
+
+const char *ctui_pointer_current(void) { return g_pointer_shown; }
+
+void ctui_pointer_begin(void) {
+  g_pointer_claiming = 1;
+  g_pointer_claim[0] = '\0';
+}
+
+void ctui_pointer_end(void) {
+  g_pointer_claiming = 0;
+  pointer_send(g_pointer_claim);
+}
+
 void ctui_suspend(void) {
   ctui_logf(E_INF, "[CTUI:TERM] - suspended @ tick %d\n",
             ctui_tick_advance());
+  pointer_reset();
   modes_off();
   fflush(stdout);
   tcsetattr(STDIN_FILENO, TCSADRAIN, &orig_termios);
@@ -271,6 +324,7 @@ void ctui_shutdown(void) {
    * ctui_gfx_kitty_shm_reap()'s own doc comment. */
   ctui_gfx_kitty_shm_reap();
   ctui_log_shutdown();
+  pointer_reset();
   modes_off();
   g_mouse_enabled = g_focus_enabled = g_kitty_keys_enabled = 0;
   ctui_g_mouse_pixels = 0;

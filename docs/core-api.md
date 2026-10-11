@@ -524,6 +524,19 @@ above into the loop described in "Life of a frame".
 - `ctui_cell_px(cw, ch)` — the cell size in pixels (TIOCGWINSZ), or
   what `ctui_cell_px_set(cw, ch)` set (tests; 0, 0 asks again); -1 when
   unknown. `ctui_drawn_cell_px()` falls back to it.
+- `ctui_pointer_shape(name)` — the mouse pointer's shape over the
+  window (kitty's OSC 22, CSS cursor names: `pointer`, `text`, `grab`,
+  `grabbing`, `ew-resize`, `not-allowed`, `wait`, `crosshair`, ...;
+  NULL or "" the default arrow). Called from a `CTUI_MOUSE_EVENT`
+  handler for where the pointer is, it's a claim: `ctui_handle_event()`
+  settles it once the event's handlers are done -- the last claim wins,
+  none means the default -- and the terminal hears only of a change. So
+  widgets sharing a terminal never fight over the shape: whichever is
+  under the pointer says. Outside a mouse event it's set at once (a
+  busy `wait` from a timer). Written only while mouse reporting is on;
+  `ctui_suspend()` / `ctui_shutdown()` put the default back.
+  `ctui_pointer_current()` is the shape as last settled (`"default"`
+  before any; tests read it).
 - `ctui_focus_enable()` — opt into focus reports (`CTUI_FOCUS_EVENT`)
   when the terminal window gains/loses keyboard focus;
   `ctui_shutdown()` turns them back off.

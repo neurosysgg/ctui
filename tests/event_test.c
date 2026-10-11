@@ -17,7 +17,13 @@
  * (split->count shrinks), the child's OWN handler still fires regardless
  * (bubbling never gates the widget it's currently on, only whether the
  * walk continues past it), and a BUBBLE-scope event with no origin is
- * dropped rather than crashing. */
+ * dropped rather than crashing.
+ *
+ * test_pointer() covers ctui_pointer_shape(): two widgets sharing the
+ * terminal each claim the pointer's shape over their own cells during a
+ * mouse event; the claim of the one under the pointer is what's settled,
+ * no claim settles the default, and outside a mouse event a claim is
+ * taken at once. */
 #include "ctui.h"
 
 #include "ctui_test.h"
@@ -241,6 +247,65 @@ static void test_unregister(void) {
   ctui_event_unregister(&y);
 }
 
+/* two widgets side by side: the left one's cells take a hand, the right
+ * one's an I-beam; each claims only where the pointer is over it */
+static CTUI_WIDGET *g_left, *g_right;
+
+static int claim_left(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  CTUI_MOUSE_EVENT_DATA *m = ev->event_data;
+  if (ctui_widget_contains(self, m->row, m->col)) {
+    ctui_pointer_shape("pointer");
+  }
+  return 0;
+}
+
+static int claim_right(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  CTUI_MOUSE_EVENT_DATA *m = ev->event_data;
+  if (ctui_widget_contains(self, m->row, m->col)) {
+    ctui_pointer_shape("text");
+  }
+  return 0;
+}
+
+static void motion_at(int row, int col) {
+  CTUI_MOUSE_EVENT_DATA m = {.action = CTUI_MOUSE_MOTION,
+                             .button = -1,
+                             .row = row,
+                             .col = col,
+                             .px = -1,
+                             .py = -1};
+  CTUI_EVENT ev = {.type = CTUI_MOUSE_EVENT,
+                   .scope = CTUI_EVENT_SCOPE_GLOBAL,
+                   .ev_source = "input",
+                   .event_data = &m};
+  ctui_handle_event(&ev);
+}
+
+static void test_pointer(void) {
+  CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "default") == 0,
+                   "the pointer starts as the default arrow");
+  ctui_event_register("input", CTUI_MOUSE_EVENT, g_left, claim_left);
+  ctui_event_register("input", CTUI_MOUSE_EVENT, g_right, claim_right);
+  motion_at(0, 1);
+  CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "pointer") == 0,
+                   "over the left widget: its hand, though the right "
+                   "widget's handler ran after it");
+  motion_at(0, 6);
+  CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "text") == 0,
+                   "over the right one: its I-beam");
+  motion_at(5, 5);
+  CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "default") == 0,
+                   "over neither: nobody claims it, the default");
+  ctui_pointer_shape("wait");
+  CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "wait") == 0,
+                   "outside a mouse event: taken at once");
+  ctui_pointer_shape(NULL);
+  CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "default") == 0,
+                   "NULL: the default");
+  ctui_event_unregister(g_left);
+  ctui_event_unregister(g_right);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -286,6 +351,12 @@ int main(void) {
 
   test_bubble(&app);
   test_unregister();
+
+  CTUI_WIDGET left = ctui_widget_make(0, 0, 5, 1, NULL, noop_render, NULL);
+  CTUI_WIDGET right = ctui_widget_make(5, 0, 5, 1, NULL, noop_render, NULL);
+  g_left = &left;
+  g_right = &right;
+  test_pointer();
 
   ctui_app_free(&app);
   return ctui_test_summary();

@@ -22,6 +22,12 @@ extern CTUI_APP *ctui_g_app;
  * reports: resolve_mouse() (input.c) then reads pixels, not cells */
 extern int ctui_g_mouse_pixels;
 
+/* a mouse event's dispatch begins / ends (ctui_handle_event(), event.c):
+ * the pointer's shape claims are collected between the two and settled
+ * at the end (term.c) */
+void ctui_pointer_begin(void);
+void ctui_pointer_end(void);
+
 /* the graphics mode negotiated by ctui_init() (term.c) -- one CTUI_GFX_MODE
  * value, not a bitmask. Not read by ctui_screen_flush() (per-cell
  * color_mode drives emission there, see GFX_DESIGN.md); reserved for
