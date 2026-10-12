@@ -324,12 +324,19 @@ static const char *num_end(const char *p, const char *e, int *integer) {
 }
 
 static double to_double(const char *s, const char *e) {
-  char buf[64];
-  size_t n =
-      (size_t)(e - s) < sizeof buf - 1 ? (size_t)(e - s) : sizeof buf - 1;
-  memcpy(buf, s, n);
-  buf[n] = '\0';
-  return strtod(buf, NULL);
+  char buf[64], *p = buf;
+  size_t n = (size_t)(e - s);
+  /* a long one (zeros padding an exponent, say) whole, not cut */
+  if (n >= sizeof buf && !(p = malloc(n + 1))) {
+    return 0;
+  }
+  memcpy(p, s, n);
+  p[n] = '\0';
+  double d = strtod(p, NULL);
+  if (p != buf) {
+    free(p);
+  }
+  return d;
 }
 
 static long long to_llong(const char *s, const char *e, int integer) {

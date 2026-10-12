@@ -79,6 +79,15 @@ static void test_kinds(CTUI_JSON_REC *r, CTUI_JSON_ARENA *a) {
                    s.size, s.track);
   CTUI_TEST_ASSERT(read_line(r, "{}", &s, a) == 0 && !s.path,
                    "an empty object");
+  rc = read_line(r,
+                 "{\"gain\":1.5e+000000000000000000000000000000000000000000000"
+                 "000000000000000000000000000000003,\"size\":2."
+                 "0000000000000000000000000000000000000000000000000000000000000"
+                 "00000000001e2}",
+                 &s, a);
+  CTUI_TEST_ASSERT(rc == 0 && s.gain == 1500 && s.size == 200,
+                   "a number longer than 64 bytes read whole (%g %lld)", s.gain,
+                   s.size);
 }
 
 static void test_refused(CTUI_JSON_REC *r, CTUI_JSON_ARENA *a) {
