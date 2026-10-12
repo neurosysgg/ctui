@@ -237,6 +237,25 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`json/record.h`: objects into fixed records** (2026-10-12, for
+  ctui-wm's ctui-files fields cache, notes/files-search.md f4 there; the
+  "scalar first version" of its notes/json-cache-engine.md). The app
+  gives a table of the keys it wants (`CTUI_JSON_REC_FIELD`: key, kind --
+  string / long long / double / bool --, the offset in its record, an
+  optional "has" int's offset), hashed once (`ctui_json_rec_new()`);
+  `ctui_json_rec_read()` reads one object into a record: other keys and
+  nested values stepped over without being parsed, strings decoded
+  (escapes, surrogate pairs, a lone one as U+FFFD) into a
+  `CTUI_JSON_ARENA` of chained blocks whose pointers never move until
+  `ctui_json_arena_reset()`. Integers are read exactly (json.c goes
+  through a double: a time in nanoseconds is past 2^53), clamped;
+  another kind or null leaves the field alone; strict JSON, a duplicate
+  key's last value wins, nesting capped at 512. On ctui-wm's 129k-line
+  search output (67 MB, 13 fields): 90 ms warm, 743 MB/s, where
+  json.c's DOM takes 276 ms freeing each line's tree. tests/
+  json_record_test.c 16 (every cut of a line refused, the arena's
+  pointers over 20k records, json.c's values on the same lines).
+
 - [x] **`query/`: a search over records** (2026-10-11, for ctui-wm's
   ctui-files search, notes/files-search.md f0 there; ctui-mus's
   `src/library/query.c` made generic). The app gives a field table

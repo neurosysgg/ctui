@@ -174,7 +174,10 @@ else.
 - `src/json/` — a growable string (`buf`), a JSON parser / writer for
   hand-edited configs (`json`): `#include "json/json.h"`, and in-place
   edits of such a config that keep its comments and layout (`jsonedit`:
-  set / remove / insert / swap a member, saved with a `.bak`).
+  set / remove / insert / swap a member, saved with a `.bak`), and
+  objects -- an NDJSON file's lines -- read straight into an app's own
+  fixed records, no tree (`record`: a key -> kind + offset table, strings
+  into an arena; `#include "json/record.h"`).
 - `src/query/` — a search over records an app describes: foobar2000's
   keywords (`artist HAS x`, `AND OR NOT`, `SORT BY`) plus short forms
   (`ext:flac,mp3`, `size>10M`, `age<7d`, `is:link`, `-word`), typed
