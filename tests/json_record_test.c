@@ -70,11 +70,12 @@ static void test_kinds(CTUI_JSON_REC *r, CTUI_JSON_ARENA *a) {
                    "duplicate key wins; a fraction truncated");
   rc = read_line(r,
                  "{\"size\":99999999999999999999999,\"track\":-1e300,"
-                 "\"artist\":\"\\ud800x\"}",
+                 "\"artist\":\"\\ud800x\\u0000y\"}",
                  &s, a);
   CTUI_TEST_ASSERT(rc == 0 && s.size == LLONG_MAX && s.track == LLONG_MIN &&
-                       !strcmp(s.artist, "\xef\xbf\xbdx"),
-                   "numbers clamped, a lone surrogate replaced (%lld %lld)",
+                       !strcmp(s.artist, "\xef\xbf\xbdx\xef\xbf\xbdy"),
+                   "numbers clamped, a lone surrogate and NUL replaced (%lld "
+                   "%lld)",
                    s.size, s.track);
   CTUI_TEST_ASSERT(read_line(r, "{}", &s, a) == 0 && !s.path,
                    "an empty object");
@@ -94,7 +95,7 @@ static void test_refused(CTUI_JSON_REC *r, CTUI_JSON_ARENA *a) {
       "{\"a\":\"unterminated}",
       "{\"path\":\"a\tb\"}", /* a raw tab: JSON wants \\t */
       "{\"a\\\":1}",
-      "{\"skip\":\"\\x\"}",    /* a bad escape in a value stepped over */
+      "{\"skip\":\"\\x\"}",     /* a bad escape in a value stepped over */
       "{\"skip\":\"\\u12g4\"}", /* and a short \\u */
       "{\"a\":[1,2}",
       "{\"a\":1} x",

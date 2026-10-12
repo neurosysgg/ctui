@@ -11,7 +11,9 @@
  * put until it's reset. What a cache of thousands of records needs, where
  * json.h's DOM costs an allocation per value and several times the text
  * in memory. Strict JSON (no comments, no trailing commas: machines write
- * these files); a duplicate key's last value wins. */
+ * these files); a duplicate key's last value wins. A \u0000 or a lone
+ * surrogate becomes U+FFFD, as with json.c; numbers past a long long's or a
+ * double's range are clamped (json.c refuses them). */
 
 typedef enum {
   CTUI_JSON_REC_STR,    /* a const char * (into the arena) */

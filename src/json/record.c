@@ -251,8 +251,10 @@ static char *decode(const char *s, size_t n, int esc, CTUI_JSON_ARENA *a) {
           i += 6;
         }
       }
-      if (cp >= 0xD800 && cp <= 0xDFFF) {
-        cp = 0xFFFD; /* a lone surrogate */
+      /* a lone surrogate; NUL, where a C string would end silently (as
+       * json.c does) */
+      if ((cp >= 0xD800 && cp <= 0xDFFF) || cp == 0) {
+        cp = 0xFFFD;
       }
       /* \uXXXX is 6 bytes, its UTF-8 at most 4 (a pair: 12 for 4) */
       if (cp < 0x80) {
