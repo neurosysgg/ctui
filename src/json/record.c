@@ -148,28 +148,25 @@ static void ws(CUR *c) {
   }
 }
 
-/* past a string's closing quote (c->p after its opening one): 0, or -1;
- * *esc whether it has escapes */
+/* past a string's closing quote (c->p after its opening one): 0, or -1
+ * (unclosed, a raw control character in it); *esc whether it has
+ * escapes */
 static int str_end(CUR *c, int *esc) {
   *esc = 0;
-  for (;;) {
-    const char *q = memchr(c->p, '"', (size_t)(c->e - c->p));
-    if (!q) {
-      return -1;
-    }
-    /* escaped if an odd run of backslashes is right before it */
-    const char *b = q;
-    while (b > c->p && b[-1] == '\\') {
-      b--;
-    }
-    if (memchr(c->p, '\\', (size_t)(q - c->p))) {
-      *esc = 1;
-    }
-    c->p = q + 1;
-    if ((q - b) % 2 == 0) {
+  for (const char *p = c->p; p < c->e; p++) {
+    unsigned char ch = (unsigned char)*p;
+    if (ch == '"') {
+      c->p = p + 1;
       return 0;
     }
+    if (ch == '\\') {
+      *esc = 1;
+      p++;
+    } else if (ch < 0x20) {
+      return -1;
+    }
   }
+  return -1;
 }
 
 static int hex4(const char *p, unsigned *v) {

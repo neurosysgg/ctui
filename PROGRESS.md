@@ -250,9 +250,11 @@ terminal resize.
   `ctui_json_arena_reset()`. Integers are read exactly (json.c goes
   through a double: a time in nanoseconds is past 2^53), clamped;
   another kind or null leaves the field alone; strict JSON, a duplicate
-  key's last value wins, nesting capped at 512. On ctui-wm's 129k-line
-  search output (67 MB, 13 fields): 90 ms warm, 743 MB/s, where
-  json.c's DOM takes 276 ms freeing each line's tree. tests/
+  key's last value wins, nesting capped at 512, a raw control
+  character in a string refused (ctui-wm's fuzzer, comparing it with
+  json.c, found it taken). On ctui-wm's 129k-line search output (67 MB,
+  13 fields): 60 ms warm, 1.1 GB/s, where json.c's DOM takes 235 ms
+  freeing each line's tree. tests/
   json_record_test.c 16 (every cut of a line refused, the arena's
   pointers over 20k records, json.c's values on the same lines).
 

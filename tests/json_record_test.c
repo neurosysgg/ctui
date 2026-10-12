@@ -92,6 +92,8 @@ static void test_refused(CTUI_JSON_REC *r, CTUI_JSON_ARENA *a) {
       "{\"path\":\"x\\q\"}",
       "{\"path\":\"\\u12\"}",
       "{\"a\":\"unterminated}",
+      "{\"path\":\"a\tb\"}", /* a raw tab: JSON wants \\t */
+      "{\"a\\\":1}",
       "{\"a\":[1,2}",
       "{\"a\":1} x",
       "{\"a\":1}{}",
