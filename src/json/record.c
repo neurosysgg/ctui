@@ -148,9 +148,14 @@ static void ws(CUR *c) {
   }
 }
 
+static int is_hex(char h) {
+  return (h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') ||
+         (h >= 'A' && h <= 'F');
+}
+
 /* past a string's closing quote (c->p after its opening one): 0, or -1
- * (unclosed, a raw control character in it); *esc whether it has
- * escapes */
+ * (unclosed, a raw control character or a bad escape in it: a string
+ * stepped over is as strict as one read); *esc whether it has escapes */
 static int str_end(CUR *c, int *esc) {
   *esc = 0;
   for (const char *p = c->p; p < c->e; p++) {
@@ -161,7 +166,13 @@ static int str_end(CUR *c, int *esc) {
     }
     if (ch == '\\') {
       *esc = 1;
-      p++;
+      if (++p >= c->e || !strchr("\"\\/bfnrtu", *p) || !*p) {
+        return -1;
+      }
+      if (*p == 'u' && (c->e - p < 5 || !is_hex(p[1]) || !is_hex(p[2]) ||
+                        !is_hex(p[3]) || !is_hex(p[4]))) {
+        return -1;
+      }
     } else if (ch < 0x20) {
       return -1;
     }
