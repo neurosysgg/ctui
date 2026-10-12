@@ -16,10 +16,17 @@
  *
  * Keys: up/down, Tab / shift+Tab move the focus (headings and disabled
  * rows are skipped). A toggle flips on space / Enter; a choice steps on
- * left / right (Enter / space: the next); a slider moves a step on left /
+ * left / right, and Enter / space drop its list down -- every option, the
+ * one it has picked: up / down, Home / End, a letter (the next option
+ * starting with it) move in it, Enter / space take one, Esc closes it, Tab
+ * closes it and moves on (the list owns the keys while it's down: a
+ * caller handling Esc or Enter first checks ctui_form_list_open()); a
+ * slider moves a step on left /
  * right, home / end go to its ends; a button presses on Enter / space; an
  * entry edits (entry.h) and presses on Enter. Mouse: a click focuses a row
- * and works its control (a toggle flips, a choice's ‹ › step, a slider
+ * and works its control (a toggle flips, a choice drops its list -- a
+ * click on an option takes it, one beside the list closes it, the wheel
+ * scrolls it, the pointer lights the option under it --, a slider
  * jumps to the click and follows a drag, a button presses, an entry
  * places its cursor); the wheel moves the focus. The pointer's shape says
  * what a click would do (with CTUI_MOUSE_TRACK_ANY for hover): an I-beam
@@ -58,7 +65,16 @@ typedef struct {
    * slider (-1 = none) */
   int page, control_col, drag;
   int hover; /* 1 + the row under the pointer (0: none) */
+  /* a choice's list dropped down: 1 + its row (0: none), the option lit,
+   * the first one shown, and where it was drawn (widget cells) */
+  int list, list_pick, list_top;
+  int list_x, list_y, list_w, list_h;
 } CTUI_FORM;
+
+/* a choice's list is down: it takes the keys (Esc, Enter included) */
+static inline int ctui_form_list_open(const CTUI_FORM *f) { return f->list > 0; }
+/* the list closed, nothing picked */
+static inline void ctui_form_list_close(CTUI_FORM *f) { f->list = 0; }
 
 enum {
   CTUI_FORM_NONE = 0,

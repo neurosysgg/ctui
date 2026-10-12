@@ -147,6 +147,31 @@ int main(void) {
   CTUI_TEST_ASSERT(frows[5].value == 1 &&
                        ctui_test_row_contains(screen, 6, "‹ adaptive ›"),
                    "left steps a choice (wrapping)");
+  /* its list: no room under it in 7 rows, so above it */
+  ctui_test_key(&app, screen, CTUI_KEY_ENTER, 0);
+  CTUI_TEST_ASSERT(ctui_form_list_open(&f) &&
+                       ctui_test_row_contains(screen, 3, "flat") &&
+                       ctui_test_row_contains(screen, 4, "adaptive") &&
+                       ctui_test_row_contains(screen, 2, "╭"),
+                   "enter drops the list: every option, above the row");
+  ctui_test_key(&app, screen, CTUI_KEY_DOWN, 0);
+  CTUI_TEST_ASSERT(f.list_pick == 1 && f.focus == 5,
+                   "down in it: the last stays lit, the focus stays");
+  ctui_test_key(&app, screen, CTUI_KEY_UP, 0);
+  ctui_test_key(&app, screen, CTUI_KEY_ESC, 0);
+  CTUI_TEST_ASSERT(!ctui_form_list_open(&f) && frows[5].value == 1 &&
+                       !ctui_test_row_contains(screen, 3, "flat"),
+                   "esc closes it, nothing taken");
+  got[0] = '\0';
+  ctui_test_key(&app, screen, CTUI_KEY_CHAR, ' ');
+  ctui_test_key(&app, screen, CTUI_KEY_CHAR, 'F');
+  CTUI_TEST_ASSERT(f.list_pick == 0, "a letter: the option starting with it");
+  ctui_test_key(&app, screen, CTUI_KEY_ENTER, 0);
+  CTUI_TEST_ASSERT(!ctui_form_list_open(&f) && frows[5].value == 0 &&
+                       !strcmp(got, "changed") && got_row == 5,
+                   "enter takes it: changed");
+  ctui_test_key(&app, screen, CTUI_KEY_RIGHT, 0);
+  CTUI_TEST_ASSERT(frows[5].value == 1, "right still steps it");
   ctui_test_key(&app, screen, CTUI_KEY_DOWN, 0);
   ctui_test_key(&app, screen, CTUI_KEY_ENTER, 0);
   CTUI_TEST_ASSERT(!strcmp(got, "pressed") && got_row == 6,
@@ -161,7 +186,17 @@ int main(void) {
                        !strcmp(got, "changed"),
                    "a click on a toggle focuses and flips it");
   mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 6, 25);
-  CTUI_TEST_ASSERT(frows[5].value == 0, "a click on a choice steps it");
+  CTUI_TEST_ASSERT(ctui_form_list_open(&f) && frows[5].value == 1,
+                   "a click on a choice drops its list");
+  mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 9, 45);
+  CTUI_TEST_ASSERT(!ctui_form_list_open(&f) && frows[5].value == 1,
+                   "a click beside it closes it");
+  mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 6, 25);
+  mouse(&app, screen, CTUI_MOUSE_MOTION, 0, 3, 21);
+  CTUI_TEST_ASSERT(f.list_pick == 0, "the pointer lights the option under it");
+  mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 3, 21);
+  CTUI_TEST_ASSERT(frows[5].value == 0 && !ctui_form_list_open(&f),
+                   "a click on an option takes it");
   mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 3, 18);
   CTUI_TEST_ASSERT(frows[2].value == 0 && f.drag == 2,
                    "a click on a slider's start: its minimum, dragging");
@@ -280,8 +315,11 @@ int main(void) {
                        !ctui_test_row_contains(screen, 7, "[ Apply ]"),
                    "a button: 9 cells, focused, its label plain");
   mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 6, 18 + 10);
-  CTUI_TEST_ASSERT(frows[5].value == 1,
-                   "a click in a drawn choice's wider field steps it");
+  CTUI_TEST_ASSERT(ctui_form_list_open(&f),
+                   "a click in a drawn choice's wider field drops its list");
+  mouse(&app, screen, CTUI_MOUSE_PRESS, 0, 4, 21);
+  CTUI_TEST_ASSERT(frows[5].value == 1 && !ctui_form_list_open(&f),
+                   "... and one on an option takes it");
 
   /* the pointer says what a click would do: rows at 1 + i, controls from
    * column 18 */

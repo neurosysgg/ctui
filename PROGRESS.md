@@ -237,6 +237,23 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A form's choice drops a list** (2026-10-12, asked from ctui-wm's
+  ctui-files search form: "make the select boxes actual dropdowns; i'd
+  like to see all the options"). Enter / Space or a click on a choice
+  opens a list of every option under its field (above it when it doesn't
+  fit below, else the roomier side, scrolled, ▴ ▾ where more are): the
+  option it has in the heading's colour, the lit one a bar. Up / down,
+  PgUp / PgDn, Home / End and a letter (the next option starting with
+  it) move in it, Enter / Space take one (CHANGED), Esc closes it, Tab
+  closes it and moves on; the pointer lights the option under it, a
+  click takes it, the wheel scrolls it, a click beside it closes it.
+  Left / right still step the choice without it. The list owns the keys
+  and the mouse while down, so an app handling Esc / Enter before the
+  form checks `ctui_form_list_open()` (`ctui_form_list_close()` to drop
+  it). Drawn last, over the rows it covers, in the look's FRAME where
+  there is one (else ╭─╮). form_test: 9 new, the click-steps checks now
+  the list's.
+
 - [x] **`json/record.h`: objects into fixed records** (2026-10-12, for
   ctui-wm's ctui-files fields cache, notes/files-search.md f4 there; the
   "scalar first version" of its notes/json-cache-engine.md). The app

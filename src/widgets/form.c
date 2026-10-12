@@ -34,6 +34,7 @@ void ctui_form_focus(CTUI_FORM *f, int row) {
 
 /* the next row taking the focus by dir (wrapping), or the focus itself */
 static int step_focus(CTUI_FORM *f, int dir) {
+  f->list = 0;
   for (int k = 1; k <= f->count; k++) {
     int i = ((f->focus + dir * k) % f->count + f->count) % f->count;
     if (takes_focus(&f->rows[i])) {
@@ -66,10 +67,106 @@ static int choice_step(CTUI_FORM_ROW *r, int dir) {
   return CTUI_FORM_CHANGED;
 }
 
+/* the list's option i lit, kept in view (rows: how many it shows) */
+static void list_pick(CTUI_FORM *f, int i) {
+  const CTUI_FORM_ROW *r = &f->rows[f->list - 1];
+  i = i < 0 ? 0 : i >= r->option_count ? r->option_count - 1 : i;
+  f->list_pick = i;
+  int rows = f->list_h > 2 ? f->list_h - 2 : 1;
+  if (i < f->list_top) {
+    f->list_top = i;
+  } else if (i >= f->list_top + rows) {
+    f->list_top = i - rows + 1;
+  }
+  if (f->list_top > r->option_count - rows) { /* no blank rows at its end */
+    f->list_top = r->option_count - rows > 0 ? r->option_count - rows : 0;
+  }
+}
+
+/* the lit option taken: CHANGED when it's another */
+static int list_take(CTUI_FORM *f) {
+  CTUI_FORM_ROW *r = &f->rows[f->list - 1];
+  f->list = 0;
+  if (r->value == f->list_pick) {
+    return CTUI_FORM_MOVED;
+  }
+  r->value = f->list_pick;
+  return CTUI_FORM_CHANGED;
+}
+
+static char fold_ascii(uint32_t c) {
+  return c >= 'A' && c <= 'Z' ? (char)(c + 32) : (char)c;
+}
+
+/* a key while the list is down: it takes them all */
+static int list_key(CTUI_FORM *f, const CTUI_KEYPRESS_EVENT_DATA *kp) {
+  const CTUI_FORM_ROW *r = &f->rows[f->list - 1];
+  int page = f->list_h > 2 ? f->list_h - 2 : 1;
+  switch (kp->type) {
+  case CTUI_KEY_UP:
+    list_pick(f, f->list_pick - 1);
+    return CTUI_FORM_MOVED;
+  case CTUI_KEY_DOWN:
+    list_pick(f, f->list_pick + 1);
+    return CTUI_FORM_MOVED;
+  case CTUI_KEY_PGUP:
+    list_pick(f, f->list_pick - page);
+    return CTUI_FORM_MOVED;
+  case CTUI_KEY_PGDN:
+    list_pick(f, f->list_pick + page);
+    return CTUI_FORM_MOVED;
+  case CTUI_KEY_HOME:
+    list_pick(f, 0);
+    return CTUI_FORM_MOVED;
+  case CTUI_KEY_END:
+    list_pick(f, r->option_count - 1);
+    return CTUI_FORM_MOVED;
+  case CTUI_KEY_ESC:
+    f->list = 0;
+    return CTUI_FORM_MOVED;
+  case CTUI_KEY_TAB:
+  case CTUI_KEY_BACKTAB:
+    return step_focus(f, kp->type == CTUI_KEY_TAB ? 1 : -1);
+  case CTUI_KEY_ENTER:
+    return list_take(f);
+  case CTUI_KEY_CHAR:
+    if (kp->ch == ' ' && !kp->mods) {
+      return list_take(f);
+    }
+    /* a letter: the next option starting with it */
+    for (int k = 1; k <= r->option_count && kp->ch < 0x80; k++) {
+      int i = (f->list_pick + k) % r->option_count;
+      if (fold_ascii((unsigned char)r->options[i][0]) == fold_ascii(kp->ch)) {
+        list_pick(f, i);
+        return CTUI_FORM_MOVED;
+      }
+    }
+    return CTUI_FORM_NONE;
+  default:
+    return CTUI_FORM_NONE;
+  }
+}
+
+static int list_drop(CTUI_FORM *f) {
+  CTUI_FORM_ROW *r = &f->rows[f->focus];
+  if (r->option_count < 1) {
+    return CTUI_FORM_NONE;
+  }
+  f->list = f->focus + 1;
+  f->list_h = 0; /* until drawn: its size */
+  f->list_top = 0;
+  list_pick(f, r->value);
+  return CTUI_FORM_MOVED;
+}
+
 int ctui_form_key(CTUI_FORM *f, const CTUI_KEYPRESS_EVENT_DATA *kp) {
   if (f->count <= 0 || f->focus < 0 || f->focus >= f->count) {
     return CTUI_FORM_NONE;
   }
+  if (f->list > 0 && f->list <= f->count) {
+    return list_key(f, kp);
+  }
+  f->list = 0;
   switch (kp->type) {
   case CTUI_KEY_UP:
   case CTUI_KEY_BACKTAB:
@@ -109,8 +206,10 @@ int ctui_form_key(CTUI_FORM *f, const CTUI_KEYPRESS_EVENT_DATA *kp) {
     if (kp->type == CTUI_KEY_LEFT) {
       return choice_step(r, -1);
     }
-    return kp->type == CTUI_KEY_RIGHT || activate ? choice_step(r, 1)
-                                                  : CTUI_FORM_NONE;
+    if (kp->type == CTUI_KEY_RIGHT) {
+      return choice_step(r, 1);
+    }
+    return activate ? list_drop(f) : CTUI_FORM_NONE;
   case CTUI_FORM_SLIDER:
     switch (kp->type) {
     case CTUI_KEY_LEFT:
@@ -221,8 +320,56 @@ static int hover(CTUI_FORM *f, const CTUI_WIDGET *self,
   return changed;
 }
 
+/* the list's option under (row, col) of the screen, or -1 */
+static int list_at(const CTUI_FORM *f, const CTUI_WIDGET *self, int row,
+                   int col) {
+  int y = row - self->y - f->list_y - 1, x = col - self->x - f->list_x;
+  const CTUI_FORM_ROW *r = &f->rows[f->list - 1];
+  if (x < 1 || x >= f->list_w - 1 || y < 0 || y >= f->list_h - 2 ||
+      f->list_top + y >= r->option_count) {
+    return -1;
+  }
+  return f->list_top + y;
+}
+
+/* the mouse while the list is down: it owns it */
+static int list_mouse(CTUI_FORM *f, const CTUI_WIDGET *self,
+                      const CTUI_MOUSE_EVENT_DATA *m) {
+  int i = list_at(f, self, m->row, m->col);
+  const CTUI_FORM_ROW *r = &f->rows[f->list - 1];
+  if (m->action == CTUI_MOUSE_SCROLL_UP || m->action == CTUI_MOUSE_SCROLL_DOWN) {
+    int rows = f->list_h > 2 ? f->list_h - 2 : 1;
+    int top = f->list_top + (m->action == CTUI_MOUSE_SCROLL_UP ? -1 : 1);
+    top = top > r->option_count - rows ? r->option_count - rows : top;
+    f->list_top = top < 0 ? 0 : top;
+    return CTUI_FORM_MOVED;
+  }
+  if (m->action == CTUI_MOUSE_MOTION || m->action == CTUI_MOUSE_RELEASE) {
+    if (i >= 0) {
+      ctui_pointer_shape("pointer");
+    }
+    if (i >= 0 && i != f->list_pick) {
+      f->list_pick = i;
+      return CTUI_FORM_HOVER;
+    }
+    return CTUI_FORM_NONE;
+  }
+  if (m->action != CTUI_MOUSE_PRESS) {
+    return CTUI_FORM_NONE;
+  }
+  if (i < 0) { /* beside it: closed, nothing taken */
+    f->list = 0;
+    return CTUI_FORM_MOVED;
+  }
+  f->list_pick = i;
+  return list_take(f);
+}
+
 int ctui_form_mouse(CTUI_FORM *f, const CTUI_WIDGET *self,
                     const CTUI_MOUSE_EVENT_DATA *m) {
+  if (f->list > 0 && f->list <= f->count) {
+    return list_mouse(f, self, m);
+  }
   int col = m->col - self->x - f->control_col;
   int room = self->w - f->control_col;
   int hovered = hover(f, self, m, col, room);
@@ -273,15 +420,11 @@ int ctui_form_mouse(CTUI_FORM *f, const CTUI_WIDGET *self,
         what = CTUI_FORM_CHANGED;
       }
       break;
-    case CTUI_FORM_CHOICE: {
-      int w = choice_width(r);
-      if (col < 2) {
-        what = choice_step(r, -1);
-      } else if (col < w + 4) {
-        what = choice_step(r, 1);
+    case CTUI_FORM_CHOICE:
+      if (col < choice_width(r) + 4) {
+        what = list_drop(f);
       }
       break;
-    }
     case CTUI_FORM_SLIDER: {
       int bar = slider_width(f, room);
       if (bar >= 2 && col < bar) {
@@ -407,6 +550,93 @@ static void render_control(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y,
   }
 }
 
+/* box drawing round h rows of w cells from (y, x): where the look has no
+ * frame */
+static void glyph_frame(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int y, int x,
+                        int w, int h, const CTUI_CELL *pen) {
+  for (int r = 0; r < h; r++) {
+    for (int c = 0; c < w; c++) {
+      int top = r == 0, bottom = r == h - 1, left = c == 0, right = c == w - 1;
+      uint32_t ch = top && left       ? 0x256d /* ╭ */
+                    : top && right    ? 0x256e /* ╮ */
+                    : bottom && left  ? 0x2570 /* ╰ */
+                    : bottom && right ? 0x256f /* ╯ */
+                    : top || bottom   ? 0x2500 /* ─ */
+                    : left || right   ? 0x2502 /* │ */
+                                      : ' ';
+      ctui_widget_putc_cell(self, comp, y + r, x + c, ch, pen);
+    }
+  }
+}
+
+/* the list dropped from row y (widget rows): under it if it fits, else
+ * above, else on the roomier side and scrolled; over whatever is there */
+static void render_list(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, CTUI_FORM *f,
+                        int y, const CTUI_STYLE *st) {
+  const CTUI_FORM_ROW *r = &f->rows[f->list - 1];
+  int w = choice_width(r) + 4;
+  w = w < 8 ? 8 : w;
+  int x = f->control_col;
+  if (x + w > self->w) {
+    x = self->w - w > 0 ? self->w - w : 0;
+    w = w > self->w ? self->w : w;
+  }
+  int below = self->h - y - 1, above = y;
+  int h = r->option_count + 2;
+  int down = h <= below || below >= above;
+  int room = down ? below : above;
+  h = h > room ? room : h;
+  if (h < 3 || w < 5) {
+    f->list_h = 0;
+    return;
+  }
+  f->list_x = x;
+  f->list_y = down ? y + 1 : y - h;
+  f->list_w = w;
+  f->list_h = h;
+  list_pick(f, f->list_pick); /* in view at this size */
+  CTUI_CELL text =
+      ctui_style_cell(st, CTUI_STYLE_FG, CTUI_STYLE_BG, st->fg, st->bg);
+  CTUI_CELL dim =
+      ctui_style_cell(st, CTUI_STYLE_DIM, CTUI_STYLE_BG, st->dim_fg, st->bg);
+  CTUI_CELL sel = ctui_style_cell(st, CTUI_STYLE_SEL_FG, CTUI_STYLE_SEL_BG,
+                                  st->sel_fg, st->sel_bg);
+  CTUI_CELL cur = ctui_style_cell(st, CTUI_STYLE_TITLE, CTUI_STYLE_BG,
+                                  st->title_fg, st->bg);
+  CTUI_CONTROL frame = {.kind = CTUI_CONTROL_FRAME, .rows = h};
+  if (ctui_style_control(st, self, comp, f->list_y, x, w, &frame, st->bg)) {
+    for (int rr = 0; rr < h; rr++) {
+      for (int c = 0; c < w; c++) {
+        ctui_widget_putc_cell(self, comp, f->list_y + rr, x + c, ' ', &text);
+      }
+    }
+  } else {
+    glyph_frame(self, comp, f->list_y, x, w, h, &dim);
+  }
+  for (int k = 0; k < h - 2 && f->list_top + k < r->option_count; k++) {
+    int i = f->list_top + k;
+    /* the lit one a bar; the one it has now in the heading's colour */
+    const CTUI_CELL *pen = i == f->list_pick ? &sel
+                           : i == r->value   ? &cur
+                                             : &text;
+    for (int c = 1; c < w - 1; c++) {
+      ctui_widget_putc_cell(self, comp, f->list_y + 1 + k, x + c, ' ', pen);
+    }
+    ctui_widget_puts_cut_cell(self, comp, f->list_y + 1 + k, x + 2,
+                              r->options[i], w - 4, pen);
+  }
+  if (f->list_top > 0 || f->list_top + h - 2 < r->option_count) {
+    /* more than shows: a mark on the edge where they are */
+    if (f->list_top > 0) {
+      ctui_widget_putc_cell(self, comp, f->list_y, x + w - 2, 0x25b4, &dim);
+    }
+    if (f->list_top + h - 2 < r->option_count) {
+      ctui_widget_putc_cell(self, comp, f->list_y + h - 1, x + w - 2, 0x25be,
+                            &dim);
+    }
+  }
+}
+
 void ctui_form_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   CTUI_FORM *f = self->widget_data;
   const CTUI_STYLE *st = ctui_style_of(f->style);
@@ -462,6 +692,14 @@ void ctui_form_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     }
     render_control(self, comp, y, f->control_col, self->w - f->control_col,
                    bar, r, focused, f->hover == i + 1, st);
+  }
+  /* last: over the rows it drops onto */
+  int ly = f->list - 1 - f->scroll;
+  if (f->list > 0 && f->list <= f->count &&
+      f->rows[f->list - 1].kind == CTUI_FORM_CHOICE && ly >= 0 && ly < self->h) {
+    render_list(self, comp, f, ly, st);
+  } else {
+    f->list = 0; /* its row went out of view, or isn't a choice now */
   }
 }
 
