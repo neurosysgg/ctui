@@ -326,7 +326,15 @@ size_t ctui_utf8_cluster(const char *s, size_t n, uint32_t *ch, int *width) {
 
   while (s[bytes] && (end == NULL || s + bytes < end)) {
     uint32_t cp;
-    int len = ctui_utf8_decode(s + bytes, &cp);
+    int len;
+    if (end && end - (s + bytes) < 4) {
+      /* a character cut at n decodes as U+FFFD, never reading past n */
+      char tail[5] = {0};
+      memcpy(tail, s + bytes, (size_t)(end - (s + bytes)));
+      len = ctui_utf8_decode(tail, &cp);
+    } else {
+      len = ctui_utf8_decode(s + bytes, &cp);
+    }
     if (ncps > 0 && (cp < 0x20 || cp == 0x7F || (cp >= 0x80 && cp < 0xA0))) {
       /* a control character is always a cluster of its own (text layout
        * looks for \n and \t at cluster starts). Prepends before it (all

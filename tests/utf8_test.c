@@ -133,6 +133,16 @@ static void test_clusters(void) {
   CTUI_TEST_ASSERT(p == 2 && w == 2,
                    "prefix never splits a cluster (a flag straddling the "
                    "limit stays whole, outside)");
+
+  /* a character cut at n, the bytes after it continuations: not read */
+  const char cut[] = "a\xe4\xbd\xa0";
+  CTUI_TEST_ASSERT(ctui_utf8_cluster(cut + 1, 2, &a, &w) == 1 &&
+                       a == 0xFFFD,
+                   "a 3-byte character cut by n after 2 bytes: U+FFFD, 1 "
+                   "byte, nothing read past n");
+  CTUI_TEST_ASSERT(ctui_utf8_cluster(cut, 2, &a, &w) == 1 && a == 'a',
+                   "a cluster ending where a cut character starts stops "
+                   "before it");
 }
 
 static void test_widget_wide_glyphs(void) {

@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`ctui_utf8_cluster()` read past n** (2026-10-13, ctui-wm's fuzzer
+  on tools/harness/vt.c). A multi-byte character cut at n was decoded
+  from the bytes after n when they looked like its continuation bytes, so
+  the cluster came back longer than n (the VT parser's pending text, a
+  buffer reused without clearing, then moved a negative length). A
+  character cut at n now decodes from a copy padded with NULs: U+FFFD,
+  one byte, as a truncated one at a NUL always did. utf8_test: 2 new.
+
 - [x] **`tools/harness/`: the pty harness in C** (2026-10-13, step t0 of
   ctui-wm's notes/c-harness.md: its screens scripts move from zsh step
   strings and fixed sleeps to C cases). `vt.c`: a terminal's output into
