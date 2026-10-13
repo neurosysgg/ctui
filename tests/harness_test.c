@@ -71,6 +71,15 @@ static void test_swallowed(void) {
   ctui_vt_free(vt);
 }
 
+/* field by field: a CTUI_CELL has padding memcmp would compare too */
+static int cells_equal(const CTUI_CELL *a, const CTUI_CELL *b) {
+  return a->ch == b->ch && a->fg == b->fg && a->bg == b->bg &&
+         a->color_mode == b->color_mode && a->fg_r == b->fg_r &&
+         a->fg_g == b->fg_g && a->fg_b == b->fg_b && a->bg_r == b->bg_r &&
+         a->bg_g == b->bg_g && a->bg_b == b->bg_b &&
+         a->kitty_row == b->kitty_row && a->attr == b->attr;
+}
+
 /* fed one byte at a time and whole: the same cells */
 static void test_split(void) {
   const char *s = "\x1b[1;1H\x1b[0;1;38;2;10;20;30;48;2;1;2;3mA\xe4\xbd\xa0"
@@ -84,8 +93,7 @@ static void test_split(void) {
   int same = 1;
   for (int r = 0; r < 2; r++) {
     for (int c = 0; c < 12; c++) {
-      same &= memcmp(ctui_vt_cell(whole, r, c), ctui_vt_cell(bytes, r, c),
-                     sizeof(CTUI_CELL)) == 0;
+      same &= cells_equal(ctui_vt_cell(whole, r, c), ctui_vt_cell(bytes, r, c));
     }
   }
   CTUI_TEST_ASSERT(same, "a stream cut anywhere (in a sequence, a UTF-8 "
