@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The harness waits for an app to end** (2026-10-13, ctui-mus's
+  screens: ESC quits it). `ctui_pty_until_ended()` and the step
+  `CTUI_HS_ENDED` (appended to the ops): the app reaped within a timeout.
+  Waiting for its screen to go wasn't it -- the alternate screen is left
+  before the exit, and a close in between SIGTERMed it, so a clean exit
+  read as ours and its "-- exited 0 --" went missing under load.
+  harness_test: 3 new.
+
 - [x] **A flush with nothing changed wrote a lone `\e[0m`** (2026-10-13,
   ctui-mus's screens on the C harness never went quiet).
   `ctui_screen_flush()` ended every frame with the reset, cells changed or

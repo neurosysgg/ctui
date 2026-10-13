@@ -70,6 +70,10 @@ int ctui_pty_until_text(CTUI_PTY *p, const char *text, int timeout_ms);
 int ctui_pty_until_gone(CTUI_PTY *p, const char *text, int timeout_ms);
 /* no output for quiet_ms in a row */
 int ctui_pty_until_quiet(CTUI_PTY *p, int quiet_ms, int timeout_ms);
+/* the app ended (by itself: ESC quit it, ...), so ctui_pty_close() reports
+ * how without racing it with a SIGTERM. Its screen going isn't that: it
+ * leaves the alternate screen before it exits */
+int ctui_pty_until_ended(CTUI_PTY *p, int timeout_ms);
 /* reads for ms whatever happens: a fixed sleep, for what no condition
  * says (a timer that has to tick) */
 void ctui_pty_wait(CTUI_PTY *p, int ms);
@@ -95,6 +99,7 @@ enum {
                       * (1-based), as SGR mouse reports; released too
                       * unless a wheel (64, 65) */
   CTUI_HS_OP_DUMP,
+  CTUI_HS_OP_ENDED, /* the app ended, within a ms */
 };
 
 typedef struct {
@@ -117,6 +122,7 @@ typedef struct {
 #define CTUI_HS_WHEEL_UP(col, row) {CTUI_HS_OP_CLICK, "64", (col), (row)}
 #define CTUI_HS_WHEEL_DOWN(col, row) {CTUI_HS_OP_CLICK, "65", (col), (row)}
 #define CTUI_HS_DUMP {CTUI_HS_OP_DUMP, NULL, 0, 0}
+#define CTUI_HS_ENDED {CTUI_HS_OP_ENDED, NULL, 0, 0}
 #define CTUI_HS_END {CTUI_HS_OP_END, NULL, 0, 0}
 
 /* keys as a terminal sends them (kitty's legacy encoding), to put in

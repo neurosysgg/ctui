@@ -259,6 +259,24 @@ int ctui_pty_until_quiet(CTUI_PTY *p, int quiet_ms, int timeout_ms) {
   }
 }
 
+int ctui_pty_until_ended(CTUI_PTY *p, int timeout_ms) {
+  long end = now_ms() + timeout_ms;
+  for (;;) {
+    reap(p, 0);
+    if (p->reaped) {
+      return 0;
+    }
+    long left = end - now_ms();
+    if (left <= 0) {
+      return -1;
+    }
+    /* its side closed: no more output to wait on, only its exit */
+    if (ctui_pty_pump(p, (int)(left < 20 ? left : 20)) < 0) {
+      nanosleep(&(struct timespec){0, 5 * 1000000L}, NULL);
+    }
+  }
+}
+
 void ctui_pty_wait(CTUI_PTY *p, int ms) {
   long end = now_ms() + ms;
   for (long left = ms; left > 0 && !p->gone; left = end - now_ms()) {
@@ -352,6 +370,8 @@ static int failed(CTUI_PTY *p, FILE *out, FILE *styles,
                   const CTUI_HARNESS_STEP *s, int ms) {
   if (s->op == CTUI_HS_OP_QUIET) {
     fprintf(out, "!! quiet for %d ms: not within %d ms\n", s->a, ms);
+  } else if (s->op == CTUI_HS_OP_ENDED) {
+    fprintf(out, "!! ended: not within %d ms\n", ms);
   } else {
     fprintf(out, "!! %s \"%s\": not within %d ms\n",
             s->op == CTUI_HS_OP_UNTIL ? "until" : "gone", s->s, ms);
@@ -394,6 +414,11 @@ int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out,
     }
     case CTUI_HS_OP_WAIT:
       ctui_pty_wait(p, s->a);
+      break;
+    case CTUI_HS_OP_ENDED:
+      if (ctui_pty_until_ended(p, ms) != 0) {
+        return failed(p, out, styles, s, ms);
+      }
       break;
     case CTUI_HS_OP_RESIZE:
       ctui_pty_resize(p, s->a, s->b);

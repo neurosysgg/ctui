@@ -425,9 +425,25 @@ static void test_pty(void) {
   ctui_pty_until_text(p, "up", 3000);
   CTUI_TEST_ASSERT(ctui_pty_close(p, f) == 1,
                    "one that exits 4 on it ended otherwise");
+  /* the screen cleared, then a moment before the exit: close at once
+   * would SIGTERM it (and say nothing) */
+  p = sh("printf 'up'; read x; printf '\033[2J'; sleep 0.3; exit 0", 2, 10);
+  static const CTUI_HARNESS_STEP bye[] = {
+      CTUI_HS_UNTIL("up"), CTUI_HS_KEYS("\n"), CTUI_HS_GONE("up"),
+      CTUI_HS_ENDED, CTUI_HS_END};
+  CTUI_TEST_ASSERT(ctui_harness_steps(p, bye, f, NULL) == 0 && ctui_pty_gone(p),
+                   "ENDED waits past the screen's clearing for the exit");
+  CTUI_TEST_ASSERT(ctui_pty_close(p, f) == 1, "close: it ended by itself");
+  p = sh("echo up; sleep 10", 2, 10);
+  t0 = ms_now();
+  CTUI_TEST_ASSERT(ctui_pty_until_text(p, "up", 3000) == 0 &&
+                       ctui_pty_until_ended(p, 200) == -1 &&
+                       ms_now() - t0 < 1500,
+                   "until_ended gives up on one still running");
+  ctui_pty_close(p, NULL);
   fclose(f);
   CTUI_TEST_ASSERT(strcmp(buf, "-- exited 3 --\n-- killed by signal 11 --\n"
-                               "-- exited 4 --\n") == 0,
+                               "-- exited 4 --\n-- exited 0 --\n") == 0,
                    "how it ended goes to the output, a crash too");
 
   p = sh("printf 'ready'; read x; printf '\\033[2Jgot [%s]' \"$x\"; sleep 10",
