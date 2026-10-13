@@ -654,6 +654,83 @@ char *ctui_vt_text(CTUI_VT *vt) {
   return out;
 }
 
+static int color_name(char *out, int mode_rgb, int mode_256, unsigned char v,
+                      unsigned char r, unsigned char g, unsigned char b) {
+  if (mode_rgb) {
+    return sprintf(out, "#%02x%02x%02x", r, g, b);
+  }
+  if (mode_256) {
+    return sprintf(out, "@%d", v);
+  }
+  return sprintf(out, "%c", v <= CTUI_COLOR_WHITE ? "dkrgybmcw"[v] : '?');
+}
+
+/* a cell's STYLE (ctui_vt_styles()) into out (32 bytes) */
+static void style_of(const CTUI_CELL *cell, char *out) {
+  int blank = cell->ch == ' ';
+  int m = cell->color_mode;
+  int n = blank ? sprintf(out, "d")
+                : color_name(out,
+                             m == CTUI_COLOR_MODE_RGB ||
+                                 m == CTUI_COLOR_MODE_RGB_FG,
+                             m == CTUI_COLOR_MODE_256, cell->fg, cell->fg_r,
+                             cell->fg_g, cell->fg_b);
+  out[n++] = '/';
+  n += color_name(out + n, m == CTUI_COLOR_MODE_RGB, m == CTUI_COLOR_MODE_256,
+                  cell->bg, cell->bg_r, cell->bg_g, cell->bg_b);
+  unsigned char attr = cell->attr;
+  if (blank) {
+    attr &= CTUI_ATTR_UNDERLINE | CTUI_ATTR_STRIKE;
+  }
+  if (attr) {
+    out[n++] = '+';
+    for (int i = 0; i < 5; i++) {
+      if (attr & (1 << i)) {
+        out[n++] = "BDIUS"[i];
+      }
+    }
+  }
+  out[n] = '\0';
+}
+
+char *ctui_vt_styles(CTUI_VT *vt) {
+  if (vt->state == ST_GROUND) {
+    flush_text(vt, 0);
+  }
+  /* a row at worst: a change every cell, "COL #rrggbb/#rrggbb+BDIUS " */
+  size_t row_max = 16 + (size_t)vt->cols * 32;
+  char *out = malloc(row_max * (size_t)vt->rows + 1);
+  if (out == NULL) {
+    return NULL;
+  }
+  size_t len = 0;
+  for (int r = 0; r < vt->rows; r++) {
+    const CTUI_CELL *row = row_at(vt, r);
+    char last[32] = "d/d", cur[32];
+    size_t start = len;
+    len += (size_t)sprintf(out + len, "%d:", r);
+    int any = 0;
+    for (int c = 0; c < vt->cols; c++) {
+      if (row[c].ch == CTUI_CELL_CONT) {
+        continue;
+      }
+      style_of(&row[c], cur);
+      if (strcmp(cur, last) != 0) {
+        len += (size_t)sprintf(out + len, " %d %s", c, cur);
+        memcpy(last, cur, sizeof last);
+        any = 1;
+      }
+    }
+    if (any) {
+      out[len++] = '\n';
+    } else {
+      len = start;
+    }
+  }
+  out[len] = '\0';
+  return out;
+}
+
 int ctui_vt_find(CTUI_VT *vt, const char *needle) {
   if (vt->state == ST_GROUND) {
     flush_text(vt, 0);

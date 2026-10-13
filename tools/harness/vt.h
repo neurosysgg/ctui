@@ -44,6 +44,15 @@ const CTUI_CELL *ctui_vt_cell(CTUI_VT *vt, int row, int col);
  * prints it). Malloc'd, the caller frees; NULL out of memory. */
 char *ctui_vt_text(CTUI_VT *vt);
 
+/* the grid's colours and attributes beside ctui_vt_text(): a line per
+ * row that isn't all plain, "ROW: COL STYLE COL STYLE ..." with a column
+ * wherever the style changes (from plain at 0). STYLE is FG/BG then
+ * "+BDIUS" for bold, dim, italic, underline, strike: a colour is d
+ * (default), k r g y b m c w (basic), @N (256) or #rrggbb. A blank cell's
+ * fg and its B/D/I can't be seen and are left out. Malloc'd ("" when all
+ * is plain), the caller frees; NULL out of memory. */
+char *ctui_vt_styles(CTUI_VT *vt);
+
 /* the first row whose text holds needle, -1 if none */
 int ctui_vt_find(CTUI_VT *vt, const char *needle);
 

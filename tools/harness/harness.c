@@ -266,15 +266,25 @@ void ctui_pty_wait(CTUI_PTY *p, int ms) {
   }
 }
 
-void ctui_pty_dump(CTUI_PTY *p, FILE *out) {
+static void rule(int cols, FILE *out) {
+  for (int i = 0; i < cols; i++) {
+    fputc('-', out);
+  }
+  fputc('\n', out);
+}
+
+void ctui_pty_dump(CTUI_PTY *p, FILE *out, FILE *styles) {
   ctui_pty_pump(p, 0);
   char *text = ctui_vt_text(p->vt);
   fprintf(out, "%s\n", text ? text : "(out of memory)");
   free(text);
-  for (int i = 0; i < ctui_vt_cols(p->vt); i++) {
-    fputc('-', out);
+  rule(ctui_vt_cols(p->vt), out);
+  if (styles) {
+    char *st = ctui_vt_styles(p->vt);
+    fputs(st ? st : "(out of memory)\n", styles);
+    free(st);
+    rule(ctui_vt_cols(p->vt), styles);
   }
-  fputc('\n', out);
 }
 
 CTUI_VT *ctui_pty_vt(CTUI_PTY *p) { return p->vt; }
@@ -338,18 +348,20 @@ static void click(CTUI_PTY *p, const CTUI_HARNESS_STEP *s) {
   ctui_pty_send(p, buf, (size_t)n);
 }
 
-static int failed(CTUI_PTY *p, FILE *out, const CTUI_HARNESS_STEP *s, int ms) {
+static int failed(CTUI_PTY *p, FILE *out, FILE *styles,
+                  const CTUI_HARNESS_STEP *s, int ms) {
   if (s->op == CTUI_HS_OP_QUIET) {
     fprintf(out, "!! quiet for %d ms: not within %d ms\n", s->a, ms);
   } else {
     fprintf(out, "!! %s \"%s\": not within %d ms\n",
             s->op == CTUI_HS_OP_UNTIL ? "until" : "gone", s->s, ms);
   }
-  ctui_pty_dump(p, out);
+  ctui_pty_dump(p, out, styles);
   return -1;
 }
 
-int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out) {
+int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out,
+                       FILE *styles) {
   for (const CTUI_HARNESS_STEP *s = steps; s->op != CTUI_HS_OP_END; s++) {
     int ms = s->a > 0 ? s->a : CTUI_HARNESS_TIMEOUT_MS;
     switch (s->op) {
@@ -362,12 +374,12 @@ int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out) {
       break;
     case CTUI_HS_OP_UNTIL:
       if (ctui_pty_until_text(p, s->s, ms) != 0) {
-        return failed(p, out, s, ms);
+        return failed(p, out, styles, s, ms);
       }
       break;
     case CTUI_HS_OP_GONE:
       if (ctui_pty_until_gone(p, s->s, ms) != 0) {
-        return failed(p, out, s, ms);
+        return failed(p, out, styles, s, ms);
       }
       break;
     case CTUI_HS_OP_QUIET: {
@@ -376,7 +388,7 @@ int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out) {
       if (ctui_pty_until_quiet(p, quiet, limit) != 0) {
         CTUI_HARNESS_STEP shown = *s;
         shown.a = quiet;
-        return failed(p, out, &shown, limit);
+        return failed(p, out, styles, &shown, limit);
       }
       break;
     }
@@ -390,7 +402,7 @@ int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out) {
       click(p, s);
       break;
     case CTUI_HS_OP_DUMP:
-      ctui_pty_dump(p, out);
+      ctui_pty_dump(p, out, styles);
       break;
     default:
       break;

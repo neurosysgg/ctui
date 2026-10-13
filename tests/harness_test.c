@@ -140,6 +140,31 @@ static void test_cells(void) {
   ctui_vt_free(vt);
 }
 
+static void test_styles(void) {
+  CTUI_VT *vt = fed(2, 8,
+                    "\x1b[1;37;44mab\x1b[0m c\x1b[4m \x1b[38;2;1;2;3md"
+                    "\x1b[0m\x1b[2;1H\x1b[1;31m \x1b[0m\x1b[38;5;9;48;5;0m"
+                    "x\x1b[0m");
+  char *st = ctui_vt_styles(vt);
+  CTUI_TEST_ASSERT(st && strcmp(st, "0: 0 w/b+B 2 d/d 4 d/d+U 5 #010203/d+U 6 "
+                                    "d/d\n1: 1 @9/@0 2 d/d\n") == 0,
+                   "styles: a column where it changes; a blank's fg and bold "
+                   "unseen, its underline kept; a plain row left out");
+  if (st &&
+      strcmp(
+          st,
+          "0: 0 w/b+B 2 d/d 4 d/d+U 5 #010203/d+U 6 d/d\n1: 1 @9/@0 2 d/d\n")) {
+    printf("    styles: [%s]\n", st);
+  }
+  free(st);
+  ctui_vt_free(vt);
+  vt = ctui_vt_new(2, 3);
+  st = ctui_vt_styles(vt);
+  CTUI_TEST_ASSERT(st && *st == '\0', "all plain: nothing");
+  free(st);
+  ctui_vt_free(vt);
+}
+
 static void test_shm_probe(void) {
   const char *probe = "\x1b_Ga=q,i=31,s=1,v=1,f=32,t=s,q=0;L2N0dWk=\x1b\\";
   CTUI_VT *vt = ctui_vt_new(1, 10);
@@ -408,7 +433,7 @@ static void test_pty(void) {
                                          CTUI_HS_END};
   char dump[512] = "";
   f = fmemopen(dump, sizeof dump, "w");
-  int r = ctui_harness_steps(p, ok, f);
+  int r = ctui_harness_steps(p, ok, f, NULL);
   fclose(f);
   CTUI_TEST_ASSERT(r == -1, "a failed wait fails the run");
   CTUI_TEST_ASSERT(strcmp(dump, "\ngot [ab]\n--------------------\n"
@@ -425,6 +450,7 @@ int main(void) {
   test_swallowed();
   test_split();
   test_cells();
+  test_styles();
   test_shm_probe();
   test_roundtrip();
   test_captures();

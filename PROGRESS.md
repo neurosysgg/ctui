@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **tools/harness: the styles beside a dump** (2026-10-13, step t2 of
+  ctui-wm's notes/c-harness.md: a colour or bold regression shows in its
+  screens' diffs, which compared text only). `ctui_vt_styles()`: a line
+  per row that isn't all plain, `ROW: COL STYLE ...` with a column
+  wherever the style changes, STYLE as `FG/BG+BDIUS` (`d`, `kgrybmcw`,
+  `@N`, `#rrggbb`); a blank cell's fg and bold / dim / italic aren't
+  shown (they can't be seen), its underline and strike are.
+  `ctui_pty_dump()` and `ctui_harness_steps()` take a second FILE for
+  them (NULL: none). harness_test: 2 new.
+
 - [x] **`ctui_utf8_cluster()` read past n** (2026-10-13, ctui-wm's fuzzer
   on tools/harness/vt.c). A multi-byte character cut at n was decoded
   from the bytes after n when they looked like its continuation bytes, so

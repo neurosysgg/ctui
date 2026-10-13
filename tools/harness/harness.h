@@ -13,7 +13,7 @@
  *       CTUI_HS_DUMP, CTUI_HS_END};
  *   CTUI_PTY *p = ctui_pty_spawn(&(CTUI_PTY_SPAWN){.argv = argv,
  *                                .rows = 32, .cols = 110});
- *   int bad = ctui_harness_steps(p, log_case, stdout);
+ *   int bad = ctui_harness_steps(p, log_case, stdout, NULL);
  *   ctui_pty_close(p, stdout);
  *
  * POSIX only (posix_openpt, no -lutil): glibc and musl alike. Not part of
@@ -75,8 +75,9 @@ int ctui_pty_until_quiet(CTUI_PTY *p, int quiet_ms, int timeout_ms);
 void ctui_pty_wait(CTUI_PTY *p, int ms);
 
 /* the grid's text, then a line of '-' as wide as the grid (the dump
- * pty_harness.py prints) */
-void ctui_pty_dump(CTUI_PTY *p, FILE *out);
+ * pty_harness.py prints); its styles (ctui_vt_styles()) and the same line
+ * to styles unless NULL */
+void ctui_pty_dump(CTUI_PTY *p, FILE *out, FILE *styles);
 
 /* what a wait gives a condition when the step leaves it 0 */
 #define CTUI_HARNESS_TIMEOUT_MS 5000
@@ -136,12 +137,14 @@ typedef struct {
 #define CTUI_HK_BTAB "\x1b[Z"
 #define CTUI_HK_BACKSPACE "\x7f"
 
-/* runs steps against p, dumps to out. A wait that fails prints why
+/* runs steps against p, dumps to out (and their styles to styles unless
+ * NULL: ctui_pty_dump()). A wait that fails prints why
  * ("!! until "X": not within N ms") and the screen, and ends the run:
  * what follows depended on it. Returns 0, or -1 after a failed wait. A
  * KEYS step that ends in a lone ESC is followed by 80 ms of reading, so
  * the app takes it as the Esc key, not the start of the next key's
  * sequence (ctui waits 50 ms). */
-int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out);
+int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out,
+                       FILE *styles);
 
 #endif

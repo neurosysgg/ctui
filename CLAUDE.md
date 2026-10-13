@@ -262,7 +262,8 @@ Cases are data, a `CTUI_HARNESS_STEP` array run by
 `ctui_harness_steps()` (`CTUI_HS_UNTIL("Branches")`,
 `CTUI_HS_KEYS(CTUI_HK_DOWN)`, `CTUI_HS_QUIET`, `CTUI_HS_DUMP`, ...;
 harness.h's top comment has an example); a dump prints what
-`pty_harness.py`'s does. Not linked into any app: `tests/harness_test.c`
+`pty_harness.py`'s does, and beside it (`ctui_vt_styles()`) a line per
+row that isn't plain: where its colours and attributes change. Not linked into any app: `tests/harness_test.c`
 and ctui-wm's screens runner link it. `tools/harness/capture.py` remakes
 `tests/data/harness/` (examples' output and pty_harness.py's grid of it,
 which the C parser has to match).
