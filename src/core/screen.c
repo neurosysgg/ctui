@@ -320,6 +320,12 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
     }
   }
 
+  /* nothing changed: nothing written (an app redrawing every frame, a
+   * visualiser at rest, would otherwise wake the terminal with a lone
+   * reset each time; the last frame's reset still holds) */
+  if (len == 0) {
+    return;
+  }
   len += (size_t)snprintf(out + len, cap - len, "\x1b[0m");
 
   write(STDOUT_FILENO, out, len);

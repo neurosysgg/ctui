@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A flush with nothing changed wrote a lone `\e[0m`** (2026-10-13,
+  ctui-mus's screens on the C harness never went quiet).
+  `ctui_screen_flush()` ended every frame with the reset, cells changed or
+  not, so an app that renders every frame (ctui-mus: its visualisers at
+  rest, ~60 a second) woke the terminal and the pty reader for 4 bytes
+  each time. No changed cell now writes nothing; the last frame's reset
+  still holds. screen_test's no-change case asserts 0 bytes.
+
 - [x] **tools/harness: the styles beside a dump** (2026-10-13, step t2 of
   ctui-wm's notes/c-harness.md: a colour or bold regression shows in its
   screens' diffs, which compared text only). `ctui_vt_styles()`: a line

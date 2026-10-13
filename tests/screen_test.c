@@ -95,10 +95,10 @@ static void test_flush_diff_and_color_cache(void) {
       "the non-contiguous, differently-colored C, ending with a reset");
 
   n = capture_flush(s, out, sizeof out);
-  CTUI_TEST_ASSERT(n == strlen("\x1b[0m") && strcmp(out, "\x1b[0m") == 0,
+  CTUI_TEST_ASSERT(n == 0,
                    "a flush with nothing changed since the last one writes "
-                   "only the trailing reset -- every cell matched the "
-                   "shadow buffer and was skipped");
+                   "nothing, not even the trailing reset -- every cell "
+                   "matched the shadow buffer and was skipped");
 
   ctui_screen_free(s);
 }
@@ -123,9 +123,8 @@ static void test_flush_256_and_rgb(void) {
       "CTUI_COLOR_MODE_256 cell");
 
   n = capture_flush(s, out, sizeof out);
-  CTUI_TEST_ASSERT(n == strlen("\x1b[0m"),
-                   "an unchanged 256-color cell is skipped on the next "
-                   "flush, same as a BASIC one");
+  CTUI_TEST_ASSERT(n == 0, "an unchanged 256-color cell is skipped on the next "
+                           "flush, same as a BASIC one");
 
   s->cells[0] = (CTUI_CELL){.ch = 'R',
                             .color_mode = CTUI_COLOR_MODE_RGB,
@@ -144,7 +143,7 @@ static void test_flush_256_and_rgb(void) {
       "256-color cell it replaced");
 
   n = capture_flush(s, out, sizeof out);
-  CTUI_TEST_ASSERT(n == strlen("\x1b[0m"),
+  CTUI_TEST_ASSERT(n == 0,
                    "an unchanged RGB cell (all six channels matching the "
                    "shadow buffer) is skipped on the next flush");
 
@@ -166,7 +165,7 @@ static void test_flush_256_and_rgb(void) {
                    "flush emits a truecolor fg with a basic bg code for a "
                    "CTUI_COLOR_MODE_RGB_FG cell");
   n = capture_flush(s, out, sizeof out);
-  CTUI_TEST_ASSERT(n == strlen("\x1b[0m"),
+  CTUI_TEST_ASSERT(n == 0,
                    "an unchanged RGB_FG cell is skipped on the next flush");
   s->cells[0].bg = CTUI_COLOR_DEFAULT;
   capture_flush(s, out, sizeof out);
