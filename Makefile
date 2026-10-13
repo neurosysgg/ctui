@@ -50,6 +50,11 @@ all: ctui-demo examples
 test-%: $(CORE_SRC) $(CORE_HDR) tests/%.c tools/ctui_test.h
 	$(CC) $(CFLAGS) -Itools -o $@ $(CORE_SRC) tests/$*.c $(LDLIBS)
 
+# tools/harness/: the pty harness for the apps' screens (not in any app)
+HARNESS_SRC = $(wildcard tools/harness/*.c)
+test-harness_test: $(CORE_SRC) $(CORE_HDR) $(HARNESS_SRC) $(wildcard tools/harness/*.h) tests/harness_test.c tools/ctui_test.h
+	$(CC) $(CFLAGS) -Itools -Itools/harness -o $@ $(CORE_SRC) $(HARNESS_SRC) tests/harness_test.c $(LDLIBS)
+
 # src/query/ is libc only (ctui-mus's headless core links it): it must
 # compile with nothing of ctui's on the include path
 query-alone:

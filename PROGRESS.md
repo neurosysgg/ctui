@@ -237,6 +237,37 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`tools/harness/`: the pty harness in C** (2026-10-13, step t0 of
+  ctui-wm's notes/c-harness.md: its screens scripts move from zsh step
+  strings and fixed sleeps to C cases). `vt.c`: a terminal's output into
+  a grid of `CTUI_CELL`s -- CUP/HVP, CUU/CUD/CUF/CUB, CHA, VPA, ED, EL,
+  CR LF BS TAB, the deferred wrap, scrolling at the bottom, SGR into
+  colours (the four shapes ctui's renderer sends map back to the cell
+  they came from) and attributes, the alternate screen; text placed
+  cluster by cluster with `ctui_utf8_cluster()` (kitty's widths, where
+  pty_harness.py has Python's `unicodedata` and drops combining marks);
+  strings (OSC, APC, DCS, ...) and every other sequence swallowed; a
+  stream cut anywhere reads as the whole. Answers ctui's kitty shm probe
+  when asked. `harness.c`: an app under a pty (`posix_openpt`, so glibc
+  and musl alike, no `-lutil`) with its argv, cwd, environment set and
+  unset; keys, SGR clicks and the wheel, resizes; the waits
+  (`until_text`, `until_gone`, `until_quiet`, a plain `wait`), a dump in
+  pty_harness.py's format; close says how the app ended unless it was
+  our SIGTERM ("-- killed by signal 11 --"), so a crash shows in a diff.
+  Steps as data (`CTUI_HARNESS_STEP`, `CTUI_HS_*` macros, `CTUI_HK_*`
+  keys); a failed wait prints why and the screen, and ends the case. A
+  lone Esc is followed by 80 ms, so the app doesn't read it as the start
+  of the next key. tests/harness_test.c (36): the parser on streams, fed
+  whole and a byte at a time, six frames of `ctui_screen_flush()` read
+  back cell for cell (wide glyphs, clusters, every colour mode and
+  attribute), three examples' captured output against pty_harness.py's
+  grid (`tools/harness/capture.py`), the pty side on /bin/sh (env, cwd,
+  size, resize, timeouts, exits and a crash, a step run). Also checked by
+  hand: six of ctui-wm's apps' output (files, settings, top, git, web,
+  vms) gives the same grid in both parsers (git's once the alternate
+  screen it leaves on SIGTERM is cut: a terminal shows the empty main
+  screen there, pty_harness.py ignores it).
+
 - [x] **A form's choice drops a list** (2026-10-12, asked from ctui-wm's
   ctui-files search form: "make the select boxes actual dropdowns; i'd
   like to see all the options"). Enter / Space or a click on a choice

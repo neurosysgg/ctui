@@ -1,0 +1,31 @@
+30 100
+Widgets         │CTUI_TEXTVIEW
+ Form           │=============
+ Table          │
+ Text           │A read-only text pane: the app's text, indexed by line once, shown either wrapped
+                │at the width (a long line takes several rows, broken between words) or unwrapped
+                │with a sideways scroll (left/right, 8 columns).
+                │
+                │        Tabs    go      to      the     next    multiple        of      8.
+                │Control bytes show as ?: ???, a CR before a line end goes.
+                │Wide glyphs count two columns: 日本語のテキスト, and emoji too.
+                │
+                │Press w to toggle wrapping.
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+                │
+up/down: page · enter: in · esc: out · q: quit

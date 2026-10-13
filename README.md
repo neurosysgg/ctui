@@ -230,7 +230,9 @@ else.
 - `tools/` — testing infrastructure: `ctui_test.h` (the headless C test
   driver `tests/` builds on), `pty_harness.py` (drives a binary under a
   real pty for terminal-I/O-layer testing — raw input decoding, actual
-  `SIGWINCH`, real ANSI output), and `coverage.sh` (`make coverage`'s
+  `SIGWINCH`, real ANSI output), `harness/` (the same in C: a VT parser
+  into `CTUI_CELL`s, a pty runner with waits on the screen, cases as
+  step arrays), and `coverage.sh` (`make coverage`'s
   `gcov`-based per-file line coverage report over `src/core/`).
 - `docs/` — per-topic docs, written up once a topic's substantial enough
   to outgrow a `PROGRESS.md` entry. `core-api.md` (a subsystem-by-

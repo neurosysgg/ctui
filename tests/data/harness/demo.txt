@@ -1,0 +1,31 @@
+30 100
++                                                                                                  +
+
+                                            ctui - demo
+
+
++                                                                                                  +
++                                                                                                  +
+
+                          Pick a tool (Enter to select, Esc to quit)
+
+                            debug info
+                          > dump palette
+                            kitty image
+                            whatever
+                            1337
+                          [kitty required]
+
+
+
+
+
+
+
++                                                                                                  +
++                                                                                                  +
+
+  Status:
+  you picked: kitty image
+
++                                                                                                  +

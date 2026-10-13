@@ -250,6 +250,23 @@ grid instead of raw ANSI:
   (`./ctui-clock`, `./ctui-file_browser`, ...) — just swap the binary
   path. Run `tools/pty_harness.py --help` for the full step vocabulary.
 
+### `tools/harness/` — the same from C
+
+`vt.c` replays a terminal's output into a grid of `CTUI_CELL`s (cursor
+moves, erases, SGR into the cells' colours and attributes, text cluster
+by cluster at ctui's own widths; chunks cut anywhere); `harness.c` runs
+an app under a pty (`posix_openpt`, no `-lutil`) with its environment,
+sends keys / clicks / resizes, and **waits on the screen** instead of
+sleeping: `ctui_pty_until_text()`, `_until_gone()`, `_until_quiet()`.
+Cases are data, a `CTUI_HARNESS_STEP` array run by
+`ctui_harness_steps()` (`CTUI_HS_UNTIL("Branches")`,
+`CTUI_HS_KEYS(CTUI_HK_DOWN)`, `CTUI_HS_QUIET`, `CTUI_HS_DUMP`, ...;
+harness.h's top comment has an example); a dump prints what
+`pty_harness.py`'s does. Not linked into any app: `tests/harness_test.c`
+and ctui-wm's screens runner link it. `tools/harness/capture.py` remakes
+`tests/data/harness/` (examples' output and pty_harness.py's grid of it,
+which the C parser has to match).
+
 ### Both harnesses
 
 - **Cross-check against the log**: `ctui.log` (gitignored) records
