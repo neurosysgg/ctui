@@ -253,11 +253,12 @@ terminal resize.
   unset; keys, SGR clicks and the wheel, resizes; the waits
   (`until_text`, `until_gone`, `until_quiet`, a plain `wait`), a dump in
   pty_harness.py's format; close says how the app ended unless it was
-  our SIGTERM ("-- killed by signal 11 --"), so a crash shows in a diff.
+  our SIGTERM (killed by it, or a clean exit 0 after catching it): "--
+  killed by signal 11 --", so a crash shows in a diff.
   Steps as data (`CTUI_HARNESS_STEP`, `CTUI_HS_*` macros, `CTUI_HK_*`
   keys); a failed wait prints why and the screen, and ends the case. A
   lone Esc is followed by 80 ms, so the app doesn't read it as the start
-  of the next key. tests/harness_test.c (36): the parser on streams, fed
+  of the next key. tests/harness_test.c (38): the parser on streams, fed
   whole and a byte at a time, six frames of `ctui_screen_flush()` read
   back cell for cell (wide glyphs, clusters, every colour mode and
   attribute), three examples' captured output against pty_harness.py's

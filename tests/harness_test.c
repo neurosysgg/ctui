@@ -384,9 +384,17 @@ static void test_pty(void) {
   p = sh("kill -SEGV $$", 2, 10);
   ctui_pty_wait(p, 300);
   ctui_pty_close(p, f);
+  p = sh("trap 'exit 0' TERM; echo up; while :; do sleep 0.05; done", 2, 10);
+  ctui_pty_until_text(p, "up", 3000);
+  CTUI_TEST_ASSERT(ctui_pty_close(p, f) == 0,
+                   "an app that catches SIGTERM and exits 0 ended by ours");
+  p = sh("trap 'exit 4' TERM; echo up; while :; do sleep 0.05; done", 2, 10);
+  ctui_pty_until_text(p, "up", 3000);
+  CTUI_TEST_ASSERT(ctui_pty_close(p, f) == 1,
+                   "one that exits 4 on it ended otherwise");
   fclose(f);
-  CTUI_TEST_ASSERT(strcmp(buf, "-- exited 3 --\n-- killed by signal 11 --\n") ==
-                       0,
+  CTUI_TEST_ASSERT(strcmp(buf, "-- exited 3 --\n-- killed by signal 11 --\n"
+                               "-- exited 4 --\n") == 0,
                    "how it ended goes to the output, a crash too");
 
   p = sh("printf 'ready'; read x; printf '\\033[2Jgot [%s]' \"$x\"; sleep 10",

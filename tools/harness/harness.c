@@ -304,7 +304,11 @@ int ctui_pty_close(CTUI_PTY *p, FILE *out) {
       reap(p, 1);
       ret = -1;
     } else {
-      ret = WIFSIGNALED(p->status) && WTERMSIG(p->status) == SIGTERM ? 0 : 1;
+      /* ended by our SIGTERM, or caught it and exited cleanly */
+      ret = (WIFSIGNALED(p->status) && WTERMSIG(p->status) == SIGTERM) ||
+                    (WIFEXITED(p->status) && WEXITSTATUS(p->status) == 0)
+                ? 0
+                : 1;
     }
   }
   if (out && ret == 1) {

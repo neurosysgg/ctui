@@ -41,10 +41,11 @@ typedef struct {
 CTUI_PTY *ctui_pty_spawn(const CTUI_PTY_SPAWN *how);
 
 /* stops the app if it still runs (SIGTERM, SIGKILL 2 s later) and frees
- * it all; how it ended goes to out (NULL: nowhere) unless that was our
- * SIGTERM: "-- exited N --" or "-- killed by signal N --", so a crash
- * shows in a dump's diff. Returns 0 when our SIGTERM ended it, 1 when it
- * had ended by itself, -1 when it would not end. */
+ * it all. How it ended goes to out (NULL: nowhere) unless that was our
+ * SIGTERM (killed by it, or exit 0 after it): "-- exited N --" or
+ * "-- killed by signal N --", so a crash shows in a dump's diff. Returns
+ * 0 for our SIGTERM, 1 when it ended otherwise, -1 when it would not end
+ * (SIGKILL). */
 int ctui_pty_close(CTUI_PTY *p, FILE *out);
 
 CTUI_VT *ctui_pty_vt(CTUI_PTY *p);
