@@ -5,23 +5,27 @@
 
 #include "../core/deflate.h"
 
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-static uint32_t crc32_of(uint32_t crc, const unsigned char *p, size_t n) {
-  static uint32_t table[256];
-  if (!table[1]) {
-    for (uint32_t i = 0; i < 256; i++) {
-      uint32_t c = i;
-      for (int k = 0; k < 8; k++) {
-        c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
-      }
-      table[i] = c;
+/* CRC-32's table, made for each file (2K steps: nothing next to its
+ * pixels), so threads writing at once share nothing */
+static void crc_table(uint32_t table[256]) {
+  for (uint32_t i = 0; i < 256; i++) {
+    uint32_t c = i;
+    for (int k = 0; k < 8; k++) {
+      c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
     }
+    table[i] = c;
   }
+}
+
+static uint32_t crc32_of(const uint32_t table[256], uint32_t crc,
+                         const unsigned char *p, size_t n) {
   crc = ~crc;
   for (size_t i = 0; i < n; i++) {
     crc = table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
@@ -36,12 +40,12 @@ static void be32(unsigned char *p, uint32_t v) {
   p[3] = (unsigned char)v;
 }
 
-static int chunk(FILE *f, const char *type, const unsigned char *data,
-                 size_t len) {
+static int chunk(FILE *f, const uint32_t table[256], const char *type,
+                 const unsigned char *data, size_t len) {
   unsigned char head[8], tail[4];
   be32(head, (uint32_t)len);
   memcpy(head + 4, type, 4);
-  uint32_t crc = crc32_of(crc32_of(0, head + 4, 4), data, len);
+  uint32_t crc = crc32_of(table, crc32_of(table, 0, head + 4, 4), data, len);
   be32(tail, crc);
   return fwrite(head, 1, 8, f) == 8 && fwrite(data, 1, len, f) == len &&
                  fwrite(tail, 1, 4, f) == 4
@@ -117,18 +121,23 @@ int ctui_look_png_write(const char *path, const unsigned char *rgba, int w,
   if (!z) {
     return -1;
   }
-  /* written next to it and renamed in, so a zone never reads half a file */
-  char tmp[4096 + 32];
-  snprintf(tmp, sizeof tmp, "%s.%ld.tmp", path, (long)getpid());
+  /* written next to it and renamed in, so a zone never reads half a file;
+   * the temporary name its own per call (threads writing at once) */
+  static atomic_uint calls;
+  char tmp[4096 + 48];
+  snprintf(tmp, sizeof tmp, "%s.%ld.%u.tmp", path, (long)getpid(),
+           atomic_fetch_add_explicit(&calls, 1u, memory_order_relaxed));
+  uint32_t table[256];
+  crc_table(table);
   FILE *f = fopen(tmp, "wb");
   unsigned char ihdr[13];
   be32(ihdr, (uint32_t)w);
   be32(ihdr + 4, (uint32_t)h);
   memcpy(ihdr + 8, "\x08\x06\x00\x00\x00", 5); /* 8-bit RGBA */
   int r = f && fwrite("\x89PNG\r\n\x1a\n", 1, 8, f) == 8 &&
-                  chunk(f, "IHDR", ihdr, sizeof ihdr) == 0 &&
-                  chunk(f, "IDAT", z, z_len) == 0 &&
-                  chunk(f, "IEND", NULL, 0) == 0
+                  chunk(f, table, "IHDR", ihdr, sizeof ihdr) == 0 &&
+                  chunk(f, table, "IDAT", z, z_len) == 0 &&
+                  chunk(f, table, "IEND", NULL, 0) == 0
               ? 0
               : -1;
   if (f && fclose(f) != 0) {

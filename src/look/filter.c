@@ -3,6 +3,7 @@
 #include "resample.h"
 
 #include <math.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -129,14 +130,12 @@ static void boost(unsigned char *px, int n, int percent) {
 static const int BAYER[4][4] = {
     {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
 
-/* a table entry not found yet (palettes have fewer colours) */
-#define LUT_UNSET 255
-
 /* lut: the palette entry nearest each colour at 5 bits a channel (r << 10
- * | g << 5 | b), LUT_UNSET until a pixel needs it; NULL: searched for each
- * pixel */
+ * | g << 5 | b), plus 1 (0: not found yet, so a zeroed table starts it),
+ * filled as pixels need it; NULL: searched for each pixel. Its entries
+ * are atomic, relaxed: threads filtering at once fill it alike */
 static void quantize(unsigned char *px, int w, int h, const PALETTE *p,
-                     int dither, unsigned char *lut) {
+                     int dither, _Atomic unsigned char *lut) {
   float *err = NULL;
   if (dither == CTUI_LOOK_FILTER_DITHER_FS) {
     err = calloc((size_t)w * (size_t)h * 3, sizeof *err);
@@ -162,14 +161,17 @@ static void quantize(unsigned char *px, int w, int h, const PALETTE *p,
       const unsigned char *q;
       if (lut) {
         int k = (int)v[0] >> 3 << 10 | (int)v[1] >> 3 << 5 | (int)v[2] >> 3;
-        if (lut[k] == LUT_UNSET) {
+        int e = atomic_load_explicit(&lut[k], memory_order_relaxed);
+        if (!e) {
           /* the colours a picture has, found as it meets them */
           q = nearest(p, (float)((k >> 10) * 8 + 4),
                       (float)((k >> 5 & 31) * 8 + 4),
                       (float)((k & 31) * 8 + 4));
-          lut[k] = (unsigned char)((q - p->rgb[0]) / 3);
+          e = (int)((q - p->rgb[0]) / 3) + 1;
+          atomic_store_explicit(&lut[k], (unsigned char)e,
+                                memory_order_relaxed);
         }
-        q = p->rgb[lut[k]];
+        q = p->rgb[e - 1];
       } else {
         q = nearest(p, v[0], v[1], v[2]);
       }
@@ -328,15 +330,13 @@ void ctui_look_filter_web(const unsigned char *src, int sw, int sh,
       memset(o, 0, 4);
     }
   }
-  /* the palette made once, its table filled as pictures need it (all
-   * 32K colours at once: ~20 ms before the first picture) */
-  static PALETTE p;
-  static unsigned char lut[1 << 15];
-  if (!p.n) {
-    palette_of(
-        &(CTUI_LOOK){.filter.palette = CTUI_LOOK_FILTER_PALETTE_HALFTONE}, &p);
-    memset(lut, LUT_UNSET, sizeof lut);
-  }
+  /* the palette made each time (a few microseconds), its table kept and
+   * filled as pictures need it (all 32K colours at once: ~20 ms before
+   * the first picture); safe from more than one thread */
+  static _Atomic unsigned char lut[1 << 15];
+  PALETTE p;
+  palette_of(&(CTUI_LOOK){.filter.palette = CTUI_LOOK_FILTER_PALETTE_HALFTONE},
+             &p);
   quantize(out, w, h, &p, CTUI_LOOK_FILTER_DITHER_FS, lut);
 }
 

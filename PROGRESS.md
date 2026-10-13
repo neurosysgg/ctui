@@ -237,6 +237,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The web filter and the PNG writer weren't safe from two threads**
+  (2026-10-13, ctui-wm's ctui-web fitting pictures on a work thread
+  while icons are written on its UI thread). `ctui_look_filter_web()`
+  filled its palette and its 32K colour table lazily in plain statics,
+  `ctui_look_png_write()` its CRC table, and the temporary file's name
+  was only the pid's. Now the palette is made per call (microseconds),
+  the colour table's entries are relaxed atomics holding the entry + 1
+  (0: not found yet, so the zeroed table needs no setup), the CRC table
+  is made per file (2K steps), and the temporary name carries a per-call
+  counter. No pthreads in ctui: C11 atomics only. The output is the same
+  byte for byte (look_test; ctui-wm's TSAN runs of its picture jobs).
+
 - [x] **The harness waits for an app to end** (2026-10-13, ctui-mus's
   screens: ESC quits it). `ctui_pty_until_ended()` and the step
   `CTUI_HS_ENDED` (appended to the ops): the app reaped within a timeout.
