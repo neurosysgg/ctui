@@ -237,6 +237,29 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Masked log calls and putting text cell by cell** (2026-10-15,
+  ctui-wm's notes/self-improving.md, session 219). In ctui-wm's profiles
+  `widget_put` led a frame (top 19 %, git 11 %), `ctui_logf` 4-5 %:
+  every putc made an E_DBG call whose arguments (`ctui_tick_advance()`,
+  a `strlen()` per puts) were evaluated before its level check. Now:
+  - `ctui_logf()` is a macro checking `ctui_g_log_verbosity` first; a
+    masked call evaluates nothing (`level` twice: constants or plain
+    conditionals at all ~1000 call sites across ctui, ctui-wm, ctui-mus).
+    The tick counter now numbers logged lines only.
+  - the puts family shares `widget_put_str()`: a run of lone printable
+    ASCII inside the widget is written straight into the row, one bounds
+    check, the wide glyphs it cuts mended at its two edges (what
+    `ctui_cell_set_ch()` does per cell comes to that).
+  A 240x60 frame (60 puts lines + 4800 putc): 186 -> 143 (the macro) ->
+  45 us. ctui-wm's screens runs since the UTF-8 step: ctui-git -27 %,
+  top -10 %, mail / feeds / files -8 %. widget_test puts random strings
+  (wide, combining, controls, cut by n) over rows of wide glyphs, at
+  edges and outside the widget and the compositor, for a group member on
+  another's slice too, both ways -- the run path and cluster by cluster
+  through `widget_put()` -- and compares every cell and the returned
+  width; four planted bugs fail it (either edge's mending, the slice's
+  addressing, a run joined by a combining mark).
+
 - [x] **The compositor's clear went cell by cell, fields left stale**
   (2026-10-15, ctui-wm's notes/self-improving.md, session 219). It set six
   fields per cell; the fields a cell's mode doesn't use (an RGB cell's
