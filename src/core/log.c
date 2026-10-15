@@ -6,6 +6,7 @@
 
 static struct CTUI_LOGGER logger;
 static int _ctui_ticks;
+int ctui_g_log_verbosity;
 
 int ctui_tick_advance(void) { return ++_ctui_ticks; }
 
@@ -18,7 +19,7 @@ int ctui_log(int level, const char *log_str) {
   return logger.log_entry(&logger, level, log_str);
 }
 
-int ctui_logf(int level, const char *fmt, ...) {
+int(ctui_logf)(int level, const char *fmt, ...) {
   /* mirrors log_entry()'s own verbosity check, but ahead of the
    * vsnprintf/malloc/free below -- without this, every call site (many of
    * them per-primitive: one per ctui_widget_putc(), one per event
@@ -79,6 +80,7 @@ void ctui_log_set_path(const char *path) {
 void ctui_log_init(int verbosity) {
   _ctui_ticks = 0;
   logger = init_logger((char *)log_path, verbosity);
+  ctui_g_log_verbosity = verbosity;
   ctui_tick_advance();
   ctui_logf(E_INF, "[CTUI:LOG] - logger initialised @ tick %d.\n",
             _ctui_ticks);

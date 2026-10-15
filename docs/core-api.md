@@ -588,9 +588,14 @@ above into the loop described in "Life of a frame".
   Every non-trivial core operation logs through these — grep
   `ctui.log` (gitignored) when debugging rather than guessing.
   Before `ctui_log_init()` both drop the line and return 0 (a helper
-  that logs may run before an app starts ctui).
+  that logs may run before an app starts ctui). `ctui_logf()` is a
+  macro checking the level first (`ctui_g_log_verbosity`, read-only):
+  a masked call evaluates none of its arguments, so it costs a load and
+  a branch -- an E_DBG per putc is free. `level` is evaluated twice
+  (keep it free of side effects); `(ctui_logf)(...)` is the function.
 - `ctui_tick_advance()` — the global tick counter used as the
-  timestamp in most `ctui_logf()` calls.
+  timestamp in most `ctui_logf()` calls; it advances only for lines
+  that pass the level (their arguments are evaluated then).
 
 ## `util.h` — layout/encoding helpers
 

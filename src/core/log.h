@@ -26,8 +26,21 @@ void ctui_log_shutdown(void);
  * number of bytes written (0 if filtered out by verbosity). level is
  * exactly one of E_DBG/E_WRN/E_INF/E_ERR (see logger.h) */
 int ctui_log(int level, const char *log_str);
-int ctui_logf(int level, const char *fmt, ...);
+int(ctui_logf)(int level, const char *fmt, ...);
 int ctui_tick_advance(void);
+
+/* the verbosity ctui_log_init() set (0 before it): what ctui_logf()
+ * checks first. Read-only outside core/log.c. */
+extern int ctui_g_log_verbosity;
+
+/* ctui_logf() checks the level before anything else is evaluated: a masked
+ * call (one E_DBG per putc, per widget render) costs a load and a branch,
+ * not a call -- its arguments (ctui_tick_advance(), a strlen(), ...) are
+ * never evaluated, so the tick counter numbers logged lines only. Was 4-5
+ * % of a text app's instructions (ctui-wm's notes/self-improving.md,
+ * session 219). (ctui_logf)(...) calls the function itself. */
+#define ctui_logf(level, ...)                                                  \
+  ((ctui_g_log_verbosity & (level)) ? (ctui_logf)((level), __VA_ARGS__) : 0)
 
 /* opts into skipping the fflush() ctui_log()/ctui_logf() otherwise issue
  * after every single entry -- see logger.h's CTUI_LOGGER.buffered doc
