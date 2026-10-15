@@ -134,6 +134,68 @@ static int widget_put(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   return w;
 }
 
+/* how many bytes at str (before end, NULL: none) are printable ASCII that
+ * nothing joins (the next byte ASCII too, or the end): one cell each */
+static int ascii_run(const char *str, const char *end) {
+  const unsigned char *u = (const unsigned char *)str;
+  int n = 0;
+  while ((end == NULL || str + n < end) && u[n] >= 0x20 && u[n] < 0x7F &&
+         ((end != NULL && str + n + 1 == end) || u[n + 1] < 0x80)) {
+    n++;
+  }
+  return n;
+}
+
+/* str (up to end, NULL: its NUL) at (row, col) in style, cluster by
+ * cluster; returns the column after it. A run of lone printable ASCII
+ * inside the widget is written straight into the row: one bounds check,
+ * and the wide glyphs it cuts mended at its two edges -- what
+ * ctui_cell_set_ch() does cell by cell comes to that, each write having
+ * already blanked the CONT to its right. ~5x fewer instructions a cell
+ * than widget_put() (ctui-wm's notes/self-improving.md, session 219);
+ * widget_test checks it against widget_put() cell by cell. */
+static int widget_put_str(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, const char *str, const char *end,
+                          const CTUI_CELL *style) {
+  while ((end == NULL || str < end) && *str) {
+    int run = ascii_run(str, end);
+    int abs_row = widget->y + row;
+    int abs_col = widget->x + col;
+    if (run > widget->w - col) {
+      run = widget->w - col;
+    }
+    if (run > comp->cols - abs_col) {
+      run = comp->cols - abs_col;
+    }
+    if (run > 0 && widget->buf != NULL && row >= 0 && row < widget->h &&
+        col >= 0 && abs_row >= 0 && abs_row < comp->rows && abs_col >= 0) {
+      /* addressed as widget_cell_at() does: from the widget's slice */
+      CTUI_CELL *cell =
+          widget->buf + (size_t)row * (size_t)comp->cols + (size_t)col;
+      CTUI_CELL *line = cell - abs_col;
+      if (line[abs_col].ch == CTUI_CELL_CONT && abs_col > 0) {
+        line[abs_col - 1].ch = ' ';
+      }
+      if (abs_col + run < comp->cols &&
+          line[abs_col + run].ch == CTUI_CELL_CONT) {
+        line[abs_col + run].ch = ' ';
+      }
+      for (int i = 0; i < run; i++) {
+        line[abs_col + i] = *style;
+        line[abs_col + i].ch = (unsigned char)str[i];
+      }
+      str += run;
+      col += run;
+      continue;
+    }
+    uint32_t ch;
+    str += ctui_utf8_cluster(str, end ? (size_t)(end - str) : (size_t)-1, &ch,
+                             NULL);
+    col += widget_put(widget, comp, row, col, ch, style);
+  }
+  return col;
+}
+
 static int widget_puts_styled(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
                               int row, int col, const char *str,
                               const CTUI_CELL *style) {
@@ -142,12 +204,7 @@ static int widget_puts_styled(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
             "mode=%d): \"%s\"\n",
             ctui_tick_advance(), row, col, strlen(str), style->color_mode,
             str);
-  while (*str) {
-    uint32_t ch;
-    str += ctui_utf8_cluster(str, (size_t)-1, &ch, NULL);
-    col += widget_put(widget, comp, row, col, ch, style);
-  }
-  return col;
+  return widget_put_str(widget, comp, row, col, str, NULL, style);
 }
 
 void ctui_widget_putc(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
@@ -172,14 +229,7 @@ int ctui_widget_puts_n(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
             "[CTUI:WIDGET] - puts_n @ tick %d (row=%d, col=%d, n=%zu): "
             "\"%.*s\"\n",
             ctui_tick_advance(), row, col, n, (int)n, str);
-  const char *end = str + n;
-  int c = col;
-  while (str < end && *str) {
-    uint32_t ch;
-    str += ctui_utf8_cluster(str, (size_t)(end - str), &ch, NULL);
-    c += widget_put(widget, comp, row, c, ch, &style);
-  }
-  return c - col;
+  return widget_put_str(widget, comp, row, col, str, str + n, &style) - col;
 }
 
 int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
@@ -208,13 +258,7 @@ int ctui_widget_puts_cut_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
     n--;
     w--;
   }
-  const char *end = str + n;
-  int c = col;
-  while (str < end) {
-    uint32_t ch;
-    str += ctui_utf8_cluster(str, (size_t)(end - str), &ch, NULL);
-    c += widget_put(widget, comp, row, c, ch, style);
-  }
+  widget_put_str(widget, comp, row, col, str, str + n, style);
   widget_put(widget, comp, row, col + w, 0x2026, style);
   return w + 1;
 }
@@ -232,14 +276,7 @@ int ctui_widget_puts_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
             "mode=%d, attr=%d)\n",
             ctui_tick_advance(), row, col, n, style->color_mode, style->attr);
   const char *end = n == (size_t)-1 ? NULL : str + n;
-  int c = col;
-  while ((end == NULL || str < end) && *str) {
-    uint32_t ch;
-    str += ctui_utf8_cluster(str, end ? (size_t)(end - str) : (size_t)-1,
-                             &ch, NULL);
-    c += widget_put(widget, comp, row, c, ch, style);
-  }
-  return c - col;
+  return widget_put_str(widget, comp, row, col, str, end, style) - col;
 }
 
 void ctui_widget_putc_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,

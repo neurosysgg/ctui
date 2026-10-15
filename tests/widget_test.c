@@ -9,6 +9,9 @@
 
 #include "ctui_test.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 /* ctui_g_gfx_mode is intentionally private -- see kitty_protocol_test.c's
  * identical extern for why redeclaring it here is the accepted gray-box
  * trick for a headless test that never calls ctui_init(). */
@@ -384,6 +387,117 @@ static void test_render_hooks(void) {
   ctui_screen_free(screen);
 }
 
+/* the puts family against the reference: the same string put cluster by
+ * cluster through ctui_widget_putc_cell() (widget_put(), cell by cell),
+ * which the ASCII run fast path must match byte for byte -- on rows full
+ * of wide glyphs it cuts, at edges and outside the widget and the
+ * compositor, for a group member addressing a slice bound elsewhere */
+static int ref_puts(CTUI_WIDGET *w, CTUI_COMPOSITOR *comp, int row, int col,
+                    const char *str, const char *end, const CTUI_CELL *style) {
+  while ((end == NULL || str < end) && *str) {
+    uint32_t ch;
+    str += ctui_utf8_cluster(str, end ? (size_t)(end - str) : (size_t)-1, &ch,
+                             NULL);
+    col += ctui_widget_putc_cell(w, comp, row, col, ch, style);
+  }
+  return col;
+}
+
+static void test_puts_vs_ref(void) {
+  /* the random runs log little: their out-of-bounds puts are warnings */
+  ctui_log_shutdown();
+  ctui_log_init(E_ERR);
+  static const char *const bits[] = {"a",
+                                     "b",
+                                     "Z",
+                                     " ",
+                                     "~",
+                                     "\xe4\xbd\xa0" /* wide */,
+                                     "\xcc\x81" /* combining */,
+                                     "\xf0\x9f\x91\x8d" /* emoji */,
+                                     "\xe2\x94\x80" /* box */,
+                                     "\n",
+                                     "\t",
+                                     "\x7f",
+                                     "\xc2\x85" /* C1 */,
+                                     "#",
+                                     "\xef\xb8\x8f" /* VS16 */,
+                                     "\xe2\x80\x8b" /* ZWSP */};
+  enum { ROWS = 5, COLS = 16 };
+  CTUI_COMPOSITOR *a = ctui_compositor_create(ROWS, COLS);
+  CTUI_COMPOSITOR *b = ctui_compositor_create(ROWS, COLS);
+  srand(219);
+  int bad = 0;
+  for (int r = 0; r < 30000; r++) {
+    /* a row's worth of wide glyphs and colours in both */
+    for (int y = 0; y < ROWS; y++) {
+      CTUI_CELL *line = a->cells + y * COLS;
+      for (int x = 0; x < COLS; x++) {
+        line[x] = (CTUI_CELL){.ch = (uint32_t)('A' + rand() % 26),
+                              .fg = (unsigned char)(rand() % 8)};
+      }
+      for (int x = 0; x < COLS - 1; x++) {
+        if (rand() % 3 == 0) {
+          x += ctui_cell_set_ch(line, COLS, x, COLS, 0x4F60) - 1;
+        }
+      }
+    }
+    memcpy(b->cells, a->cells, sizeof(CTUI_CELL) * ROWS * COLS);
+    CTUI_WIDGET wa = {.render = noop_render,
+                      .x = rand() % 6,
+                      .y = rand() % 3,
+                      .w = 1 + rand() % 14,
+                      .h = 1 + rand() % 4};
+    CTUI_WIDGET wb = wa;
+    ctui_widget_init(&wa, a);
+    ctui_widget_init(&wb, b);
+    if (rand() % 4 == 0 && wa.buf) {
+      /* a group member: the first member's slice, its own place */
+      int dx = rand() % 3, dy = rand() % 2;
+      wa.x += dx;
+      wa.y += dy;
+      wb.x += dx;
+      wb.y += dy;
+    }
+    char str[64] = "";
+    int nbits = rand() % 12;
+    for (int i = 0; i < nbits; i++) {
+      strcat(str, bits[rand() % (int)(sizeof bits / sizeof *bits)]);
+    }
+    CTUI_CELL style = {.fg = (unsigned char)(rand() % 8),
+                       .bg = (unsigned char)(rand() % 8),
+                       .color_mode = (unsigned char)(rand() % 2),
+                       .attr = (unsigned char)(rand() % 4)};
+    int row = rand() % 6 - 1, col = rand() % 18 - 2;
+    size_t len = strlen(str);
+    size_t n = len ? (size_t)rand() % (len + 1) : 0;
+    int which = rand() % 3, got = 0, want = 0;
+    if (which == 0) {
+      got = ctui_widget_puts_cell(&wa, a, row, col, str, (size_t)-1, &style);
+      want = ref_puts(&wb, b, row, col, str, NULL, &style) - col;
+    } else if (which == 1) {
+      got = ctui_widget_puts_cell(&wa, a, row, col, str, n, &style);
+      want = ref_puts(&wb, b, row, col, str, str + n, &style) - col;
+    } else {
+      ctui_widget_puts(&wa, a, row, col, str, style.fg, style.bg);
+      CTUI_CELL basic = {.fg = style.fg, .bg = style.bg};
+      ref_puts(&wb, b, row, col, str, NULL, &basic);
+    }
+    if (got != want ||
+        memcmp(a->cells, b->cells, sizeof(CTUI_CELL) * ROWS * COLS) != 0) {
+      bad++;
+    }
+  }
+  CTUI_TEST_ASSERT(bad == 0,
+                   "puts, puts_cell whole and cut: the same cells "
+                   "as putting each cluster (%d of 30000 differ)",
+                   bad);
+  ctui_compositor_free(a);
+  ctui_compositor_free(b);
+  ctui_log_shutdown();
+  ctui_log_init(E_ALL);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -393,6 +507,7 @@ int main(void) {
   test_puts_cut_cell();
   test_puts_n();
   test_puts_cell();
+  test_puts_vs_ref();
   test_widget_init_out_of_bounds();
   test_gfx_dispatch();
   test_render_hooks();
