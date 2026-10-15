@@ -237,6 +237,43 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The compositor's clear went cell by cell, fields left stale**
+  (2026-10-15, ctui-wm's notes/self-improving.md, session 219). It set six
+  fields per cell; the fields a cell's mode doesn't use (an RGB cell's
+  bytes after a plain putc()) stayed, so an unchanged cell could differ
+  in bytes and miss flush's row memcmp. Now a whole blank row is written
+  and copied down: 240x60 6.0 -> 2.2 us, 400x100 16.7 -> 6.6 us (the blit
+  after it is 3.1 / 10.1 us). Small next to a frame's work, but sound:
+  compositor_test checks every cell is the blank bytewise (fails on the
+  old clear).
+
+- [x] **Measuring text was most of the text apps' instructions**
+  (2026-10-15, ctui-wm's notes/self-improving.md, session 219). Callgrind
+  over ctui-wm's screens: `cp_props`, `ctui_utf8_cluster`, `seg_step` and
+  `sendable` were 28-56 % of every text app's instructions (ctui-git
+  56 %). Every codepoint, ASCII too, went through a binary search over
+  the 980 property ranges and the whole UAX #29 state machine. Now:
+  - the properties come from a two-stage table (`utf8_props.h`: a block
+    number per 128 codepoints, a packed 16-bit value per codepoint of the
+    distinct blocks; Hangul's LV/LVT resolved in it; ~55 KB). Block sizes
+    64-512 measured the same; a byte index into the 30 distinct values
+    (~32 KB) was slower. All codepoints: 9.5 -> 1.2 ms.
+  - `cluster_lone()` ahead of the segmentation: a codepoint of class
+    Other whose next one isn't Extend, ZWJ, SpacingMark or zero width is
+    a cluster of its own (nothing else joins after Other).
+  `ctui_utf8_width` on 0.9 MB of ctui-wm's screen text: 25.0 -> 3.1
+  ns/byte (clang 3.6); a CJK/emoji mix 12.3 -> 3.5. Whole screens runs
+  (instructions, startup included): ctui-git -51 %, mail -31 %, feeds
+  -30 %, files -28 %, top -21 %. The verifier: `tests/utf8_ref.h` keeps
+  the old code (the ranges, now `tests/utf8_ref_props.h`, generated with
+  the table) as the reference; utf8_test checks the table for every
+  codepoint, every codepoint alone and cut short, a first and a last
+  codepoint of each class next to each class both ways, runs of probes
+  and random strings cut at every byte. Planted bugs (a dropped
+  SpacingMark or zero-width check, one table value off) fail it.
+  `tools/check_widths.py`: all codepoints and 20 716 clusters agree with
+  kitty 0.49.2.
+
 - [x] **Flush's compare was most of its time** (2026-10-15, ctui-wm's
   notes/self-improving.md, s3). Every cell went through the per-mode
   compare against the shadow buffer: 13.6 of flush's 18.6 ms on ctui-wm's
