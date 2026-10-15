@@ -5,8 +5,12 @@
  * the literal UTF-8 bytes ctui_screen_flush() emits. */
 #include "ctui.h"
 
+#include "core/utf8_props.h"
 #include "ctui_test.h"
+#include "utf8_ref.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -298,12 +302,200 @@ static void test_flush_utf8(void) {
   ctui_screen_free(s);
 }
 
+/* the two-stage table holds what the ranges say, for every codepoint
+ * (the Hangul syllables' LV/LVT resolved the way ref_props() does) */
+static void test_props_table(void) {
+  uint32_t bad = 0, first_bad = 0;
+  for (uint32_t cp = 0; cp <= 0x10FFFF; cp++) {
+    REF_PROPS r = ref_props(cp);
+    unsigned block = ctui_utf8_props_block[cp >> CTUI_UTF8_PROPS_SHIFT];
+    unsigned v = ctui_utf8_props[block << CTUI_UTF8_PROPS_SHIFT |
+                                 (cp & ((1u << CTUI_UTF8_PROPS_SHIFT) - 1))];
+    if ((v & 3) != r.width || (v >> 2 & 15) != r.gb || (v >> 6) != r.flags ||
+        ctui_utf8_cpwidth(cp) != r.width) {
+      first_bad = bad++ ? first_bad : cp;
+    }
+  }
+  if (bad) {
+    fprintf(stderr, "  first differing codepoint: U+%04X\n", first_bad);
+  }
+  CTUI_TEST_ASSERT(bad == 0, "every codepoint's width, class and flags in "
+                             "the two-stage table match the ranges");
+  CTUI_TEST_ASSERT(ctui_utf8_cpwidth(0x110000) == 1 &&
+                       ctui_utf8_cpwidth(0xFFFFFFFFu) == 1,
+                   "past U+10FFFF: width 1 like anything unlisted, no read "
+                   "past the table");
+}
+
+/* ctui_utf8_cluster() against ref_cluster() on s[0..n): the same bytes,
+ * width and codepoints. A cluster of several codepoints only compared
+ * with intern set: each distinct one stays interned (CTUI_CLUSTER_LIMIT,
+ * 2^20), too few for every codepoint with a mark after it. 0: they agree */
+static int cluster_differs(const char *s, size_t n, int intern) {
+  uint32_t ref[CTUI_CLUSTER_MAX];
+  int nref = 0, wref = -1, w = -1;
+  uint32_t ch = 0xDEAD;
+  size_t rb = ref_cluster(s, n, ref, &nref, &wref);
+  int with_ch = intern || nref <= 1;
+  size_t b = ctui_utf8_cluster(s, n, with_ch ? &ch : NULL, &w);
+  int w2 = -1;
+  if (b != rb || w != wref || ctui_utf8_cluster(s, n, NULL, &w2) != b ||
+      w2 != w) {
+    return 1;
+  }
+  if (!with_ch) {
+    return 0;
+  }
+  int m = 1;
+  const uint32_t *cps = ctui_cell_cluster(ch, &m);
+  if (cps == NULL) {
+    cps = &ch;
+    m = nref == 0 ? 0 : 1;
+  }
+  if (nref == 0) {
+    return ch != 0;
+  }
+  return m != nref || memcmp(cps, ref, (size_t)m * sizeof *cps) != 0;
+}
+
+/* one codepoint of each kind the segmentation tells apart */
+static const uint32_t probes[] = {
+    'a',    '#',    ' ',    '\n',    '\r',    0x01,   0x7F,   0x85,
+    0xA0,   0xAD,   0x301,  0x200D,  0x903,   0x600,  0x1100, 0x1161,
+    0x11A8, 0xAC00, 0xAC01, 0x1F1E6, 0x1F1E9, 0xFE0F, 0xFE0E, 0x200B,
+    0x915,  0x94D,  0x93C,  0x1F600, 0x1F3FD, 0x2764, 0x231A, 0x4E00,
+    0xE33,  0xFFFD, 0xFFFE, 0xD800,  0xE0067, 0x2500, 0x2580, 0xFF21};
+#define NPROBES (sizeof probes / sizeof probes[0])
+
+/* cps encoded into buf (a surrogate or a noncharacter as its raw
+ * three-byte form, the way a careless producer writes it) */
+static size_t encode_raw(const uint32_t *cps, int n, char *buf) {
+  size_t len = 0;
+  for (int i = 0; i < n; i++) {
+    uint32_t c = cps[i];
+    if (c >= 0xD800 && c <= 0xDFFF) {
+      buf[len++] = (char)(0xE0 | (c >> 12));
+      buf[len++] = (char)(0x80 | ((c >> 6) & 0x3F));
+      buf[len++] = (char)(0x80 | (c & 0x3F));
+    } else {
+      len += (size_t)ctui_utf8_encode(c, buf + len);
+    }
+  }
+  buf[len] = '\0';
+  return len;
+}
+
+/* the codepoints the segmentation can tell apart: the first and the last
+ * of each class -- the same properties (the table is checked for every
+ * codepoint above), the same encoded length, replaced or not -- and every
+ * codepoint the code names (controls, the variation selectors) as a class
+ * of its own */
+static uint32_t *class_reps(int *n) {
+  enum { KEYS = 8192 }; /* the key: 10 bits of properties, 3 more */
+  static int first[KEYS], last[KEYS];
+  memset(first, -1, sizeof first);
+  for (uint32_t cp = 1; cp <= 0x10FFFF; cp++) {
+    REF_PROPS p = ref_props(cp);
+    char tmp[4];
+    int len = ctui_utf8_encode(cp, tmp);
+    int key = p.width | p.gb << 2 | p.flags << 6;
+    key = key << 3 | (len - 1) << 1 | (ref_sendable(cp) != cp);
+    if (cp < 0xA0 || cp == REF_VS15 || cp == REF_VS16) {
+      key = KEYS - 1 - (int)(cp < 0xA0 ? cp : cp - REF_VS15 + 0xA0);
+    }
+    if (first[key] < 0) {
+      first[key] = (int)cp;
+    }
+    last[key] = (int)cp;
+  }
+  uint32_t *reps = malloc(2 * KEYS * sizeof *reps);
+  *n = 0;
+  for (int k = 0; reps && k < KEYS; k++) {
+    if (first[k] >= 0) {
+      reps[(*n)++] = (uint32_t)first[k];
+      if (last[k] != first[k]) {
+        reps[(*n)++] = (uint32_t)last[k];
+      }
+    }
+  }
+  return reps;
+}
+
+static void test_clusters_vs_ref(void) {
+  char buf[64];
+  uint32_t seq[4];
+  int bad = 0;
+  /* every codepoint alone, cut short too */
+  for (uint32_t cp = 1; cp <= 0x10FFFF; cp++) {
+    seq[0] = cp;
+    size_t len = encode_raw(seq, 1, buf);
+    bad +=
+        cluster_differs(buf, (size_t)-1, 0) | cluster_differs(buf, len - 1, 0);
+  }
+  CTUI_TEST_ASSERT(bad == 0, "every codepoint alone (and cut short): the same "
+                             "cluster as the reference segmentation");
+
+  /* every class next to every class, cut in the second */
+  int nreps = 0;
+  uint32_t *reps = class_reps(&nreps);
+  bad = reps == NULL;
+  for (int i = 0; i < nreps; i++) {
+    for (int j = 0; j < nreps; j++) {
+      seq[0] = reps[i];
+      seq[1] = reps[j];
+      size_t len = encode_raw(seq, 2, buf);
+      bad += cluster_differs(buf, (size_t)-1, 0) |
+             cluster_differs(buf, len - 1, 0);
+    }
+  }
+  free(reps);
+  CTUI_TEST_ASSERT(bad == 0 && nreps > 100,
+                   "a codepoint of each class before one of each class: the "
+                   "same clusters as the reference segmentation");
+
+  /* every run of three probes, and random strings of probes and random
+   * codepoints cut at every length */
+  bad = 0;
+  for (size_t i = 0; i < NPROBES; i++) {
+    for (size_t j = 0; j < NPROBES; j++) {
+      for (size_t k = 0; k < NPROBES; k++) {
+        seq[0] = probes[i];
+        seq[1] = probes[j];
+        seq[2] = probes[k];
+        encode_raw(seq, 3, buf);
+        bad += cluster_differs(buf, (size_t)-1, 1);
+      }
+    }
+  }
+  srand(219);
+  for (int r = 0; r < 20000; r++) {
+    uint32_t run[8];
+    int n = 1 + rand() % 8;
+    for (int i = 0; i < n; i++) {
+      run[i] = rand() % 3 ? probes[(size_t)rand() % NPROBES]
+                          : (uint32_t)rand() % 0x110000;
+    }
+    size_t len = encode_raw(run, n, buf);
+    for (size_t cut = 0; cut <= len; cut++) {
+      bad += cluster_differs(buf, cut, 1);
+    }
+    /* stray continuation and lead bytes */
+    buf[rand() % (int)len] = (char)(0x80 | rand() % 0x80);
+    bad += cluster_differs(buf, (size_t)-1, 1) | cluster_differs(buf, len, 1);
+  }
+  CTUI_TEST_ASSERT(bad == 0, "runs of probes and random strings (cut at "
+                             "every byte, broken bytes in them): the same "
+                             "clusters as the reference");
+}
+
 int main(void) {
   ctui_log_init(E_WRN | E_ERR);
 
   test_decode_encode();
   test_widths();
   test_clusters();
+  test_props_table();
+  test_clusters_vs_ref();
   test_widget_wide_glyphs();
   test_util_widths();
   test_flush_utf8();

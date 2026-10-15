@@ -76,8 +76,9 @@ int ctui_utf8_encode(uint32_t cp, char *out) {
 }
 
 /* Grapheme_Cluster_Break classes, in the order tools/gen_utf8_props.py
- * writes them; LV/LVT come out of CTUI_GB_HANGUL, RI_PENDING is a state
- * only (an odd regional indicator waiting for its pair) */
+ * writes them; the table holds LV/LVT, never HANGUL (only its ranges for
+ * the tests do), RI_PENDING is a state only (an odd regional indicator
+ * waiting for its pair) */
 enum {
   CTUI_GB_OTHER,
   CTUI_GB_CR,
@@ -111,31 +112,19 @@ typedef struct {
 } CTUI_CP_PROPS;
 
 static CTUI_CP_PROPS cp_props(uint32_t cp) {
-  CTUI_CP_PROPS p = {1, CTUI_GB_OTHER, 0};
-  size_t lo = 0;
-  size_t hi = sizeof ctui_utf8_props_table / sizeof ctui_utf8_props_table[0];
-  while (lo < hi) {
-    size_t mid = lo + (hi - lo) / 2;
-    if (cp < ctui_utf8_props_table[mid].first) {
-      hi = mid;
-    } else if (cp > ctui_utf8_props_table[mid].last) {
-      lo = mid + 1;
-    } else {
-      p.width = ctui_utf8_props_table[mid].width;
-      p.gb = ctui_utf8_props_table[mid].gb;
-      p.flags = ctui_utf8_props_table[mid].flags;
-      break;
-    }
+  if (cp > 0x10FFFF) {
+    return (CTUI_CP_PROPS){1, CTUI_GB_OTHER, 0};
   }
-  if (p.gb == CTUI_GB_HANGUL) {
-    p.gb = (cp - 0xAC00) % 28 == 0 ? CTUI_GB_LV : CTUI_GB_LVT;
-  }
-  return p;
+  unsigned block = ctui_utf8_props_block[cp >> CTUI_UTF8_PROPS_SHIFT];
+  unsigned v = ctui_utf8_props[block << CTUI_UTF8_PROPS_SHIFT |
+                               (cp & ((1u << CTUI_UTF8_PROPS_SHIFT) - 1))];
+  return (CTUI_CP_PROPS){(unsigned char)(v & 3), (unsigned char)(v >> 2 & 15),
+                         (unsigned char)(v >> 6)};
 }
 
 int ctui_utf8_cpwidth(uint32_t cp) {
-  /* ASCII has no table entry (the first is U+00AD) */
-  if (cp < 0x7F) {
+  /* printable ASCII is 1 wide, no need to look it up */
+  if (cp >= 0x20 && cp < 0x7F) {
     return 1;
   }
   return cp_props(cp).width;
@@ -314,8 +303,73 @@ static uint32_t cluster_intern(const uint32_t *cps, int n, int width) {
   return CTUI_CELL_CLUSTER | i;
 }
 
+/* one codepoint at s, end (NULL: none) never read past: a character cut
+ * there decodes as U+FFFD */
+static int decode_before(const char *s, const char *end, uint32_t *cp) {
+  if (end && end - s < 4) {
+    char tail[5] = {0};
+    memcpy(tail, s, (size_t)(end - s));
+    return ctui_utf8_decode(tail, cp);
+  }
+  return ctui_utf8_decode(s, cp);
+}
+
+/* the common case, ahead of the segmentation: a codepoint of class Other
+ * whose next one can't join it (neither Extend, ZWJ nor SpacingMark, nor
+ * zero width: dropped into the cluster) is a cluster of one. Nothing after
+ * Other joins but those (GB6-8 need Hangul, GB9b a Prepend, GB9c a
+ * consonant and a linker, GB11 a ZWJ, GB12-13 a regional indicator before
+ * it). Returns its length, 0 when it isn't the case -- the segmentation
+ * below decides those (tests/utf8_test.c checks the two agree, codepoint
+ * by codepoint). On screen text ~8x faster than segmenting everything
+ * (ctui-wm's notes/self-improving.md, session 219). */
+static size_t cluster_lone(const char *s, const char *end, uint32_t *ch,
+                           int *width) {
+  const unsigned char *u = (const unsigned char *)s;
+  uint32_t cp;
+  int len;
+  int w = 1;
+  if (u[0] >= 0x20 && u[0] < 0x7F) {
+    cp = u[0];
+    len = 1;
+  } else {
+    len = decode_before(s, end, &cp);
+    if (sendable(cp) != cp) { /* a control, a surrogate, ... */
+      return 0;
+    }
+    CTUI_CP_PROPS p = cp_props(cp);
+    if (p.gb != CTUI_GB_OTHER || p.width == 0) {
+      return 0;
+    }
+    w = p.width;
+  }
+  const char *next = s + len;
+  if ((end == NULL || next < end) && (unsigned char)*next >= 0x80) {
+    uint32_t nc; /* a C1 control: U+FFFD, which joins nothing either */
+    decode_before(next, end, &nc);
+    CTUI_CP_PROPS q = cp_props(sendable(nc));
+    if (q.width == 0 || q.gb == CTUI_GB_EXTEND || q.gb == CTUI_GB_ZWJ ||
+        q.gb == CTUI_GB_SPACINGMARK) {
+      return 0;
+    }
+  }
+  if (ch != NULL) {
+    *ch = cp;
+  }
+  if (width != NULL) {
+    *width = w;
+  }
+  return (size_t)len;
+}
+
 size_t ctui_utf8_cluster(const char *s, size_t n, uint32_t *ch, int *width) {
   const char *end = n == (size_t)-1 ? NULL : s + n;
+  if (n > 0 && s[0] != '\0') {
+    size_t lone = cluster_lone(s, end, ch, width);
+    if (lone > 0) {
+      return lone;
+    }
+  }
   uint32_t cps[CTUI_CLUSTER_MAX];
   int ncps = 0;
   size_t bytes = 0;
@@ -326,15 +380,7 @@ size_t ctui_utf8_cluster(const char *s, size_t n, uint32_t *ch, int *width) {
 
   while (s[bytes] && (end == NULL || s + bytes < end)) {
     uint32_t cp;
-    int len;
-    if (end && end - (s + bytes) < 4) {
-      /* a character cut at n decodes as U+FFFD, never reading past n */
-      char tail[5] = {0};
-      memcpy(tail, s + bytes, (size_t)(end - (s + bytes)));
-      len = ctui_utf8_decode(tail, &cp);
-    } else {
-      len = ctui_utf8_decode(s + bytes, &cp);
-    }
+    int len = decode_before(s + bytes, end, &cp);
     if (ncps > 0 && (cp < 0x20 || cp == 0x7F || (cp >= 0x80 && cp < 0xA0))) {
       /* a control character is always a cluster of its own (text layout
        * looks for \n and \t at cluster starts). Prepends before it (all
