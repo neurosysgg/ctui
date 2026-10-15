@@ -27,6 +27,9 @@ struct CTUI_VT {
   int wrap;
   VT_COLOR fg, bg;
   unsigned char attr;
+  /* the last glyph placed, for REP; width 0: none yet */
+  uint32_t last_ch;
+  int last_w;
 
   int state;
   int params[VT_PARAMS], nparams;
@@ -176,6 +179,8 @@ static void put(CTUI_VT *vt, uint32_t ch, int w) {
     linefeed(vt);
     row = row_at(vt, vt->r);
   }
+  vt->last_ch = ch;
+  vt->last_w = w;
   int used = ctui_cell_set_ch(row, vt->cols, vt->c, vt->cols, ch);
   for (int i = 0; i < used; i++) {
     pen_to_cell(vt, &row[vt->c + i]);
@@ -404,6 +409,11 @@ static void csi(CTUI_VT *vt, char final) {
   }
   case 'm':
     sgr(vt);
+    break;
+  case 'b':
+    for (int n = param(vt, 0, 1); n > 0 && vt->last_w; n--) {
+      put(vt, vt->last_ch, vt->last_w);
+    }
     break;
   default:
     break;

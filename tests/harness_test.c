@@ -9,6 +9,7 @@
 #include "ctui_test.h"
 #include "harness/harness.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -274,6 +275,209 @@ static void paint(CTUI_SCREEN *s, unsigned seed) {
   }
 }
 
+/* the reference for flush: its loop as it was before 2026-10-15, with
+ * snprintf() doing the formatting, every move a CUP, every colour change
+ * a whole SGR, every glyph written out. Kept simple and slow on purpose;
+ * flush must draw the same screen from the same frames, in no more
+ * bytes. */
+static int ref_same(const CTUI_CELL *a, const CTUI_CELL *b, int with_ch) {
+  if ((with_ch && (a->ch != b->ch || a->kitty_row != b->kitty_row)) ||
+      a->color_mode != b->color_mode || a->attr != b->attr) {
+    return 0;
+  }
+  int fg_rgb = a->color_mode == CTUI_COLOR_MODE_RGB ||
+               a->color_mode == CTUI_COLOR_MODE_RGB_FG;
+  if (fg_rgb &&
+      (a->fg_r != b->fg_r || a->fg_g != b->fg_g || a->fg_b != b->fg_b)) {
+    return 0;
+  }
+  if (!fg_rgb && a->fg != b->fg) {
+    return 0;
+  }
+  if (a->color_mode == CTUI_COLOR_MODE_RGB) {
+    return a->bg_r == b->bg_r && a->bg_g == b->bg_g && a->bg_b == b->bg_b;
+  }
+  return a->bg == b->bg;
+}
+
+static size_t ref_flush(const CTUI_CELL *cells, const CTUI_CELL *prev,
+                        int rows, int cols, char *out, size_t cap) {
+  static const char *const sgr[] = {"1;", "2;", "3;", "4;", "9;"};
+  size_t len = 0;
+  int last_row = -1, last_col = -1;
+  CTUI_CELL last = {.color_mode = 0xff};
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+      const CTUI_CELL *cur = &cells[r * cols + c];
+      if (ref_same(cur, &prev[r * cols + c], 1) || cur->ch == CTUI_CELL_CONT) {
+        continue;
+      }
+      if (r != last_row || c != last_col) {
+        len += (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dH", r + 1,
+                                c + 1);
+      }
+      if (!ref_same(cur, &last, 0)) {
+        int fg = cur->fg == CTUI_COLOR_DEFAULT ? 39 : 30 + (cur->fg - 1);
+        int bg = cur->bg == CTUI_COLOR_DEFAULT ? 49 : 40 + (cur->bg - 1);
+        len += (size_t)snprintf(out + len, cap - len, "\x1b[");
+        if (cur->attr != last.attr) {
+          len += (size_t)snprintf(out + len, cap - len, "0;");
+          for (int i = 0; i < 5; i++) {
+            if (cur->attr & (1 << i)) {
+              len += (size_t)snprintf(out + len, cap - len, "%s", sgr[i]);
+            }
+          }
+        }
+        if (cur->color_mode == CTUI_COLOR_MODE_256) {
+          len += (size_t)snprintf(out + len, cap - len, "38;5;%d;48;5;%dm",
+                                  cur->fg, cur->bg);
+        } else if (cur->color_mode == CTUI_COLOR_MODE_RGB_FG) {
+          len += (size_t)snprintf(out + len, cap - len, "38;2;%d;%d;%d;%dm",
+                                  cur->fg_r, cur->fg_g, cur->fg_b, bg);
+        } else if (cur->color_mode == CTUI_COLOR_MODE_RGB) {
+          len += (size_t)snprintf(out + len, cap - len,
+                                  "38;2;%d;%d;%d;48;2;%d;%d;%dm", cur->fg_r,
+                                  cur->fg_g, cur->fg_b, cur->bg_r, cur->bg_g,
+                                  cur->bg_b);
+        } else {
+          len += (size_t)snprintf(out + len, cap - len, "%d;%dm", fg, bg);
+        }
+        last = *cur;
+      }
+      len += (size_t)ctui_cell_encode(cur->ch, out + len);
+      if (cur->ch == CTUI_GFX_KITTY_PLACEHOLDER && cur->kitty_row) {
+        len += (size_t)ctui_utf8_encode(
+            ctui_gfx_kitty_diacritic(cur->kitty_row - 1), out + len);
+      }
+      last_row = r;
+      last_col = c + ctui_cell_width(cur->ch);
+    }
+  }
+  if (len) {
+    len += (size_t)snprintf(out + len, cap - len, "\x1b[0m");
+  }
+  return len;
+}
+
+static unsigned g_rng = 2026;
+static unsigned rnd(void) {
+  g_rng = g_rng * 1103515245u + 12345u;
+  return g_rng >> 8;
+}
+
+/* a run of len cells from c on: one glyph, one style */
+static void paint_run(CTUI_SCREEN *s, int r, int c, int len) {
+  static const char *const text[] = {" ",
+                                     " ",
+                                     "a",
+                                     "Z",
+                                     "\xe2\x94\x80",
+                                     "\xe4\xb8\x80",
+                                     "e\xcc\x81",
+                                     "\xf0\x9f\x91\x8d",
+                                     "\x01"};
+  CTUI_CELL style = {.color_mode = (unsigned char)(rnd() % 4)};
+  int basic = style.color_mode != CTUI_COLOR_MODE_256;
+  /* BASIC's 0..8: past them a code isn't a colour (38, 48 start one) */
+  style.fg = (unsigned char)(basic ? rnd() % 9 : rnd());
+  style.bg = (unsigned char)(basic ? rnd() % 9 : rnd());
+  style.fg_r = (unsigned char)(rnd() % 2 ? rnd() : rnd() % 10);
+  style.fg_g = (unsigned char)rnd(), style.fg_b = (unsigned char)rnd();
+  style.bg_r = (unsigned char)(rnd() % 4 ? 30 : rnd());
+  style.bg_g = (unsigned char)rnd(), style.bg_b = (unsigned char)rnd();
+  style.attr = (unsigned char)(rnd() % 3 ? 0 : rnd() % 32);
+  int placeholder = rnd() % 12 == 0;
+  const char *t = text[rnd() % 9];
+  int row_of = (int)(rnd() % 3);
+  for (int k = c; k < c + len && k < s->cols;) {
+    CTUI_CELL *cell = &s->cells[r * s->cols + k];
+    int w = placeholder ? 1 : ctui_utf8_width(t);
+    if (k + w > s->cols) {
+      break;
+    }
+    if (placeholder) {
+      ctui_screen_putc(s, r, k, CTUI_GFX_KITTY_PLACEHOLDER, 0, 0);
+    } else {
+      ctui_screen_puts(s, r, k, t, 0, 0);
+    }
+    for (int i = 0; i < w; i++) {
+      uint32_t ch = cell[i].ch;
+      cell[i] = style;
+      cell[i].ch = ch;
+      cell[i].kitty_row = placeholder ? (unsigned char)row_of : 0;
+    }
+    k += w;
+  }
+}
+
+/* frames of runs, each partly over the last; screens past 255 rows and
+ * columns. Both the reference's bytes and flush's into a VT of their
+ * own after every frame: the same cells, and flush's bytes no more */
+static void test_flush_vs_reference(void) {
+  static const int sizes[][2] = {{3, 7}, {24, 80}, {12, 300}, {270, 4}};
+  int bad = 0, longer = 0, frames = 0;
+  size_t ref_bytes = 0, bytes = 0;
+  for (size_t z = 0; z < sizeof sizes / sizeof sizes[0]; z++) {
+    int rows = sizes[z][0], cols = sizes[z][1];
+    size_t n = (size_t)rows * (size_t)cols;
+    size_t cap = n * 100 + 64;
+    CTUI_SCREEN *s = ctui_screen_create(rows, cols);
+    CTUI_VT *va = ctui_vt_new(rows, cols), *vb = ctui_vt_new(rows, cols);
+    CTUI_CELL *prev = malloc(n * sizeof *prev);
+    char *want = malloc(cap);
+    for (int f = 0; f < 8; f++) {
+      memcpy(prev, s->buffer, n * sizeof *prev);
+      /* the first frame whole, then 1 in touch runs over */
+      unsigned touch = f == 0 ? 1 : 2 + rnd() % 5;
+      for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols;) {
+          int len = 1 + (int)(rnd() % 14);
+          if (rnd() % touch == 0) {
+            paint_run(s, r, c, len);
+          }
+          c += len;
+        }
+      }
+      size_t wn = ref_flush(s->cells, prev, rows, cols, want, cap);
+      char *got;
+      size_t gn = capture_flush(s, &got);
+      ctui_vt_feed(va, want, wn);
+      ctui_vt_feed(vb, got, gn);
+      free(got);
+      int differ = 0;
+      for (int r = 0; r < rows && !differ; r++) {
+        for (int c = 0; c < cols && !differ; c++) {
+          if (!same_cell(ctui_vt_cell(va, r, c), ctui_vt_cell(vb, r, c))) {
+            printf("    %dx%d frame %d differs at %d,%d\n", rows, cols, f, r,
+                   c);
+            differ = 1;
+          }
+        }
+      }
+      bad += differ;
+      longer += gn > wn;
+      frames++;
+      ref_bytes += wn;
+      bytes += gn;
+    }
+    free(prev);
+    free(want);
+    ctui_vt_free(va);
+    ctui_vt_free(vb);
+    ctui_screen_free(s);
+  }
+  CTUI_TEST_ASSERT(bad == 0,
+                   "flush draws the reference's screen on %d random frames "
+                   "(runs, gaps, every colour mode and attribute, wide "
+                   "glyphs, clusters, kitty placeholders, past 255 rows "
+                   "and columns; %d differ)",
+                   frames, bad);
+  CTUI_TEST_ASSERT(longer == 0,
+                   "and never in more bytes: %zu against the reference's "
+                   "%zu (%d frames longer)",
+                   bytes, ref_bytes, longer);
+}
+
 static void test_roundtrip(void) {
   CTUI_SCREEN *s = ctui_screen_create(12, 50);
   CTUI_VT *vt = ctui_vt_new(12, 50);
@@ -477,6 +681,7 @@ int main(void) {
   test_styles();
   test_shm_probe();
   test_roundtrip();
+  test_flush_vs_reference();
   test_captures();
   test_pty();
   return ctui_test_summary();

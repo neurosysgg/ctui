@@ -153,7 +153,7 @@ static int ansi_bg_code(unsigned char c) {
 /* whichever fields matter for a cell's color_mode -- BASIC and 256 both
  * key off plain fg/bg (just different index spaces), RGB off fg_r../bg_r..,
  * RGB_FG off fg_r.. and plain bg */
-static int ctui_compare_ctuicell(CTUI_CELL *lhs, CTUI_CELL *rhs) {
+static int ctui_compare_ctuicell(const CTUI_CELL *lhs, const CTUI_CELL *rhs) {
   if (lhs->ch != rhs->ch || lhs->color_mode != rhs->color_mode ||
       lhs->kitty_row != rhs->kitty_row || lhs->attr != rhs->attr) {
     return 0;
@@ -252,50 +252,219 @@ static char *put_rgb(char *p, unsigned char r, unsigned char g,
   return put_uint(p, b);
 }
 
-/* one SGR escape for cell's colours; when its attributes differ from
- * last_attr (what the terminal has now) it starts with a reset and sets
- * them again ("0;1;4;..."), since the colours follow in the same escape */
-static char *emit_color(char *p, const CTUI_CELL *cell,
-                        unsigned char last_attr) {
-  static const char sgr[] = {'1', '2', '3', '4', '9'};
-  p = PUT_LIT(p, "\x1b[");
-  if (cell->attr != last_attr) {
-    p = PUT_LIT(p, "0;");
-    for (int i = 0; i < 5; i++) {
-      if (cell->attr & (1 << i)) {
-        p[0] = sgr[i];
-        p[1] = ';';
-        p += 2;
-      }
-    }
-  }
+/* the SGR parameters for a cell's fg, and for its bg (no separator) */
+static char *put_fg(char *p, const CTUI_CELL *cell) {
   switch (cell->color_mode) {
   case CTUI_COLOR_MODE_256:
     p = PUT_LIT(p, "38;5;");
-    p = put_uint(p, cell->fg);
-    p = PUT_LIT(p, ";48;5;");
-    p = put_uint(p, cell->bg);
-    break;
+    return put_uint(p, cell->fg);
   case CTUI_COLOR_MODE_RGB_FG:
-    p = PUT_LIT(p, "38;2;");
-    p = put_rgb(p, cell->fg_r, cell->fg_g, cell->fg_b);
-    *p++ = ';';
-    p = put_uint(p, (unsigned)ansi_bg_code(cell->bg));
-    break;
   case CTUI_COLOR_MODE_RGB:
     p = PUT_LIT(p, "38;2;");
-    p = put_rgb(p, cell->fg_r, cell->fg_g, cell->fg_b);
-    p = PUT_LIT(p, ";48;2;");
-    p = put_rgb(p, cell->bg_r, cell->bg_g, cell->bg_b);
-    break;
+    return put_rgb(p, cell->fg_r, cell->fg_g, cell->fg_b);
   default:
-    p = put_uint(p, (unsigned)ansi_fg_code(cell->fg));
-    *p++ = ';';
-    p = put_uint(p, (unsigned)ansi_bg_code(cell->bg));
-    break;
+    return put_uint(p, (unsigned)ansi_fg_code(cell->fg));
   }
-  *p++ = 'm';
+}
+
+static char *put_bg(char *p, const CTUI_CELL *cell) {
+  switch (cell->color_mode) {
+  case CTUI_COLOR_MODE_256:
+    p = PUT_LIT(p, "48;5;");
+    return put_uint(p, cell->bg);
+  case CTUI_COLOR_MODE_RGB:
+    p = PUT_LIT(p, "48;2;");
+    return put_rgb(p, cell->bg_r, cell->bg_g, cell->bg_b);
+  default:
+    return put_uint(p, (unsigned)ansi_bg_code(cell->bg));
+  }
+}
+
+/* whether two cells' fg (bg) come out as the same SGR parameters: the
+ * mode decides how each side is sent (basic, 256 or RGB) */
+static int fg_kind(const CTUI_CELL *c) {
+  return c->color_mode == CTUI_COLOR_MODE_RGB_FG ? CTUI_COLOR_MODE_RGB
+                                                 : c->color_mode;
+}
+
+static int fg_same(const CTUI_CELL *a, const CTUI_CELL *b) {
+  if (fg_kind(a) != fg_kind(b)) {
+    return 0;
+  }
+  if (fg_kind(a) == CTUI_COLOR_MODE_RGB) {
+    return a->fg_r == b->fg_r && a->fg_g == b->fg_g && a->fg_b == b->fg_b;
+  }
+  return a->fg == b->fg;
+}
+
+static int bg_kind(const CTUI_CELL *c) {
+  return c->color_mode == CTUI_COLOR_MODE_RGB_FG ? CTUI_COLOR_MODE_BASIC
+                                                 : c->color_mode;
+}
+
+static int bg_same(const CTUI_CELL *a, const CTUI_CELL *b) {
+  if (bg_kind(a) != bg_kind(b)) {
+    return 0;
+  }
+  if (bg_kind(a) == CTUI_COLOR_MODE_RGB) {
+    return a->bg_r == b->bg_r && a->bg_g == b->bg_g && a->bg_b == b->bg_b;
+  }
+  return a->bg == b->bg;
+}
+
+/* "1;2;..." for the CTUI_ATTR_* bits in attr */
+static char *put_attrs(char *p, unsigned attr) {
+  static const char sgr[] = {'1', '2', '3', '4', '9'};
+  for (int i = 0; i < 5; i++) {
+    if (attr & (1u << i)) {
+      p[0] = sgr[i];
+      p[1] = ';';
+      p += 2;
+    }
+  }
   return p;
+}
+
+/* the SGR escape taking the terminal from last's colours and attributes
+ * to cell's, only what changed in it: an attribute gone is switched off
+ * (22 bold and dim together, 23, 24, 29), unless both colours change
+ * anyway, when a reset ("0;") is shorter. known = 0: last isn't what the
+ * terminal has (a frame's first escape), so both colours are sent, after
+ * a reset when there are attributes (the last frame ended on one).
+ * Returns past it -- nothing written when nothing differs. */
+static char *emit_color(char *p, const CTUI_CELL *cell, const CTUI_CELL *last,
+                        int known) {
+  char *start = p;
+  int fg = !known || !fg_same(cell, last);
+  int bg = !known || !bg_same(cell, last);
+  unsigned gone = known ? (unsigned)(last->attr & ~cell->attr) : 0;
+  p = PUT_LIT(p, "\x1b[");
+  if (!known) {
+    if (cell->attr) {
+      p = put_attrs(PUT_LIT(p, "0;"), cell->attr);
+    }
+  } else if (cell->attr == last->attr) {
+    /* the usual case: colours alone */
+  } else if (gone && fg && bg) {
+    p = put_attrs(PUT_LIT(p, "0;"), cell->attr);
+  } else {
+    unsigned add = (unsigned)(cell->attr & ~last->attr);
+    if (gone & (CTUI_ATTR_BOLD | CTUI_ATTR_DIM)) {
+      p = PUT_LIT(p, "22;");
+      add |= cell->attr & (CTUI_ATTR_BOLD | CTUI_ATTR_DIM);
+    }
+    if (gone & CTUI_ATTR_ITALIC) {
+      p = PUT_LIT(p, "23;");
+    }
+    if (gone & CTUI_ATTR_UNDERLINE) {
+      p = PUT_LIT(p, "24;");
+    }
+    if (gone & CTUI_ATTR_STRIKE) {
+      p = PUT_LIT(p, "29;");
+    }
+    p = put_attrs(p, add);
+  }
+  if (fg) {
+    p = put_fg(p, cell);
+    *p++ = ';';
+  }
+  if (bg) {
+    p = put_bg(p, cell);
+    *p++ = ';';
+  }
+  if (p == start + 2) {
+    return start;
+  }
+  p[-1] = 'm';
+  return p;
+}
+
+/* the digits put_uint() writes for v (5 standing for any more) */
+static int digits_of(unsigned v) {
+  return v < 10 ? 1 : v < 100 ? 2 : v < 1000 ? 3 : 5;
+}
+
+/* the unchanged cells line[from..to) written out again, when that is
+ * shorter than limit bytes: each a plain one-column glyph in the colours
+ * the terminal has now. Returns past them, or NULL (nothing kept) */
+static char *refill(char *p, const CTUI_CELL *line, int from, int to,
+                    const CTUI_CELL *last_color, int limit) {
+  char *start = p;
+  for (int c = from; c < to; c++) {
+    const CTUI_CELL *cell = &line[c];
+    if (p - start >= limit || color_changed(cell, last_color) ||
+        cell->ch == CTUI_CELL_CONT || cell->ch == CTUI_GFX_KITTY_PLACEHOLDER ||
+        ctui_cell_width(cell->ch) != 1) {
+      return NULL;
+    }
+    p += ctui_cell_encode(cell->ch, p);
+  }
+  return p - start < limit ? p : NULL;
+}
+
+/* the cursor from where the last cell left it (last_row, last_col: col
+ * may be cols, a deferred wrap pending) to (r, c), in the fewest bytes:
+ * nothing when the wrap lands there, CR LF to the next row's start, the
+ * cells between written again or CUF along a row, else CUP. line is row
+ * r's cells. */
+static char *move_cursor(char *p, const CTUI_CELL *line, int r, int c,
+                         int last_row, int last_col,
+                         const CTUI_CELL *last_color) {
+  if (r == last_row + 1 && c == 0 && last_row >= 0) {
+    /* a deferred wrap puts the next glyph there itself */
+    if (last_col == -2) {
+      return p;
+    }
+    return PUT_LIT(p, "\r\n");
+  }
+  int cup = 4 + digits_of((unsigned)r + 1) + digits_of((unsigned)c + 1);
+  if (r == last_row && last_col >= 0 && c > last_col) {
+    int n = c - last_col;
+    int cuf = 3 + (n > 1 ? digits_of((unsigned)n) : 0);
+    char *q = refill(p, line, last_col, c, last_color, cuf < cup ? cuf : cup);
+    if (q) {
+      return q;
+    }
+    if (cuf < cup) {
+      p = PUT_LIT(p, "\x1b[");
+      if (n > 1) {
+        p = put_uint(p, (unsigned)n);
+      }
+      *p++ = 'C';
+      return p;
+    }
+  }
+  p = PUT_LIT(p, "\x1b[");
+  p = put_uint(p, (unsigned)r + 1);
+  *p++ = ';';
+  p = put_uint(p, (unsigned)c + 1);
+  *p++ = 'H';
+  return p;
+}
+
+/* how many cells after (r, c) REP can draw: the same one-column glyph in
+ * the same colours, up to the last of them that changed (the unchanged
+ * ones between are drawn again, as they are). 0 for a glyph REP can't
+ * repeat: a cluster (kitty repeats one codepoint), a wide one, a kitty
+ * placeholder (its row is a diacritic). */
+static int repeat_run(const CTUI_SCREEN *s, int r, int c) {
+  const CTUI_CELL *line = &s->cells[r * s->cols];
+  const CTUI_CELL *prev = &s->buffer[r * s->cols];
+  uint32_t ch = line[c].ch;
+  if ((ch & CTUI_CELL_CLUSTER) || ch == CTUI_GFX_KITTY_PLACEHOLDER ||
+      ctui_cell_width(ch) != 1) {
+    return 0;
+  }
+  int last = c;
+  for (int j = c + 1; j < s->cols && line[j].ch == ch &&
+                      line[j].kitty_row == line[c].kitty_row &&
+                      !color_changed(&line[j], &line[c]);
+       j++) {
+    if (!ctui_compare_ctuicell(&line[j], &prev[j])) {
+      last = j;
+    }
+  }
+  return last - c;
 }
 
 /* the sink gets whole frames, and only changed ones */
@@ -370,16 +539,15 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
       }
 
       if (r != last_row || c != last_col) {
-        char *p = PUT_LIT(out + len, "\x1b[");
-        p = put_uint(p, (unsigned)r + 1);
-        *p++ = ';';
-        p = put_uint(p, (unsigned)c + 1);
-        *p++ = 'H';
-        len = (size_t)(p - out);
+        len = (size_t)(move_cursor(out + len, &s->cells[r * s->cols], r, c,
+                                   last_row, last_col, &last_color) -
+                       out);
       }
 
       if (color_changed(cur, &last_color)) {
-        len = (size_t)(emit_color(out + len, cur, last_color.attr) - out);
+        len = (size_t)(emit_color(out + len, cur, &last_color,
+                                  last_color.color_mode != 0xff) -
+                       out);
         last_color = *cur;
       }
 
@@ -388,13 +556,30 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
        * whole frame, not just one cell -- nor a noncharacter (kitty draws
        * nothing for it, the row would shift left by a cell): U+FFFD */
       uint32_t ch = cur->ch;
-      len += (size_t)ctui_cell_encode(ch, out + len);
+      int bytes = ctui_cell_encode(ch, out + len);
+      len += (size_t)bytes;
       if (ch == CTUI_GFX_KITTY_PLACEHOLDER && cur->kitty_row) {
         len += (size_t)ctui_utf8_encode(
             ctui_gfx_kitty_diacritic(cur->kitty_row - 1), out + len);
+      } else if (c + 1 < s->cols && cur[1].ch == ch) {
+        int k = repeat_run(s, r, c);
+        if (k > 0 && k * bytes > 3 + (k > 1 ? digits_of((unsigned)k) : 0)) {
+          char *p = PUT_LIT(out + len, "\x1b[");
+          if (k > 1) {
+            p = put_uint(p, (unsigned)k);
+          }
+          *p++ = 'b';
+          len = (size_t)(p - out);
+          c += k;
+        }
       }
       last_row = r;
       last_col = c + ctui_cell_width(ch);
+      /* the last column written: the terminal holds the cursor there,
+       * a wrap pending -- only a glyph or CR LF go on from it */
+      if (last_col >= s->cols) {
+        last_col = -2;
+      }
     }
   }
 

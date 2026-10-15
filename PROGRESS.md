@@ -237,6 +237,31 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Flush wrote more bytes than the screen needed** (2026-10-15,
+  ctui-wm's notes/self-improving.md, s2). Every move was a CUP, every
+  colour change a whole SGR (after a `0;` reset whenever an attribute
+  changed), every glyph written out. Now `move_cursor()` takes the
+  shortest of: nothing (the pending wrap after the last column lands on
+  the next row's start), CR LF, the unchanged cells between written again
+  (when they are one-column glyphs in the colours the terminal has), CUF,
+  CUP; `emit_color()` sends only the fg / bg that changed and switches
+  attributes off one by one (22, 23, 24, 29), a reset only when both
+  colours change anyway (a frame's first escape stays whole: the pen
+  isn't known there); a run of one glyph in one style becomes the glyph
+  and a REP (`CSI n b`), up to the last cell of it that changed (not for
+  clusters, wide glyphs, kitty placeholders). The harness VT learned REP.
+  On ctui-wm's screens recorded (90 runs, 1933 frames, tools/flushbench):
+  1.47 -> 0.60 MB (-59 %; REP alone -52 % of what was left), flush time
+  20.8 -> 18.6 ms; kitty's own parser takes the same time for both (17.0
+  vs 17.5 ms: its cost is per cell, not per byte). The synthetic worst
+  case (every other cell, random colours) 0.12 -> 0.17 ms. Checked: the
+  recordings' frames give the same cells in the VT and in kitty
+  (check_flush_kitty.py); harness_test's new reference test (the old
+  snprintf flush) draws the same screen on 32 random frames of runs and
+  gaps and never in fewer bytes, and fails on four planted bugs (refill
+  or REP ignoring colours, a wrong off code); screen_test has a case per
+  saving. ctui-mus: screens identical.
+
 - [x] **Flush's output had no check beyond its unit tests' bytes**
   (2026-10-15, ctui-wm's notes/self-improving.md, s2: fewer bytes per
   frame needs "the same screen", not "the same bytes"). The harness

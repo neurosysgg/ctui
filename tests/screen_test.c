@@ -13,13 +13,10 @@
  * same trick real shells use to capture a child's output, just without a
  * child process. Restored immediately after each capture so
  * CTUI_TEST_ASSERT's own printf()s keep going to the real stdout. */
-#define _POSIX_C_SOURCE 200809L /* fileno() */
 #include "ctui.h"
 
 #include "ctui_test.h"
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -88,14 +85,13 @@ static void test_flush_diff_and_color_cache(void) {
   ctui_screen_putc(s, 0, 3, 'C', CTUI_COLOR_GREEN, CTUI_COLOR_DEFAULT);
 
   size_t n = capture_flush(s, out, sizeof out);
-  CTUI_TEST_ASSERT(
-      n == strlen("\x1b[1;1H\x1b[31;49mAB\x1b[1;4H\x1b[32;49mC\x1b[0m") &&
-          strcmp(out, "\x1b[1;1H\x1b[31;49mAB\x1b[1;4H\x1b[32;49mC\x1b[0m") ==
-              0,
-      "flush emits exactly one position escape for the contiguous A/B run "
-      "(no repeated color escape since B's color matches A's), skips "
-      "unchanged col 2 outright, then a fresh position+color escape for "
-      "the non-contiguous, differently-colored C, ending with a reset");
+  const char *want = "\x1b[1;1H\x1b[31;49mAB\x1b[C\x1b[32mC\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "flush emits exactly one position escape for the "
+                   "contiguous A/B run (no repeated color escape since B's "
+                   "color matches A's), steps over unchanged col 2 (CUF), "
+                   "then only the fg that changed for C, ending with a "
+                   "reset");
 
   n = capture_flush(s, out, sizeof out);
   CTUI_TEST_ASSERT(n == 0,
@@ -230,12 +226,14 @@ static void test_flush_attrs(void) {
   s->cells[2] = (CTUI_CELL){.ch = 'p'};
   s->cells[3] = (CTUI_CELL){.ch = 'q'};
   size_t n = capture_flush(s, out, sizeof out);
-  const char *want = "\x1b[1;1H\x1b[0;1;39;49mB\x1b[0;3;4;39;49mI"
-                     "\x1b[0;39;49mpq\x1b[0m";
+  const char *want = "\x1b[1;1H\x1b[0;1;39;49mB\x1b[22;3;4mI"
+                     "\x1b[23;24mpq\x1b[0m";
   CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
-                   "flush resets and sets each run's attributes in the "
-                   "colour escape, back to plain with a reset only, and "
-                   "repeats nothing within a run (got %s)", out + 1);
+                   "flush sets a frame's first attributes after a reset, "
+                   "then switches off only those that go (22: bold and "
+                   "dim, 23 italic, 24 underline) and on those that come, "
+                   "colours unchanged left out, nothing repeated within a "
+                   "run (got %s)", out + 1);
 
   s->cells[3].attr = CTUI_ATTR_STRIKE | CTUI_ATTR_DIM;
   n = capture_flush(s, out, sizeof out);
@@ -254,169 +252,62 @@ static void test_flush_attrs(void) {
   ctui_screen_free(s);
 }
 
-/* the reference for flush's bytes: its loop as it was with snprintf()
- * doing the formatting, before the escapes were written by hand
- * (2026-10-15). Kept simple and slow on purpose; flush must match it
- * byte for byte on any frame. */
-static int ref_same(const CTUI_CELL *a, const CTUI_CELL *b, int with_ch) {
-  if ((with_ch && (a->ch != b->ch || a->kitty_row != b->kitty_row)) ||
-      a->color_mode != b->color_mode || a->attr != b->attr) {
-    return 0;
-  }
-  int fg_rgb = a->color_mode == CTUI_COLOR_MODE_RGB ||
-               a->color_mode == CTUI_COLOR_MODE_RGB_FG;
-  if (fg_rgb &&
-      (a->fg_r != b->fg_r || a->fg_g != b->fg_g || a->fg_b != b->fg_b)) {
-    return 0;
-  }
-  if (!fg_rgb && a->fg != b->fg) {
-    return 0;
-  }
-  if (a->color_mode == CTUI_COLOR_MODE_RGB) {
-    return a->bg_r == b->bg_r && a->bg_g == b->bg_g && a->bg_b == b->bg_b;
-  }
-  return a->bg == b->bg;
-}
+/* the bytes saved beside the plain encoding: moves, refills, REP, the
+ * wrap, SGR deltas */
+static void test_flush_fewer_bytes(void) {
+  CTUI_SCREEN *s = ctui_screen_create(2, 12);
+  char out[256];
+  capture_flush(s, out, sizeof out); /* prime */
 
-static size_t ref_flush(const CTUI_CELL *cells, const CTUI_CELL *prev,
-                        int rows, int cols, char *out, size_t cap) {
-  static const char *const sgr[] = {"1;", "2;", "3;", "4;", "9;"};
-  size_t len = 0;
-  int last_row = -1, last_col = -1;
-  CTUI_CELL last = {.color_mode = 0xff};
-  for (int r = 0; r < rows; r++) {
-    for (int c = 0; c < cols; c++) {
-      const CTUI_CELL *cur = &cells[r * cols + c];
-      if (ref_same(cur, &prev[r * cols + c], 1) || cur->ch == CTUI_CELL_CONT) {
-        continue;
-      }
-      if (r != last_row || c != last_col) {
-        len += (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dH", r + 1,
-                                c + 1);
-      }
-      if (!ref_same(cur, &last, 0)) {
-        int fg = cur->fg == CTUI_COLOR_DEFAULT ? 39 : 30 + (cur->fg - 1);
-        int bg = cur->bg == CTUI_COLOR_DEFAULT ? 49 : 40 + (cur->bg - 1);
-        len += (size_t)snprintf(out + len, cap - len, "\x1b[");
-        if (cur->attr != last.attr) {
-          len += (size_t)snprintf(out + len, cap - len, "0;");
-          for (int i = 0; i < 5; i++) {
-            if (cur->attr & (1 << i)) {
-              len += (size_t)snprintf(out + len, cap - len, "%s", sgr[i]);
-            }
-          }
-        }
-        if (cur->color_mode == CTUI_COLOR_MODE_256) {
-          len += (size_t)snprintf(out + len, cap - len, "38;5;%d;48;5;%dm",
-                                  cur->fg, cur->bg);
-        } else if (cur->color_mode == CTUI_COLOR_MODE_RGB_FG) {
-          len += (size_t)snprintf(out + len, cap - len, "38;2;%d;%d;%d;%dm",
-                                  cur->fg_r, cur->fg_g, cur->fg_b, bg);
-        } else if (cur->color_mode == CTUI_COLOR_MODE_RGB) {
-          len += (size_t)snprintf(out + len, cap - len,
-                                  "38;2;%d;%d;%d;48;2;%d;%d;%dm", cur->fg_r,
-                                  cur->fg_g, cur->fg_b, cur->bg_r, cur->bg_g,
-                                  cur->bg_b);
-        } else {
-          len += (size_t)snprintf(out + len, cap - len, "%d;%dm", fg, bg);
-        }
-        last = *cur;
-      }
-      len += (size_t)ctui_cell_encode(cur->ch, out + len);
-      if (cur->ch == CTUI_GFX_KITTY_PLACEHOLDER && cur->kitty_row) {
-        len += (size_t)ctui_utf8_encode(
-            ctui_gfx_kitty_diacritic(cur->kitty_row - 1), out + len);
-      }
-      last_row = r;
-      last_col = c + ctui_cell_width(cur->ch);
-    }
-  }
-  if (len) {
-    len += (size_t)snprintf(out + len, cap - len, "\x1b[0m");
-  }
-  return len;
-}
+  ctui_screen_puts(s, 0, 0, "--------", CTUI_COLOR_RED, CTUI_COLOR_DEFAULT);
+  size_t n = capture_flush(s, out, sizeof out);
+  const char *want = "\x1b[1;1H\x1b[31;49m-\x1b[7b\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "a run of one glyph in one style is the glyph and a REP "
+                   "(got %s)", out + 1);
 
-/* flush into a temporary file: frames here pass a pipe's 64 KiB */
-static size_t capture_big(CTUI_SCREEN *s, char *out, size_t cap) {
-  FILE *f = tmpfile();
-  int saved = dup(STDOUT_FILENO);
-  dup2(fileno(f), STDOUT_FILENO);
-  ctui_screen_flush(s);
-  dup2(saved, STDOUT_FILENO);
-  close(saved);
-  rewind(f);
-  size_t n = fread(out, 1, cap, f);
-  fclose(f);
-  return n;
-}
+  ctui_screen_puts(s, 0, 0, "--------", CTUI_COLOR_GREEN, CTUI_COLOR_DEFAULT);
+  s->cells[6].fg = s->cells[7].fg = CTUI_COLOR_RED;
+  n = capture_flush(s, out, sizeof out);
+  want = "\x1b[1;1H\x1b[32;49m-\x1b[5b\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "a REP takes in only what changed (got %s)", out + 1);
 
-static unsigned g_rng = 2026;
-static unsigned rnd(void) {
-  g_rng = g_rng * 1103515245u + 12345u;
-  return g_rng >> 8;
-}
+  ctui_screen_puts(s, 0, 0, "ab", CTUI_COLOR_GREEN, CTUI_COLOR_DEFAULT);
+  ctui_screen_puts(s, 0, 4, "cd", CTUI_COLOR_GREEN, CTUI_COLOR_DEFAULT);
+  ctui_screen_puts(s, 0, 8, "e", CTUI_COLOR_GREEN, CTUI_COLOR_DEFAULT);
+  n = capture_flush(s, out, sizeof out);
+  want = "\x1b[1;1H\x1b[32;49mab--cd\x1b[2Ce\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "unchanged cells in the colours the terminal has are "
+                   "written again when that's shorter than a move; ones in "
+                   "others are stepped over (CUF) (got %s)", out + 1);
 
-/* random frames, each partly over the last: every colour mode, out-of-
- * range BASIC colours (codes past 255), attributes, wide glyphs,
- * clusters, kitty placeholders with rows, a screen past 255 rows and
- * columns (positions past the digit table) */
-static void test_flush_matches_reference(void) {
-  static const char *const text[] = {"a", "Z", " ", "\xe4\xb8\x80",
-                                     "e\xcc\x81", "\xf0\x9f\x91\x8d",
-                                     "\xe2\x94\x80"};
-  static const int sizes[][2] = {{3, 7}, {24, 80}, {12, 300}, {270, 4}};
-  int bad = 0, frames = 0;
-  size_t bytes = 0;
-  for (size_t z = 0; z < sizeof sizes / sizeof sizes[0]; z++) {
-    int rows = sizes[z][0], cols = sizes[z][1];
-    size_t n = (size_t)rows * (size_t)cols;
-    size_t cap = n * 100 + 64;
-    CTUI_SCREEN *s = ctui_screen_create(rows, cols);
-    CTUI_CELL *prev = malloc(n * sizeof *prev);
-    char *got = malloc(cap), *want = malloc(cap);
-    for (int f = 0; f < 6; f++) {
-      memcpy(prev, s->buffer, n * sizeof *prev);
-      unsigned touch = f == 0 ? 1 : 2 + rnd() % 6; /* 1 in touch changes */
-      for (int r = 0; r < rows; r++) {
-        for (int c = 0; c < cols; c++) {
-          if (rnd() % touch) {
-            continue;
-          }
-          if (rnd() % 16 == 0) {
-            ctui_screen_putc(s, r, c, CTUI_GFX_KITTY_PLACEHOLDER, 0, 0);
-            s->cells[r * cols + c].kitty_row = (unsigned char)(rnd() % 4);
-          } else {
-            ctui_screen_puts(s, r, c, text[rnd() % 7], 0, 0);
-          }
-          CTUI_CELL *cell = &s->cells[r * cols + c];
-          cell->color_mode = (unsigned char)(rnd() % 4);
-          cell->fg = (unsigned char)(rnd() % 3 ? rnd() % 9 : rnd());
-          cell->bg = (unsigned char)(rnd() % 3 ? rnd() % 9 : rnd());
-          cell->fg_r = (unsigned char)rnd();
-          cell->fg_g = (unsigned char)(rnd() % 2 ? rnd() : rnd() % 10);
-          cell->fg_b = (unsigned char)(rnd() % 2 ? rnd() : 99 + rnd() % 2);
-          cell->bg_r = (unsigned char)rnd();
-          cell->bg_g = (unsigned char)rnd();
-          cell->bg_b = (unsigned char)rnd();
-          cell->attr = (unsigned char)(rnd() % 3 ? 0 : rnd() % 32);
-        }
-      }
-      size_t wn = ref_flush(s->cells, prev, rows, cols, want, cap);
-      size_t gn = capture_big(s, got, cap);
-      bad += gn != wn || memcmp(got, want, wn) != 0;
-      frames++;
-      bytes += gn;
-    }
-    free(prev);
-    free(got);
-    free(want);
-    ctui_screen_free(s);
-  }
-  CTUI_TEST_ASSERT(bad == 0,
-                   "flush writes the reference's bytes on %d random frames "
-                   "(%zu bytes; %d differ)",
-                   frames, bytes, bad);
+  ctui_screen_putc(s, 0, 11, 'x', 0, 0);
+  ctui_screen_putc(s, 1, 0, 'y', 0, 0);
+  n = capture_flush(s, out, sizeof out);
+  want = "\x1b[1;12H\x1b[39;49mxy\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "after the last column the terminal's pending wrap "
+                   "places the next row's first glyph (got %s)", out + 1);
+
+  ctui_screen_putc(s, 0, 10, 'w', 0, 0);
+  ctui_screen_putc(s, 1, 0, 'v', 0, 0);
+  ctui_screen_putc(s, 1, 5, 'u', 0, 0);
+  n = capture_flush(s, out, sizeof out);
+  want = "\x1b[1;11H\x1b[39;49mw\r\nv\x1b[4Cu\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "short of it, CR LF to the next row's start (got %s)",
+                   out + 1);
+
+  ctui_screen_putc(s, 0, 0, 'p', 0, 0);
+  ctui_screen_putc(s, 1, 7, 'q', 0, 0);
+  n = capture_flush(s, out, sizeof out);
+  want = "\x1b[1;1H\x1b[39;49mp\x1b[2;8Hq\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "anywhere else a CUP (got %s)", out + 1);
+
+  ctui_screen_free(s);
 }
 
 static int g_frames = 0, g_refuse = 0;
@@ -477,7 +368,7 @@ int main(void) {
   test_flush_diff_and_color_cache();
   test_flush_256_and_rgb();
   test_flush_attrs();
-  test_flush_matches_reference();
+  test_flush_fewer_bytes();
   test_resize_forces_redraw();
   test_sink();
 

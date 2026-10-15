@@ -6,8 +6,8 @@
  * chunks split anywhere (a sequence or a UTF-8 character cut between two
  * reads is finished by the next feed). Understood: printable text placed
  * cluster by cluster at ctui's widths (core/utf8.h: kitty's), CR LF BS
- * TAB, cursor moves (CUP/HVP, CUU/CUD/CUF/CUB, CHA, VPA), ED and EL, SGR
- * into the cells' colours and attributes, the alternate screen (entering
+ * TAB, cursor moves (CUP/HVP, CUU/CUD/CUF/CUB, CHA, VPA), ED and EL, REP
+ * (the last glyph again), SGR into the cells' colours and attributes, the alternate screen (entering
  * it clears). Swallowed: every other CSI, OSC/APC/DCS/PM/SOS strings
  * (kitty graphics, titles), ESC + intermediates + final (charsets, DECSC,
  * ...). No scrolling regions, no insert/delete: ctui's renderer never
