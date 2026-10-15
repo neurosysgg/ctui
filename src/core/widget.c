@@ -8,31 +8,30 @@
 #include <stdlib.h>
 #include <string.h>
 
-CTUI_WIDGET ctui_widget_make(int x, int y, int w, int h, void *widget_data,
-                             void (*render)(CTUI_WIDGET *self,
-                                            CTUI_COMPOSITOR *comp),
-                             void (*layout)(CTUI_WIDGET *self,
-                                           CTUI_COMPOSITOR *comp)) {
+CTUI_WIDGET
+ctui_widget_make(int x, int y, int w, int h, void *widget_data,
+                 void (*render)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp),
+                 void (*layout)(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp)) {
   ctui_logf(E_INF,
             "[CTUI:WIDGET] - creating widget @ tick %d (x=%d, y=%d, w=%d, "
             "h=%d)\n",
             ctui_tick_advance(), x, y, w, h);
-  return (CTUI_WIDGET){
-      .x = x,
-      .y = y,
-      .w = w,
-      .h = h,
-      .widget_data = widget_data,
-      .ticks = 0,
-      .buf = NULL,
-      .layout = layout,
-      .render = render,
-      .supported_gfx_modes =
-          CTUI_GFX_ANSI16 | CTUI_GFX_ANSI256 | CTUI_GFX_TRUECOLOR,
-      .gfx_render_mode = 0,
-      .gfx_render = NULL,
-      .parent = NULL,
-      .is_active_child = NULL};
+  return (CTUI_WIDGET){.x = x,
+                       .y = y,
+                       .w = w,
+                       .h = h,
+                       .widget_data = widget_data,
+                       .ticks = 0,
+                       .buf = NULL,
+                       .layout = layout,
+                       .render = render,
+                       .supported_gfx_modes = CTUI_GFX_ANSI16 |
+                                              CTUI_GFX_ANSI256 |
+                                              CTUI_GFX_TRUECOLOR,
+                       .gfx_render_mode = 0,
+                       .gfx_render = NULL,
+                       .parent = NULL,
+                       .is_active_child = NULL};
 }
 
 void ctui_widget_tick_advance(CTUI_WIDGET *widget) { ++widget->ticks; }
@@ -57,8 +56,8 @@ void ctui_widget_init(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp) {
     widget->buf = NULL;
     return;
   }
-  widget->buf = comp->cells + (size_t)widget->y * (size_t)comp->cols +
-               (size_t)widget->x;
+  widget->buf =
+      comp->cells + (size_t)widget->y * (size_t)comp->cols + (size_t)widget->x;
   ctui_logf(E_INF,
             "[CTUI:WIDGET] - widget %p bound to compositor slice @ tick %d "
             "(x=%d, y=%d, w=%d, h=%d)\n",
@@ -110,9 +109,14 @@ static CTUI_CELL *widget_cell_at(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
  * would be at the compositor's edge. Returns the columns consumed (so
  * puts can advance), which is also what puts advances by for a rejected
  * write -- a rejected write still "occupies" its columns, so the rest of
- * the string lands where it would have. */
-static int widget_put(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
-                      int col, uint32_t ch, const CTUI_CELL *style) {
+ * the string lands where it would have. widget_put() takes the common
+ * case first and comes here for the rest -- kept out of line, or its
+ * calls' register saves land on that case too. */
+#ifdef __GNUC__
+__attribute__((noinline))
+#endif
+static int widget_put_any(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
+                          int col, uint32_t ch, CTUI_CELL style) {
   CTUI_CELL *cell = widget_cell_at(widget, comp, row, col);
   if (cell == NULL) {
     return ctui_cell_width(ch);
@@ -120,7 +124,7 @@ static int widget_put(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   ctui_logf(E_DBG,
             "[CTUI:WIDGET] - putc @ tick %d (row=%d, col=%d, ch=U+%04X, "
             "mode=%d)\n",
-            ctui_tick_advance(), row, col, ch, style->color_mode);
+            ctui_tick_advance(), row, col, ch, style.color_mode);
 
   int abs_col = widget->x + col;
   CTUI_CELL *comp_row = cell - abs_col;
@@ -128,10 +132,56 @@ static int widget_put(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
   int w = ctui_cell_set_ch(comp_row, comp->cols, abs_col, limit, ch);
   for (int i = 0; i < w; i++) {
     uint32_t keep = cell[i].ch;
-    cell[i] = *style;
+    cell[i] = style;
     cell[i].ch = keep;
   }
   return w;
+}
+
+/* narrow for sure without asking the width table: printable ASCII and
+ * what boxes, bars and graphs are drawn with -- box drawing, block
+ * elements, braille (widget_test checks the ranges against the table) */
+static int known_narrow(uint32_t ch) {
+  return (ch - 0x20u < 0x5Fu) || (ch - 0x2500u < 0xA0u) ||
+         (ch - 0x2800u < 0x100u);
+}
+
+/* widget_put_any()'s common case without its calls: a narrow glyph inside
+ * the widget and the compositor -- nearly every putc; ctui-top draws its
+ * boxes and graphs a cell at a time -- written straight into the cell
+ * with the two CONT mends ctui_cell_set_ch() would make. Logging putcs
+ * (E_DBG) goes the general way, which logs them. Each bound is one
+ * unsigned compare (a negative wraps past it). The style comes by value,
+ * here and to widget_put_any(): with its address taken, a putc wrapper
+ * built it on the stack in pieces and read it back whole, a failed
+ * store-to-load forward that cost more than the rest of the put. A
+ * frame of putcs ~1.8x faster with gcc (ctui-wm's
+ * notes/self-improving.md, session 220); widget_test checks every
+ * variant against the old path cell by cell. */
+static inline int widget_put(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
+                             int row, int col, uint32_t ch, CTUI_CELL style) {
+  int abs_row = widget->y + row;
+  int abs_col = widget->x + col;
+  if (widget->buf != NULL && (unsigned)row < (unsigned)widget->h &&
+      (unsigned)col < (unsigned)widget->w &&
+      (unsigned)abs_row < (unsigned)comp->rows &&
+      (unsigned)abs_col < (unsigned)comp->cols &&
+      !(ctui_g_log_verbosity & E_DBG) &&
+      (known_narrow(ch) || ctui_cell_width(ch) == 1)) {
+    /* addressed as widget_cell_at() does: from the widget's slice */
+    CTUI_CELL *cell =
+        widget->buf + (size_t)row * (size_t)comp->cols + (size_t)col;
+    if (cell->ch == CTUI_CELL_CONT && abs_col > 0) {
+      cell[-1].ch = ' ';
+    }
+    if (abs_col + 1 < comp->cols && cell[1].ch == CTUI_CELL_CONT) {
+      cell[1].ch = ' ';
+    }
+    *cell = style;
+    cell->ch = ch;
+    return 1;
+  }
+  return widget_put_any(widget, comp, row, col, ch, style);
 }
 
 /* how many bytes at str (before end, NULL: none) are printable ASCII that
@@ -191,7 +241,7 @@ static int widget_put_str(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
     uint32_t ch;
     str += ctui_utf8_cluster(str, end ? (size_t)(end - str) : (size_t)-1, &ch,
                              NULL);
-    col += widget_put(widget, comp, row, col, ch, style);
+    col += widget_put(widget, comp, row, col, ch, *style);
   }
   return col;
 }
@@ -202,8 +252,7 @@ static int widget_puts_styled(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
   ctui_logf(E_DBG,
             "[CTUI:WIDGET] - puts @ tick %d (row=%d, col=%d, len=%zu, "
             "mode=%d): \"%s\"\n",
-            ctui_tick_advance(), row, col, strlen(str), style->color_mode,
-            str);
+            ctui_tick_advance(), row, col, strlen(str), style->color_mode, str);
   return widget_put_str(widget, comp, row, col, str, NULL, style);
 }
 
@@ -211,7 +260,7 @@ void ctui_widget_putc(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                       int col, uint32_t ch, unsigned char fg,
                       unsigned char bg) {
   CTUI_CELL style = {.fg = fg, .bg = bg, .color_mode = CTUI_COLOR_MODE_BASIC};
-  widget_put(widget, comp, row, col, ch, &style);
+  widget_put(widget, comp, row, col, ch, style);
 }
 
 void ctui_widget_puts(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
@@ -233,8 +282,8 @@ int ctui_widget_puts_n(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
 }
 
 int ctui_widget_puts_cut(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
-                         int col, const char *str, int width,
-                         unsigned char fg, unsigned char bg) {
+                         int col, const char *str, int width, unsigned char fg,
+                         unsigned char bg) {
   CTUI_CELL style = {.fg = fg, .bg = bg, .color_mode = CTUI_COLOR_MODE_BASIC};
   return ctui_widget_puts_cut_cell(widget, comp, row, col, str, width, &style);
 }
@@ -259,13 +308,13 @@ int ctui_widget_puts_cut_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
     w--;
   }
   widget_put_str(widget, comp, row, col, str, str + n, style);
-  widget_put(widget, comp, row, col + w, 0x2026, style);
+  widget_put(widget, comp, row, col + w, 0x2026, *style);
   return w + 1;
 }
 
 int ctui_widget_putc_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           int col, uint32_t ch, const CTUI_CELL *style) {
-  return widget_put(widget, comp, row, col, ch, style);
+  return widget_put(widget, comp, row, col, ch, *style);
 }
 
 int ctui_widget_puts_cell(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
@@ -284,7 +333,7 @@ void ctui_widget_putc_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           unsigned char bg256) {
   CTUI_CELL style = {
       .fg = fg256, .bg = bg256, .color_mode = CTUI_COLOR_MODE_256};
-  widget_put(widget, comp, row, col, ch, &style);
+  widget_put(widget, comp, row, col, ch, style);
 }
 
 void ctui_widget_puts_256(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
@@ -313,7 +362,7 @@ void ctui_widget_putc_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
                           unsigned char bg_r, unsigned char bg_g,
                           unsigned char bg_b) {
   CTUI_CELL style = rgb_style(fg_r, fg_g, fg_b, bg_r, bg_g, bg_b);
-  widget_put(widget, comp, row, col, ch, &style);
+  widget_put(widget, comp, row, col, ch, style);
 }
 
 void ctui_widget_puts_rgb(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp, int row,
@@ -334,7 +383,7 @@ void ctui_widget_putc_rgb_fg(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
                      .fg_b = fg_b,
                      .bg = bg,
                      .color_mode = CTUI_COLOR_MODE_RGB_FG};
-  widget_put(widget, comp, row, col, ch, &style);
+  widget_put(widget, comp, row, col, ch, style);
 }
 
 void ctui_widget_put_kitty_placeholder(CTUI_WIDGET *widget,
@@ -355,7 +404,7 @@ void ctui_widget_put_kitty_placeholder(CTUI_WIDGET *widget,
     style.kitty_row = rows > 1 ? (unsigned char)(r + 1) : 0;
     for (int i = 0; i < cols; i++) {
       widget_put(widget, comp, row + r, col + i, CTUI_GFX_KITTY_PLACEHOLDER,
-                 &style);
+                 style);
     }
   }
 }
@@ -394,8 +443,8 @@ void ctui_widget_dispatch_render(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp) {
 
   if (gfx_pending_count == gfx_pending_cap) {
     gfx_pending_cap = gfx_pending_cap ? gfx_pending_cap * 2 : 4;
-    gfx_pending = realloc(gfx_pending,
-                          sizeof(*gfx_pending) * (size_t)gfx_pending_cap);
+    gfx_pending =
+        realloc(gfx_pending, sizeof(*gfx_pending) * (size_t)gfx_pending_cap);
   }
   gfx_pending[gfx_pending_count++] = widget;
   ctui_logf(E_DBG,
@@ -408,7 +457,8 @@ void ctui_widget_flush_gfx(CTUI_COMPOSITOR *comp) {
   for (int i = 0; i < gfx_pending_count; i++) {
     gfx_pending[i]->gfx_render(gfx_pending[i], comp);
   }
-  ctui_logf(E_DBG, "[CTUI:WIDGET] - flushed %d pending gfx widget(s) @ tick %d\n",
+  ctui_logf(E_DBG,
+            "[CTUI:WIDGET] - flushed %d pending gfx widget(s) @ tick %d\n",
             gfx_pending_count, ctui_tick_advance());
   gfx_pending_count = 0;
   /* Phase 5a: every gfx_render() call above only appended to gfx.c's

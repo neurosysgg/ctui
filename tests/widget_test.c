@@ -86,8 +86,10 @@ static void test_puts_cut(void) {
                    "puts_cut() ends a string that doesn't fit in one "
                    "\"\u2026\" glyph in the last column");
 
-  used = ctui_widget_puts_cut(&w, comp, 2, 0, "a\xe4\xb8\xad" "b", 3,
-                              CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
+  used = ctui_widget_puts_cut(&w, comp, 2, 0,
+                              "a\xe4\xb8\xad"
+                              "b",
+                              3, CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
   CTUI_CELL *r2 = &comp->cells[20];
   CTUI_TEST_ASSERT(used == 2 && r2[0].ch == 'a' && r2[1].ch == 0x2026,
                    "puts_cut() never splits a wide glyph to make room for "
@@ -113,7 +115,9 @@ static void test_puts_cut_cell(void) {
   CTUI_COMPOSITOR *comp = ctui_compositor_create(1, 10);
   CTUI_WIDGET w = ctui_widget_make(0, 0, 10, 1, NULL, noop_render, NULL);
   ctui_widget_init(&w, comp);
-  CTUI_CELL pen = {.color_mode = CTUI_COLOR_MODE_RGB_FG, .fg_r = 9, .bg = CTUI_COLOR_DEFAULT,
+  CTUI_CELL pen = {.color_mode = CTUI_COLOR_MODE_RGB_FG,
+                   .fg_r = 9,
+                   .bg = CTUI_COLOR_DEFAULT,
                    .attr = CTUI_ATTR_BOLD};
   int used = ctui_widget_puts_cut_cell(&w, comp, 0, 0, "abcdef", 4, &pen);
   CTUI_TEST_ASSERT(used == 4 && comp->cells[3].ch == 0x2026 &&
@@ -295,13 +299,14 @@ static void test_puts_cell(void) {
   CTUI_WIDGET w = ctui_widget_make(0, 0, 10, 2, NULL, noop_render, NULL);
   ctui_widget_init(&w, comp);
   CTUI_CELL bold = {.fg = CTUI_COLOR_RED, .attr = CTUI_ATTR_BOLD};
-  int n = ctui_widget_puts_cell(&w, comp, 0, 0, "h\xc3\xa9llo", (size_t)-1,
-                                &bold);
+  int n =
+      ctui_widget_puts_cell(&w, comp, 0, 0, "h\xc3\xa9llo", (size_t)-1, &bold);
   CTUI_TEST_ASSERT(n == 5 && comp->cells[1].ch == 0xe9 &&
                        comp->cells[4].attr == CTUI_ATTR_BOLD &&
                        comp->cells[4].fg == CTUI_COLOR_RED,
                    "puts_cell() draws the whole string with the cell's "
-                   "colour and attributes (%d)", n);
+                   "colour and attributes (%d)",
+                   n);
   CTUI_CELL rgb = {.color_mode = CTUI_COLOR_MODE_RGB,
                    .fg_r = 9,
                    .attr = CTUI_ATTR_ITALIC | CTUI_ATTR_UNDERLINE};
@@ -317,8 +322,7 @@ static void test_puts_cell(void) {
   CTUI_TEST_ASSERT(n == 2 && comp->cells[11].ch == CTUI_CELL_CONT &&
                        comp->cells[11].attr == CTUI_ATTR_BOLD,
                    "putc_cell() styles both halves of a wide glyph");
-  ctui_widget_puts(&w, comp, 0, 0, "x", CTUI_COLOR_DEFAULT,
-                   CTUI_COLOR_DEFAULT);
+  ctui_widget_puts(&w, comp, 0, 0, "x", CTUI_COLOR_DEFAULT, CTUI_COLOR_DEFAULT);
   CTUI_TEST_ASSERT(comp->cells[0].attr == 0,
                    "plain puts() over a bold cell leaves it plain");
   ctui_compositor_clear(comp);
@@ -387,20 +391,180 @@ static void test_render_hooks(void) {
   ctui_screen_free(screen);
 }
 
+/* the reference for a single put: widget.c's general path as it was
+ * before the narrow fast path (session 220), from public pieces -- the
+ * bounds of widget_cell_at(), then ctui_cell_set_ch() and the style laid
+ * over every cell it wrote */
+static int ref_putc(CTUI_WIDGET *w, CTUI_COMPOSITOR *comp, int row, int col,
+                    uint32_t ch, const CTUI_CELL *style) {
+  int abs_row = w->y + row;
+  int abs_col = w->x + col;
+  if (w->buf == NULL || row < 0 || row >= w->h || col < 0 || col >= w->w ||
+      abs_row < 0 || abs_row >= comp->rows || abs_col < 0 ||
+      abs_col >= comp->cols) {
+    return ctui_cell_width(ch);
+  }
+  CTUI_CELL *cell = w->buf + (size_t)row * (size_t)comp->cols + (size_t)col;
+  int n =
+      ctui_cell_set_ch(cell - abs_col, comp->cols, abs_col, w->x + w->w, ch);
+  for (int i = 0; i < n; i++) {
+    uint32_t keep = cell[i].ch;
+    cell[i] = *style;
+    cell[i].ch = keep;
+  }
+  return n;
+}
+
 /* the puts family against the reference: the same string put cluster by
- * cluster through ctui_widget_putc_cell() (widget_put(), cell by cell),
- * which the ASCII run fast path must match byte for byte -- on rows full
- * of wide glyphs it cuts, at edges and outside the widget and the
- * compositor, for a group member addressing a slice bound elsewhere */
+ * cluster through ref_putc(), which the ASCII run fast path must match
+ * byte for byte -- on rows full of wide glyphs it cuts, at edges and
+ * outside the widget and the compositor, for a group member addressing a
+ * slice bound elsewhere */
 static int ref_puts(CTUI_WIDGET *w, CTUI_COMPOSITOR *comp, int row, int col,
                     const char *str, const char *end, const CTUI_CELL *style) {
   while ((end == NULL || str < end) && *str) {
     uint32_t ch;
     str += ctui_utf8_cluster(str, end ? (size_t)(end - str) : (size_t)-1, &ch,
                              NULL);
-    col += ctui_widget_putc_cell(w, comp, row, col, ch, style);
+    col += ref_putc(w, comp, row, col, ch, style);
   }
   return col;
+}
+
+/* random rows of letters and wide glyphs, the same in both */
+static void wide_rows(CTUI_COMPOSITOR *a, CTUI_COMPOSITOR *b) {
+  for (int y = 0; y < a->rows; y++) {
+    CTUI_CELL *line = a->cells + y * a->cols;
+    for (int x = 0; x < a->cols; x++) {
+      line[x] = (CTUI_CELL){.ch = (uint32_t)('A' + rand() % 26),
+                            .fg = (unsigned char)(rand() % 8)};
+    }
+    for (int x = 0; x < a->cols - 1; x++) {
+      if (rand() % 3 == 0) {
+        x += ctui_cell_set_ch(line, a->cols, x, a->cols, 0x4F60) - 1;
+      }
+    }
+  }
+  memcpy(b->cells, a->cells, sizeof(CTUI_CELL) * a->rows * a->cols);
+}
+
+/* the narrow ranges widget_put() knows without the width table are
+ * narrow by the table: every codepoint in them */
+static void test_known_narrow(void) {
+  static const uint32_t ranges[][2] = {
+      {0x20, 0x7E}, {0x2500, 0x259F}, {0x2800, 0x28FF}};
+  int bad = 0;
+  for (size_t r = 0; r < sizeof ranges / sizeof *ranges; r++) {
+    for (uint32_t cp = ranges[r][0]; cp <= ranges[r][1]; cp++) {
+      bad += ctui_cell_width(cp) != 1;
+    }
+  }
+  CTUI_TEST_ASSERT(bad == 0,
+                   "ASCII, box drawing, blocks and braille are all one "
+                   "column by the table (%d are not)",
+                   bad);
+}
+
+/* single puts against the reference: every putc variant, narrow glyphs
+ * (the fast path) and the rest -- wide, zero-width, controls, a CONT, a
+ * cluster id -- onto rows of wide glyphs, at the edges and outside the
+ * widget and the compositor, for a group member too; then with putcs
+ * logged (E_DBG), which goes the general way */
+static void test_putc_vs_ref(void) {
+  ctui_log_shutdown();
+  ctui_log_init(E_ERR);
+  uint32_t narrow_cluster, wide_cluster;
+  ctui_utf8_cluster("e\xcc\x81", (size_t)-1, &narrow_cluster, NULL);
+  ctui_utf8_cluster("\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd", (size_t)-1,
+                    &wide_cluster, NULL);
+  const uint32_t chars[] = {
+      'a',         ' ',    '~',    0x2500, 0x2588,         0x259F,
+      0x2800,      0x28FF, 0xE9,   0x2603, 0x4F60,         0x1F44D,
+      0x301,       0x200B, '\n',   0x7F,   0x85,           0xFE0F,
+      0xFFFD,      0x25A0, 0x25FD, 0x2614, CTUI_CELL_CONT, narrow_cluster,
+      wide_cluster};
+  enum { ROWS = 5, COLS = 16, RUNS = 40000 };
+  CTUI_COMPOSITOR *a = ctui_compositor_create(ROWS, COLS);
+  CTUI_COMPOSITOR *b = ctui_compositor_create(ROWS, COLS);
+  srand(220);
+  int bad = 0;
+  for (int r = 0; r < RUNS; r++) {
+    if (r == RUNS - 2000) {
+      ctui_log_shutdown();
+      ctui_log_init(E_ALL);
+    }
+    wide_rows(a, b);
+    CTUI_WIDGET wa = {.render = noop_render,
+                      .x = rand() % 6,
+                      .y = rand() % 3,
+                      .w = 1 + rand() % 14,
+                      .h = 1 + rand() % 4};
+    CTUI_WIDGET wb = wa;
+    ctui_widget_init(&wa, a);
+    ctui_widget_init(&wb, b);
+    if (rand() % 4 == 0 && wa.buf) {
+      int dx = rand() % 3, dy = rand() % 2;
+      wa.x += dx;
+      wa.y += dy;
+      wb.x += dx;
+      wb.y += dy;
+    }
+    int row = rand() % 6 - 1, col = rand() % 18 - 2;
+    uint32_t ch = chars[rand() % (int)(sizeof chars / sizeof *chars)];
+    unsigned char c[6];
+    for (int i = 0; i < 6; i++) {
+      c[i] = (unsigned char)rand();
+    }
+    CTUI_CELL style = {0};
+    int got = 0, want = 0, which = rand() % 5;
+    if (which == 0) {
+      ctui_widget_putc(&wa, a, row, col, ch, c[0] % 8, c[1] % 8);
+      style = (CTUI_CELL){.fg = c[0] % 8, .bg = c[1] % 8};
+    } else if (which == 1) {
+      style = (CTUI_CELL){.fg = c[0],
+                          .bg = c[1],
+                          .color_mode = (unsigned char)(c[2] % 4),
+                          .fg_r = c[3],
+                          .bg_b = c[4],
+                          .kitty_row = c[5] % 3,
+                          .attr = (unsigned char)(c[2] >> 3)};
+      got = ctui_widget_putc_cell(&wa, a, row, col, ch, &style);
+    } else if (which == 2) {
+      ctui_widget_putc_256(&wa, a, row, col, ch, c[0], c[1]);
+      style = (CTUI_CELL){
+          .fg = c[0], .bg = c[1], .color_mode = CTUI_COLOR_MODE_256};
+    } else if (which == 3) {
+      ctui_widget_putc_rgb(&wa, a, row, col, ch, c[0], c[1], c[2], c[3], c[4],
+                           c[5]);
+      style = (CTUI_CELL){.fg_r = c[0],
+                          .fg_g = c[1],
+                          .fg_b = c[2],
+                          .bg_r = c[3],
+                          .bg_g = c[4],
+                          .bg_b = c[5],
+                          .color_mode = CTUI_COLOR_MODE_RGB};
+    } else {
+      ctui_widget_putc_rgb_fg(&wa, a, row, col, ch, c[0], c[1], c[2], c[3]);
+      style = (CTUI_CELL){.fg_r = c[0],
+                          .fg_g = c[1],
+                          .fg_b = c[2],
+                          .bg = c[3],
+                          .color_mode = CTUI_COLOR_MODE_RGB_FG};
+    }
+    want = ref_putc(&wb, b, row, col, ch, &style);
+    if ((which == 1 && got != want) ||
+        memcmp(a->cells, b->cells, sizeof(CTUI_CELL) * ROWS * COLS) != 0) {
+      bad++;
+    }
+  }
+  CTUI_TEST_ASSERT(bad == 0,
+                   "putc, putc_cell, _256, _rgb, _rgb_fg: the same cells as "
+                   "the reference (%d of %d differ)",
+                   bad, RUNS);
+  ctui_compositor_free(a);
+  ctui_compositor_free(b);
+  ctui_log_shutdown();
+  ctui_log_init(E_ALL);
 }
 
 static void test_puts_vs_ref(void) {
@@ -429,20 +593,7 @@ static void test_puts_vs_ref(void) {
   srand(219);
   int bad = 0;
   for (int r = 0; r < 30000; r++) {
-    /* a row's worth of wide glyphs and colours in both */
-    for (int y = 0; y < ROWS; y++) {
-      CTUI_CELL *line = a->cells + y * COLS;
-      for (int x = 0; x < COLS; x++) {
-        line[x] = (CTUI_CELL){.ch = (uint32_t)('A' + rand() % 26),
-                              .fg = (unsigned char)(rand() % 8)};
-      }
-      for (int x = 0; x < COLS - 1; x++) {
-        if (rand() % 3 == 0) {
-          x += ctui_cell_set_ch(line, COLS, x, COLS, 0x4F60) - 1;
-        }
-      }
-    }
-    memcpy(b->cells, a->cells, sizeof(CTUI_CELL) * ROWS * COLS);
+    wide_rows(a, b);
     CTUI_WIDGET wa = {.render = noop_render,
                       .x = rand() % 6,
                       .y = rand() % 3,
@@ -508,6 +659,8 @@ int main(void) {
   test_puts_n();
   test_puts_cell();
   test_puts_vs_ref();
+  test_known_narrow();
+  test_putc_vs_ref();
   test_widget_init_out_of_bounds();
   test_gfx_dispatch();
   test_render_hooks();
