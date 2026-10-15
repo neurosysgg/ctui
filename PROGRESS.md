@@ -237,6 +237,33 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A single putc cost ~144 instructions and a stall** (2026-10-15,
+  ctui-wm's notes/self-improving.md, session 220). ctui-top draws its
+  boxes, bars and graphs a cell at a time, so the puts run path didn't
+  reach it: `widget_put` + `ctui_cell_set_ch` were 27 % of its screens
+  run. Now `widget_put()` is an inline fast path for a narrow glyph inside
+  the widget and the compositor -- one unsigned compare per bound, the
+  two CONT mends `ctui_cell_set_ch()` would make, the cell written -- and
+  everything else (wide, zero width, out of bounds, putcs logged at
+  E_DBG) goes to `widget_put_any()`, the old path, kept out of line.
+  ASCII, box drawing, block elements and braille are known narrow
+  without the width table. The style travels by value: with its address
+  taken, gcc built a putc wrapper's style on the stack in pieces and the
+  copy read it back whole, a failed store-to-load forward that cost more
+  than the rest (147 -> 60 instructions a put bought nothing; by value
+  it's 70, in half the time). A 240x60 frame of single putcs, gcc -O2:
+  108 -> 58 us ASCII, 110 -> 62 a ctui-top mix (clang 93 -> 91:
+  it still stages the style; only the sanitizer builds use it). ctui-top's
+  screens run: 5.06 -> 4.15 M instructions, screens identical. widget_test
+  keeps the old path as `ref_putc()` (the puts check uses it too) and
+  puts 40000 random glyphs -- narrow, wide, zero width, controls, a CONT,
+  clusters of both widths, wide neighbours of the inline ranges --
+  through every putc variant onto rows of wide glyphs, at the edges and
+  outside, for a group member too, the last 2000 with E_DBG on; and
+  checks every codepoint of the inline ranges against the table. Planted
+  bugs fail it: either mend dropped, a range widened, the compositor's
+  addressing instead of the slice's, a bound off by one.
+
 - [x] **Masked log calls and putting text cell by cell** (2026-10-15,
   ctui-wm's notes/self-improving.md, session 219). In ctui-wm's profiles
   `widget_put` led a frame (top 19 %, git 11 %), `ctui_logf` 4-5 %:
