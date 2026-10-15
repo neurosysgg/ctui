@@ -237,6 +237,20 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Flush's compare was most of its time** (2026-10-15, ctui-wm's
+  notes/self-improving.md, s3). Every cell went through the per-mode
+  compare against the shadow buffer: 13.6 of flush's 18.6 ms on ctui-wm's
+  recorded screens (tools/flushbench's new "unchanged" column: each frame
+  flushed again against itself). Now a row whose bytes match the buffer's
+  is skipped with one memcmp, and within a changed row equal bytes settle
+  a cell; only cells whose bytes differ get the per-mode compare (fields
+  a mode doesn't use and the padding may differ: the same cell still).
+  Swept on the recordings: the per-mode compare 18.6 ms (compare alone
+  13.6), bytes per cell first 10.6 (4.8), rows by memcmp only 9.7 (1.5),
+  both 8.4 (1.45): taken. The synthetic worst case is unchanged. No
+  canonical cells needed. screen_test: unused fields and the padding
+  changed write nothing (fails with a bytes-only compare).
+
 - [x] **Flush wrote more bytes than the screen needed** (2026-10-15,
   ctui-wm's notes/self-improving.md, s2). Every move was a CUP, every
   colour change a whole SGR (after a `0;` reset whenever an attribute

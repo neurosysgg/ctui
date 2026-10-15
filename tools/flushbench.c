@@ -28,7 +28,9 @@
 typedef struct {
   long frames, cells, bad;
   size_t in_bytes, out_bytes;
-  double ns;
+  /* ns: the frames flushed; idle_ns: each flushed again unchanged (the
+   * compare alone, nothing written) */
+  double ns, idle_ns;
 } TOTALS;
 
 static double now_ns(void) {
@@ -96,12 +98,16 @@ static size_t capture(CTUI_SCREEN *s, FILE *tmp, char **buf, size_t *cap) {
   return (size_t)n;
 }
 
-/* the best of reps flushes of the frame against the one before */
+/* the best of reps flushes of the frame against prev (the frame before,
+ * or s->buffer: against itself) */
 static double time_flush(CTUI_SCREEN *s, const CTUI_CELL *prev, int reps,
                          int devnull) {
   size_t n = (size_t)s->rows * (size_t)s->cols * sizeof(CTUI_CELL);
   CTUI_CELL *done = malloc(n);
   memcpy(done, s->buffer, n);
+  if (prev == s->buffer) {
+    prev = done; /* the frame against itself */
+  }
   int saved = dup(STDOUT_FILENO);
   dup2(devnull, STDOUT_FILENO);
   double best = 1e18;
@@ -234,6 +240,7 @@ static void replay(const char *path, int reps, const char *outdir,
       }
     }
     t.ns += time_flush(s, prev, reps, devnull);
+    t.idle_ns += time_flush(s, s->buffer, reps, devnull);
   }
   printf("%-34s %5ld frames %8ld cells %9zu B in %9zu B out %8.1f us%s\n",
          strrchr(path, '/') ? strrchr(path, '/') + 1 : path, t.frames,
@@ -245,6 +252,7 @@ static void replay(const char *path, int reps, const char *outdir,
   all->in_bytes += t.in_bytes;
   all->out_bytes += t.out_bytes;
   all->ns += t.ns;
+  all->idle_ns += t.idle_ns;
   if (old_out) {
     fclose(old_out);
     fclose(new_out);
@@ -283,10 +291,10 @@ int main(int argc, char **argv) {
   }
   printf("total: %ld frames, %ld cells changed, %zu B recorded, %zu B "
          "flushed (%.1f per changed cell), flush %.1f us (%.1f ns per "
-         "changed cell)%s\n",
+         "changed cell), the same frames unchanged %.1f us%s\n",
          all.frames, all.cells, all.in_bytes, all.out_bytes,
          all.cells ? (double)all.out_bytes / (double)all.cells : 0.0,
          all.ns / 1e3, all.cells ? all.ns / (double)all.cells : 0.0,
-         all.bad ? ", FRAMES DIFFER" : "");
+         all.idle_ns / 1e3, all.bad ? ", FRAMES DIFFER" : "");
   return all.bad ? 1 : 0;
 }

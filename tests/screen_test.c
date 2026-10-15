@@ -310,6 +310,49 @@ static void test_flush_fewer_bytes(void) {
   ctui_screen_free(s);
 }
 
+/* the compare goes bytes first; cells whose bytes differ only where their
+ * colour mode doesn't look (an RGB cell's fg/bg, a BASIC cell's channels,
+ * the padding) are still the same cells */
+static void test_flush_unused_fields(void) {
+  CTUI_SCREEN *s = ctui_screen_create(2, 6);
+  char out[256];
+  for (int i = 0; i < 12; i++) {
+    s->cells[i] = (CTUI_CELL){.ch = (uint32_t)('a' + i),
+                              .color_mode = (unsigned char)(i % 4),
+                              .fg = 3,
+                              .bg = 4,
+                              .fg_r = 5,
+                              .bg_b = 6};
+  }
+  capture_flush(s, out, sizeof out);
+  for (int i = 0; i < 12; i++) {
+    CTUI_CELL *c = &s->cells[i];
+    switch (c->color_mode) {
+    case CTUI_COLOR_MODE_RGB:
+      c->fg = 99, c->bg = 98;
+      break;
+    case CTUI_COLOR_MODE_RGB_FG:
+      c->fg = 97, c->bg_r = 1, c->bg_g = 2, c->bg_b = 3;
+      break;
+    default:
+      c->fg_r = 7, c->fg_g = 8, c->bg_r = 9, c->bg_b = 10;
+      break;
+    }
+    ((unsigned char *)c)[sizeof *c - 1] ^= 0x5a; /* the padding byte */
+  }
+  size_t n = capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(n == 0, "cells differing only in fields their mode "
+                           "doesn't use, and the padding, write nothing");
+  s->cells[7].fg_g ^= 1; /* RGB_FG: used */
+  s->cells[5].fg ^= 1;   /* 256: used */
+  n = capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(n > 0 && strchr(out, 'h') && strchr(out, 'f') &&
+                       !strchr(out, 'a') && !strchr(out, 'g'),
+                   "a field its mode uses still repaints just that cell "
+                   "(got %s)", out + 1);
+  ctui_screen_free(s);
+}
+
 static int g_frames = 0, g_refuse = 0;
 static uint32_t g_prev_ch = 0, g_new_ch = 0;
 
@@ -369,6 +412,7 @@ int main(void) {
   test_flush_256_and_rgb();
   test_flush_attrs();
   test_flush_fewer_bytes();
+  test_flush_unused_fields();
   test_resize_forces_redraw();
   test_sink();
 

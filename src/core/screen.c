@@ -170,6 +170,12 @@ static int ctui_compare_ctuicell(const CTUI_CELL *lhs, const CTUI_CELL *rhs) {
   return lhs->fg == rhs->fg && lhs->bg == rhs->bg;
 }
 
+/* equal bytes are the same cell; unequal ones may still be (fields their
+ * mode doesn't use, the padding), so the per-mode compare decides those */
+static int same_cell(const CTUI_CELL *a, const CTUI_CELL *b) {
+  return memcmp(a, b, sizeof *a) == 0 || ctui_compare_ctuicell(a, b);
+}
+
 /* same field-set-per-mode logic as ctui_compare_ctuicell(), but against the
  * last cell actually emitted this flush (to decide whether a fresh SGR
  * escape is needed), not the previous frame's shadow buffer */
@@ -471,7 +477,10 @@ static int repeat_run(const CTUI_SCREEN *s, int r, int c) {
 static void flush_sink(CTUI_SCREEN *s) {
   size_t n = (size_t)s->rows * (size_t)s->cols;
   size_t i = 0;
-  while (i < n && ctui_compare_ctuicell(&s->cells[i], &s->buffer[i])) {
+  if (memcmp(s->cells, s->buffer, n * sizeof(CTUI_CELL)) == 0) {
+    return;
+  }
+  while (i < n && same_cell(&s->cells[i], &s->buffer[i])) {
     i++;
   }
   if (i == n) {
@@ -509,11 +518,19 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
 
   // iterate over cells, compare to our buffer and rewrite accordingly
   for (int r = 0; r < s->rows; r++) {
+    /* most rows are unchanged, and bytes the same: one memcmp (libc's,
+     * vectorised) skips them -- the compare was ~3/4 of flush's time on
+     * real frames, this cut it ~9x (ctui-wm's notes/self-improving.md,
+     * s3) */
+    if (memcmp(&s->cells[r * s->cols], &s->buffer[r * s->cols],
+               sizeof(CTUI_CELL) * (size_t)s->cols) == 0) {
+      continue;
+    }
     for (int c = 0; c < s->cols; c++) {
       CTUI_CELL *cur = &s->cells[r * s->cols + c];
       CTUI_CELL *buf = &s->buffer[r * s->cols + c];
 
-      if (ctui_compare_ctuicell(cur, buf) == 1)
+      if (same_cell(cur, buf))
         continue;
 
       /* the lead cell to its left draws both columns; if the lead
