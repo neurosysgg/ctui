@@ -189,39 +189,113 @@ static int color_changed(const CTUI_CELL *cur, const CTUI_CELL *last) {
   return cur->fg != last->fg || cur->bg != last->bg;
 }
 
+/* the escapes are written by hand, not with snprintf(): its vfprintf
+ * machinery (format parsing, a string FILE, the locale) per number made
+ * a worst-case 240x60 frame (every cell moved to and coloured) 1.2 ms,
+ * this 0.12 (ctui-wm's notes/self-improving.md, s1); the bytes are the
+ * same (screen_test's reference). No bounds checks per write: flush
+ * keeps 128 + CTUI_CLUSTER_MAX * 4 bytes free before each cell, which
+ * covers the longest cell. */
+#define PUT_LIT(p, lit)                                                      \
+  (memcpy((p), (lit), sizeof(lit) - 1), (p) + sizeof(lit) - 1)
+
+/* 0..255 in decimal: the digits padded to 4 bytes, so a copy is one
+ * fixed-size memcpy (the bytes past n are overwritten by what follows) */
+typedef struct {
+  char s[4];
+  unsigned char n;
+} DIGITS;
+
+/* digit i (0 = the first) of v, which has n digits */
+#define DIG_N(v) ((v) >= 100 ? 3 : (v) >= 10 ? 2 : 1)
+#define DIG_AT(v, i)                                                         \
+  ((i) < DIG_N(v)                                                            \
+       ? (char)('0' + (v) / ((i) + 1 == DIG_N(v)   ? 1                       \
+                             : (i) + 2 == DIG_N(v) ? 10                      \
+                                                   : 100) %                  \
+                          10)                                                \
+       : 0)
+#define DIG(v) {{DIG_AT(v, 0), DIG_AT(v, 1), DIG_AT(v, 2), 0}, DIG_N(v)}
+#define DIG4(v) DIG(v), DIG((v) + 1), DIG((v) + 2), DIG((v) + 3)
+#define DIG16(v) DIG4(v), DIG4((v) + 4), DIG4((v) + 8), DIG4((v) + 12)
+#define DIG64(v) DIG16(v), DIG16((v) + 16), DIG16((v) + 32), DIG16((v) + 48)
+
+static const DIGITS digits[256] = {DIG64(0), DIG64(64), DIG64(128),
+                                   DIG64(192)};
+
+/* v in decimal, no NUL; returns past the last digit. Rows and columns
+ * can pass 255, a BASIC cell's code too (an fg out of the 8 colours) */
+static char *put_uint(char *p, unsigned v) {
+  if (v < 256) {
+    memcpy(p, digits[v].s, 4);
+    return p + digits[v].n;
+  }
+  char tmp[10];
+  int n = 0;
+  while (v) {
+    tmp[n++] = (char)('0' + v % 10);
+    v /= 10;
+  }
+  while (n) {
+    *p++ = tmp[--n];
+  }
+  return p;
+}
+
+/* "r;g;b" */
+static char *put_rgb(char *p, unsigned char r, unsigned char g,
+                     unsigned char b) {
+  p = put_uint(p, r);
+  *p++ = ';';
+  p = put_uint(p, g);
+  *p++ = ';';
+  return put_uint(p, b);
+}
+
 /* one SGR escape for cell's colours; when its attributes differ from
  * last_attr (what the terminal has now) it starts with a reset and sets
  * them again ("0;1;4;..."), since the colours follow in the same escape */
-static size_t emit_color(char *out, size_t cap, size_t len,
-                         const CTUI_CELL *cell, unsigned char last_attr) {
-  static const char *const sgr[] = {"1;", "2;", "3;", "4;", "9;"};
-  len += (size_t)snprintf(out + len, cap - len, "\x1b[");
+static char *emit_color(char *p, const CTUI_CELL *cell,
+                        unsigned char last_attr) {
+  static const char sgr[] = {'1', '2', '3', '4', '9'};
+  p = PUT_LIT(p, "\x1b[");
   if (cell->attr != last_attr) {
-    len += (size_t)snprintf(out + len, cap - len, "0;");
+    p = PUT_LIT(p, "0;");
     for (int i = 0; i < 5; i++) {
       if (cell->attr & (1 << i)) {
-        len += (size_t)snprintf(out + len, cap - len, "%s", sgr[i]);
+        p[0] = sgr[i];
+        p[1] = ';';
+        p += 2;
       }
     }
   }
   switch (cell->color_mode) {
   case CTUI_COLOR_MODE_256:
-    return len + (size_t)snprintf(out + len, cap - len, "38;5;%d;48;5;%dm",
-                                  cell->fg, cell->bg);
+    p = PUT_LIT(p, "38;5;");
+    p = put_uint(p, cell->fg);
+    p = PUT_LIT(p, ";48;5;");
+    p = put_uint(p, cell->bg);
+    break;
   case CTUI_COLOR_MODE_RGB_FG:
-    return len + (size_t)snprintf(out + len, cap - len, "38;2;%d;%d;%d;%dm",
-                                  cell->fg_r, cell->fg_g, cell->fg_b,
-                                  ansi_bg_code(cell->bg));
+    p = PUT_LIT(p, "38;2;");
+    p = put_rgb(p, cell->fg_r, cell->fg_g, cell->fg_b);
+    *p++ = ';';
+    p = put_uint(p, (unsigned)ansi_bg_code(cell->bg));
+    break;
   case CTUI_COLOR_MODE_RGB:
-    return len + (size_t)snprintf(out + len, cap - len,
-                                  "38;2;%d;%d;%d;48;2;%d;%d;%dm", cell->fg_r,
-                                  cell->fg_g, cell->fg_b, cell->bg_r,
-                                  cell->bg_g, cell->bg_b);
+    p = PUT_LIT(p, "38;2;");
+    p = put_rgb(p, cell->fg_r, cell->fg_g, cell->fg_b);
+    p = PUT_LIT(p, ";48;2;");
+    p = put_rgb(p, cell->bg_r, cell->bg_g, cell->bg_b);
+    break;
   default:
-    return len + (size_t)snprintf(out + len, cap - len, "%d;%dm",
-                                  ansi_fg_code(cell->fg),
-                                  ansi_bg_code(cell->bg));
+    p = put_uint(p, (unsigned)ansi_fg_code(cell->fg));
+    *p++ = ';';
+    p = put_uint(p, (unsigned)ansi_bg_code(cell->bg));
+    break;
   }
+  *p++ = 'm';
+  return p;
 }
 
 /* the sink gets whole frames, and only changed ones */
@@ -296,12 +370,16 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
       }
 
       if (r != last_row || c != last_col) {
-        len +=
-            (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dH", r + 1, c + 1);
+        char *p = PUT_LIT(out + len, "\x1b[");
+        p = put_uint(p, (unsigned)r + 1);
+        *p++ = ';';
+        p = put_uint(p, (unsigned)c + 1);
+        *p++ = 'H';
+        len = (size_t)(p - out);
       }
 
       if (color_changed(cur, &last_color)) {
-        len = emit_color(out, cap, len, cur, last_color.attr);
+        len = (size_t)(emit_color(out + len, cur, last_color.attr) - out);
         last_color = *cur;
       }
 
@@ -326,7 +404,7 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
   if (len == 0) {
     return;
   }
-  len += (size_t)snprintf(out + len, cap - len, "\x1b[0m");
+  len = (size_t)(PUT_LIT(out + len, "\x1b[0m") - out);
 
   write(STDOUT_FILENO, out, len);
   ctui_logf(E_INF, "[CTUI:SCREEN] - flush wrote %zu bytes @ tick %d\n", len,

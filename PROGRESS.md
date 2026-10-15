@@ -237,6 +237,24 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Flush's escapes were formatted with snprintf()** (2026-10-15,
+  ctui-wm's notes/self-improving.md, s1). Every cursor move and SGR in
+  `ctui_screen_flush()` went through glibc's vfprintf machinery for 1-3
+  digit numbers. Now written by hand: literals `memcpy`'d with their
+  compile-time length, 0..255 from a constant table of digits padded to
+  4 bytes (one fixed copy, the overrun overwritten by what follows), a
+  loop only past 255 (rows, columns, an out-of-range BASIC colour's
+  code). No bounds check per write -- flush's existing 128 +
+  CTUI_CLUSTER_MAX * 4 bytes kept free before each cell covers it.
+  Whole flush (compare, format, memcpy, write to /dev/null), 240x60:
+  every other cell changed, modes mixed, 1.22 -> 0.12 ms (gcc -O2),
+  1.21 -> 0.10 ms (clang); text-like runs of one colour 0.20 -> 0.11 ms.
+  A branchy `put_uint` without the table was 0.21 ms (gcc). The bytes
+  are the same: screen_test's new reference is the old snprintf loop,
+  matched byte for byte on random frames (every mode, attributes, wide
+  glyphs, clusters, kitty placeholders, 300 columns, 270 rows); two
+  planted bugs in the formatter fail it. ctui-mus: screens identical.
+
 - [x] **The web filter and the PNG writer weren't safe from two threads**
   (2026-10-13, ctui-wm's ctui-web fitting pictures on a work thread
   while icons are written on its UI thread). `ctui_look_filter_web()`
