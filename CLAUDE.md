@@ -269,6 +269,15 @@ and ctui-wm's and ctui-mus's screens runners link it. `tools/harness/capture.py`
 `tests/data/harness/` (examples' output and pty_harness.py's grid of it,
 which the C parser has to match).
 
+`CTUI_PTY_RECORD=DIR` makes the harness save each app's output (with
+its sizes) as `DIR/NAME-PID.vt`. `make flushbench` replays such
+recordings frame by frame through this build's `ctui_screen_flush()`:
+bytes and time per frame, and the bytes replayed into a second VT must
+give the same cells (exit 1 otherwise). `--out DIR` keeps both streams
+for `tools/check_flush_kitty.py DIR`, which compares them in kitty's own
+parser after every frame. A change to flush's output is checked with
+both, on a recording of ctui-wm's screens.
+
 ### Both harnesses
 
 - **Cross-check against the log**: `ctui.log` (gitignored) records

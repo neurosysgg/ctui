@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Flush's output had no check beyond its unit tests' bytes**
+  (2026-10-15, ctui-wm's notes/self-improving.md, s2: fewer bytes per
+  frame needs "the same screen", not "the same bytes"). The harness
+  records apps' output under `$CTUI_PTY_RECORD` (sizes as APC marks);
+  `tools/flushbench.c` replays a recording into a VT, takes the grid at
+  each frame's closing `\e[0m`, flushes it again (bytes, best-of-N time
+  against the frame before) and replays those bytes into a second VT,
+  whose cells must match. `tools/check_flush_kitty.py` does the same
+  comparison in kitty's own Screen, line by line after every frame.
+
 - [x] **Flush's escapes were formatted with snprintf()** (2026-10-15,
   ctui-wm's notes/self-improving.md, s1). Every cursor move and SGR in
   `ctui_screen_flush()` went through glibc's vfprintf machinery for 1-3

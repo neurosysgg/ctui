@@ -55,6 +55,10 @@ HARNESS_SRC = $(wildcard tools/harness/*.c)
 test-harness_test: $(CORE_SRC) $(CORE_HDR) $(HARNESS_SRC) $(wildcard tools/harness/*.h) tests/harness_test.c tools/ctui_test.h
 	$(CC) $(CFLAGS) -Itools -Itools/harness -o $@ $(CORE_SRC) $(HARNESS_SRC) tests/harness_test.c $(LDLIBS)
 
+# replays recorded apps' output through flush: bytes, time, the same cells
+flushbench: $(CORE_SRC) $(CORE_HDR) tools/harness/vt.c tools/harness/vt.h tools/flushbench.c
+	$(CC) $(CFLAGS) -O2 -Itools -o $@ $(CORE_SRC) tools/harness/vt.c tools/flushbench.c $(LDLIBS)
+
 # src/query/ is libc only (ctui-mus's headless core links it): it must
 # compile with nothing of ctui's on the include path
 query-alone:

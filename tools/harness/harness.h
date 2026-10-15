@@ -16,6 +16,10 @@
  *   int bad = ctui_harness_steps(p, log_case, stdout, NULL);
  *   ctui_pty_close(p, stdout);
  *
+ * $CTUI_PTY_RECORD=DIR records each app's output as DIR/NAME-PID.vt, its
+ * sizes in it as "\e_ctui-record;size=ROWS;COLS\e\\" (APC strings: a
+ * terminal swallows them), for tools/flushbench.c's replays.
+ *
  * POSIX only (posix_openpt, no -lutil): glibc and musl alike. Not part of
  * any app: what links it is the tests and the screens runners. */
 

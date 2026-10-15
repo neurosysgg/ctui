@@ -24,6 +24,8 @@ struct CTUI_PTY {
   int gone;
   /* reaped already: how it ended */
   int reaped, status;
+  /* $CTUI_PTY_RECORD's file for this app, NULL when not recording */
+  FILE *rec;
 };
 
 static long now_ms(void) {
@@ -36,6 +38,28 @@ static void set_size(int fd, int rows, int cols) {
   struct winsize ws = {.ws_row = (unsigned short)rows,
                        .ws_col = (unsigned short)cols};
   ioctl(fd, TIOCSWINSZ, &ws);
+}
+
+/* a size in a recording: an APC string, which the VT swallows */
+static void record_size(CTUI_PTY *p, int rows, int cols) {
+  if (p->rec) {
+    fprintf(p->rec, "\x1b_ctui-record;size=%d;%d\x1b\\", rows, cols);
+  }
+}
+
+/* $CTUI_PTY_RECORD=DIR: DIR/NAME-PID.vt gets the size and everything the
+ * app writes, the sizes it is given in between */
+static void record_open(CTUI_PTY *p, const char *argv0, int rows, int cols) {
+  const char *dir = getenv("CTUI_PTY_RECORD");
+  if (dir == NULL || *dir == '\0') {
+    return;
+  }
+  const char *name = strrchr(argv0, '/');
+  char path[4096];
+  snprintf(path, sizeof path, "%s/%s-%d.vt", dir, name ? name + 1 : argv0,
+           (int)p->pid);
+  p->rec = fopen(path, "we");
+  record_size(p, rows, cols);
 }
 
 static void child(const CTUI_PTY_SPAWN *how, const char *slave, int rows,
@@ -109,6 +133,7 @@ CTUI_PTY *ctui_pty_spawn(const CTUI_PTY_SPAWN *how) {
     child(how, slave, rows, cols);
   }
   fcntl(p->fd, F_SETFL, fcntl(p->fd, F_GETFL) | O_NONBLOCK);
+  record_open(p, how->argv[0], rows, cols);
   return p;
 fail:
   if (p->fd >= 0) {
@@ -153,6 +178,9 @@ static int drain(CTUI_PTY *p) {
     ssize_t n = read(p->fd, buf, sizeof buf);
     if (n > 0) {
       keep(p, buf, (size_t)n);
+      if (p->rec) {
+        fwrite(buf, 1, (size_t)n, p->rec);
+      }
       ctui_vt_feed(p->vt, buf, (size_t)n);
       size_t nr;
       const char *r = ctui_vt_replies(p->vt, &nr);
@@ -213,6 +241,7 @@ int ctui_pty_send(CTUI_PTY *p, const char *bytes, size_t n) {
 void ctui_pty_resize(CTUI_PTY *p, int rows, int cols) {
   ctui_pty_pump(p, 0);
   ctui_vt_resize(p->vt, rows, cols);
+  record_size(p, rows, cols);
   set_size(p->fd, rows, cols);
 }
 
@@ -349,6 +378,9 @@ int ctui_pty_close(CTUI_PTY *p, FILE *out) {
     fprintf(out, "-- would not end: SIGKILL --\n");
   }
   close(p->fd);
+  if (p->rec) {
+    fclose(p->rec);
+  }
   ctui_vt_free(p->vt);
   free(p->out);
   free(p);
