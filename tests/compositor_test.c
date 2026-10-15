@@ -6,6 +6,8 @@
 
 #include "ctui_test.h"
 
+#include <string.h>
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -28,6 +30,23 @@ int main(void) {
                    "clear() also resets color_mode back to BASIC, so a "
                    "cell drawn via putc_256/rgb last frame doesn't keep "
                    "that mode if this frame's widget uses plain putc()");
+
+  const CTUI_CELL blank = {.ch = ' '};
+  comp->cells[4 * 6 - 1] = (CTUI_CELL){.ch = 'Y',
+                                       .color_mode = CTUI_COLOR_MODE_RGB,
+                                       .fg_r = 1,
+                                       .bg_b = 2,
+                                       .kitty_row = 3,
+                                       .attr = CTUI_ATTR_BOLD};
+  comp->cells[7].fg_g = 9; /* a field BASIC doesn't use */
+  ctui_compositor_clear(comp);
+  int whole = 1;
+  for (int i = 0; i < 4 * 6; i++) {
+    whole &= memcmp(&comp->cells[i], &blank, sizeof blank) == 0;
+  }
+  CTUI_TEST_ASSERT(whole, "clear() blanks every cell whole, the last row's "
+                          "too and fields the cell's mode doesn't use "
+                          "(flush compares unchanged rows by their bytes)");
 
   ctui_compositor_resize(comp, 2, 3);
   CTUI_TEST_ASSERT(comp->rows == 2 && comp->cols == 3,

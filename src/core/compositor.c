@@ -33,16 +33,23 @@ void ctui_compositor_free(CTUI_COMPOSITOR *comp) {
 void ctui_compositor_clear(CTUI_COMPOSITOR *comp) {
   ctui_logf(E_DBG, "[CTUI:COMPOSITOR] - clearing %dx%d compositor @ tick %d\n",
             comp->cols, comp->rows, ctui_tick_advance());
-  for (int i = 0; i < comp->rows * comp->cols; i++) {
-    comp->cells[i].ch = ' ';
-    comp->cells[i].fg = CTUI_COLOR_DEFAULT;
-    comp->cells[i].bg = CTUI_COLOR_DEFAULT;
-    /* a cell drawn via ctui_widget_putc_256()/rgb() last frame must not
-     * keep that color_mode if this frame's widget draws it via plain
-     * putc() instead -- see GFX_DESIGN.md's "Resolved open questions" */
-    comp->cells[i].color_mode = CTUI_COLOR_MODE_BASIC;
-    comp->cells[i].kitty_row = 0;
-    comp->cells[i].attr = 0;
+  if (comp->rows <= 0 || comp->cols <= 0) {
+    return;
+  }
+  /* whole blank cells: a cell drawn via ctui_widget_putc_256()/rgb() last
+   * frame must not keep that color_mode if this frame's widget draws it
+   * via plain putc() instead (see GFX_DESIGN.md's "Resolved open
+   * questions"), and the fields a mode doesn't use are zeroed too, so an
+   * unchanged cell stays bytewise equal for flush's row compare. One row,
+   * then copied down: 2.7x faster than cell by cell (240x60: 6.0 -> 2.2
+   * us; ctui-wm's notes/self-improving.md, session 219) */
+  const CTUI_CELL blank = {.ch = ' '};
+  for (int i = 0; i < comp->cols; i++) {
+    comp->cells[i] = blank;
+  }
+  for (int r = 1; r < comp->rows; r++) {
+    memcpy(comp->cells + (size_t)r * (size_t)comp->cols, comp->cells,
+           sizeof(CTUI_CELL) * (size_t)comp->cols);
   }
 }
 
