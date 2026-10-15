@@ -258,7 +258,7 @@ terminal resize.
   recordings' frames give the same cells in the VT and in kitty
   (check_flush_kitty.py); harness_test's new reference test (the old
   snprintf flush) draws the same screen on 32 random frames of runs and
-  gaps and never in fewer bytes, and fails on four planted bugs (refill
+  gaps and never in more bytes, and fails on four planted bugs (refill
   or REP ignoring colours, a wrong off code); screen_test has a case per
   saving. ctui-mus: screens identical.
 
