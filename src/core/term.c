@@ -225,7 +225,7 @@ void ctui_resume(void) {
     printf("\x1b[?1004h");
   }
   if (g_kitty_keys_enabled) {
-    printf("\x1b[>1u");
+    printf("\x1b[>%du", g_kitty_keys_enabled);
   }
   fflush(stdout);
   ctui_g_resize_pending = 1; /* a full redraw, at whatever size it is now */
@@ -305,7 +305,29 @@ void ctui_focus_enable(void) {
             ctui_tick_advance());
 }
 
+/* kitty's flags 1 (disambiguate), 2 (event types), 4 (alternate keys:
+ * the shifted one) and 8 (every key as an escape code: else a key that
+ * types text never reports its release) */
+#define KITTY_KEYS_EVENTS 15
+
+void ctui_kitty_keys_enable_events(void) {
+  /* pushed like ctui_kitty_keys_enable()'s, or the flags of the entry it
+   * pushed raised (one pop at shutdown either way) */
+  if (g_kitty_keys_enabled) {
+    printf("\x1b[=%d;1u", KITTY_KEYS_EVENTS);
+  } else {
+    printf("\x1b[>%du", KITTY_KEYS_EVENTS);
+  }
+  fflush(stdout);
+  g_kitty_keys_enabled = KITTY_KEYS_EVENTS;
+  ctui_logf(E_INF, "[CTUI:TERM] - kitty key events on @ tick %d\n",
+            ctui_tick_advance());
+}
+
 void ctui_kitty_keys_enable(void) {
+  if (g_kitty_keys_enabled) {
+    return; /* on already (one entry pushed, one popped at shutdown) */
+  }
   /* push flags 1 (disambiguate) onto the terminal's stack; popped at
    * shutdown, so whatever ran before gets its own flags back */
   printf("\x1b[>1u");

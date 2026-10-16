@@ -55,6 +55,15 @@ typedef struct {
                 * from however many UTF-8 bytes the terminal sent); plain
                 * char comparisons work as-is for ASCII */
   unsigned int mods; /* CTUI_MOD_* */
+  /* a held key's repeat (kitty's report, after
+   * ctui_kitty_keys_enable_events(); 0 everywhere else, where repeats
+   * come as presses) */
+  int repeat;
+  /* where the key sits on a US PC-101 layout, as its codepoint there
+   * (kitty's base layout key: a German QWERTZ "y" has base 'z'), when that
+   * differs from ch; 0 else, and outside ctui_kitty_keys_enable_events() --
+   * a keyboard played by position rather than by letter */
+  uint32_t base;
 } CTUI_KEYPRESS_EVENT_DATA;
 
 typedef enum {
@@ -174,6 +183,14 @@ typedef enum {
                      * drag and drop once enabled); before, an ESC ] came
                      * in as alt+] and the body as keypresses. Dispatched
                      * through the registry to every listener. */
+  CTUI_KEYRELEASE_EVENT, /* a key let go, ev_source "input", event_data a
+                          * CTUI_KEYPRESS_EVENT_DATA naming the key as its
+                          * press did. Only kitty reports them, and only
+                          * after ctui_kitty_keys_enable_events() (core/
+                          * term.h): a computer keyboard played as a
+                          * piano's. A type of its own, so a handler
+                          * knowing only presses never takes one for a
+                          * second press. */
   CTUI_DUMMY_EVENT,
 } CTUI_EVENTTYPE;
 

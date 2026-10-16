@@ -65,6 +65,8 @@ const char *ctui_eventtype_name(CTUI_EVENTTYPE type) {
   switch (type) {
   case CTUI_KEYPRESS_EVENT:
     return "KEYPRESS";
+  case CTUI_KEYRELEASE_EVENT:
+    return "KEYRELEASE";
   case CTUI_FOCUS_EVENT:
     return "FOCUS";
   case CTUI_WIDGET_REDRAW:

@@ -128,6 +128,8 @@ static int resolve_key(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   kp->type = type;
   kp->ch = ch;
   kp->mods = mods;
+  kp->repeat = 0;
+  kp->base = 0;
   if (type == CTUI_KEY_CHAR) {
     ctui_logf(E_INF,
               "[CTUI:INPUT] - resolved key %s (U+%04X, mods=0x%x) @ tick %d\n",
@@ -237,6 +239,10 @@ static int resolve_csi_u(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   return resolve_key(ev, kp, CTUI_KEY_CHAR, ch, mods);
 }
 
+static int resolve_csi_final(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
+                             unsigned char c, long p1, long shifted,
+                             unsigned int mods);
+
 /* everything after "\x1b[": parameter/intermediate bytes, then one final
  * byte in 0x40-0x7e. Unrecognised sequences resolve to CTUI_KEY_NONE --
  * consumed whole, so their tail never leaks through as stray CHAR events
@@ -276,14 +282,59 @@ static int resolve_csi(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
     return 1;
   }
 
-  /* "p1;p2": p1 selects the key for '~' finals, p2 is 1 + modifier bits */
+  /* "p1;p2": p1 selects the key for '~' finals, p2 is 1 + modifier bits.
+   * After ctui_kitty_keys_enable_events() kitty adds sub-fields: "p1:
+   * shifted:base" (the key's shifted codepoint, its alternate) and
+   * "p2:event" (1 press, 2 repeat, 3 release) */
   char *end;
-  long p1 = strtol(params, &end, 10);
-  long p2 = *end == ';' ? strtol(end + 1, NULL, 10) : 1;
-  unsigned int mods = p2 > 1 ? (unsigned int)(p2 - 1) & 7u : 0;
+  long p1 = strtol(params, &end, 10), shifted = 0, base = 0, event = 1;
+  if (*end == ':') {
+    shifted = strtol(end + 1, &end, 10);
+    if (*end == ':') {
+      base = strtol(end + 1, &end, 10);
+    }
+    while (*end && *end != ';') {
+      end++;
+    }
+  }
+  long p2 = 1;
+  if (*end == ';') {
+    p2 = strtol(end + 1, &end, 10);
+    if (p2 < 1) {
+      p2 = 1;
+    }
+    if (*end == ':') {
+      event = strtol(end + 1, NULL, 10);
+    }
+  }
+  unsigned int mods = (unsigned int)(p2 - 1) & 7u;
+  int r = resolve_csi_final(ev, kp, c, p1, shifted, mods);
+  if (ev->type == CTUI_KEYPRESS_EVENT) {
+    if (event == 3) {
+      ev->type = CTUI_KEYRELEASE_EVENT;
+      ctui_logf(E_INF, "[CTUI:INPUT] - ... a release @ tick %d\n",
+                ctui_tick_advance());
+    }
+    kp->repeat = event == 2;
+    if (c == 'u' && base > 0 && base <= 0x10FFFF && kp->type == CTUI_KEY_CHAR) {
+      kp->base = (uint32_t)base;
+    }
+  }
+  return r;
+}
 
+/* a CSI sequence's final byte c with its numbers (resolve_csi's) */
+static int resolve_csi_final(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
+                             unsigned char c, long p1, long shifted,
+                             unsigned int mods) {
   switch (c) {
   case 'u':
+    /* shift with its shifted key (an "A", a "!"): the key alone, as the
+     * legacy bytes give it */
+    if (shifted > 0 && (mods & CTUI_MOD_SHIFT)) {
+      p1 = shifted;
+      mods &= ~(unsigned int)CTUI_MOD_SHIFT;
+    }
     return resolve_csi_u(ev, kp, p1, mods);
   case 'A':
     return resolve_key(ev, kp, CTUI_KEY_UP, 0, mods);
@@ -340,8 +391,8 @@ static int resolve_csi(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
     break;
   }
   ctui_logf(E_DBG,
-            "[CTUI:INPUT] - ignoring unhandled CSI \"%s%c\" @ tick %d\n",
-            params, c, ctui_tick_advance());
+            "[CTUI:INPUT] - ignoring unhandled CSI \"%ld...%c\" @ tick %d\n",
+            p1, c, ctui_tick_advance());
   return resolve_key(ev, kp, CTUI_KEY_NONE, 0, 0);
 }
 

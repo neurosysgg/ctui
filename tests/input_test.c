@@ -272,6 +272,62 @@ static void test_csi_u(void) {
                    "a kitty functional code (keypad 0) is ignored");
 }
 
+/* ctui_kitty_keys_enable_events()'s reports: event types, shifted keys */
+static void test_key_events(void) {
+  CTUI_EVENT ev;
+  CTUI_KEYPRESS_EVENT_DATA *kp;
+
+  feed("\x1b[97u\x1b[97;1:2u\x1b[97;1:3u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 'a' && !kp->repeat, "a pressed");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 'a' && kp->repeat, "a repeated: a press");
+  CTUI_TEST_ASSERT(
+      ctui_input_loop(&ev, 0) && ev.type == CTUI_KEYRELEASE_EVENT &&
+          ((CTUI_KEYPRESS_EVENT_DATA *)ev.event_data)->ch == 'a' &&
+          ((CTUI_KEYPRESS_EVENT_DATA *)ev.event_data)->type == CTUI_KEY_CHAR,
+      "a let go: a release of its own type");
+  feed("\x1b[97:65;2u\x1b[49:33;2:3u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 'A' && kp->mods == 0,
+                   "shift+a with its shifted key: A, no shift (legacy's)");
+  CTUI_TEST_ASSERT(ctui_input_loop(&ev, 0) &&
+                       ev.type == CTUI_KEYRELEASE_EVENT &&
+                       ((CTUI_KEYPRESS_EVENT_DATA *)ev.event_data)->ch == '!',
+                   "shift+1 let go: a release of !");
+  feed("\x1b[121::122u\x1b[121:89:122;2u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 'y' && kp->base == 'z',
+                   "QWERTZ's y: base z, US's place");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 'Y' && kp->base == 'z',
+                   "... shifted: Y, base z");
+  feed("\x1b[97u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->base == 0, "the same place: base 0");
+  feed("\x1b[97:65;6u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 0x01 && kp->mods == 0,
+                   "ctrl+shift+a: the control byte, as legacy ctrl+A");
+  feed("\x1b[1;1:3A\x1b[13;1:3u\x1b[127u");
+  CTUI_TEST_ASSERT(
+      ctui_input_loop(&ev, 0) && ev.type == CTUI_KEYRELEASE_EVENT &&
+          ((CTUI_KEYPRESS_EVENT_DATA *)ev.event_data)->type == CTUI_KEY_UP,
+      "up let go");
+  CTUI_TEST_ASSERT(
+      ctui_input_loop(&ev, 0) && ev.type == CTUI_KEYRELEASE_EVENT &&
+          ((CTUI_KEYPRESS_EVENT_DATA *)ev.event_data)->type == CTUI_KEY_ENTER,
+      "enter let go");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_CHAR && kp->ch == 0x7f,
+                   "backspace as an escape code: its legacy byte");
+  feed("\x1b[57441;2u\x1b[57441;1:3u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_NONE, "a lone shift: nothing");
+  CTUI_TEST_ASSERT(ctui_input_loop(&ev, 0) && ev.type == CTUI_KEYRELEASE_EVENT,
+                   "... and its release");
+}
+
 static void test_mouse(void) {
   CTUI_EVENT ev;
   CTUI_MOUSE_EVENT_DATA *md;
@@ -862,6 +918,7 @@ int main(void) {
   test_mouse_pixels();
   test_focus();
   test_csi_u();
+  test_key_events();
   test_osc();
   test_io_watch();
   test_io_fd_reuse();

@@ -66,6 +66,16 @@ void ctui_focus_enable(void);
  * ctui_shutdown() restores the previous mode. */
 void ctui_kitty_keys_enable(void);
 
+/* the same plus kitty's key events: a key let go arrives as a
+ * CTUI_KEYRELEASE_EVENT, a held key's repeats as presses with repeat set
+ * (core/event.h). Every key is then reported as an escape code (else
+ * one that types text has no release) and decodes to the event its
+ * legacy bytes give -- shift+a is "A", shift+1 "!" -- except that lone
+ * modifiers and keypad keys arrive too, as CTUI_KEY_NONE. For an app
+ * playing the keyboard like a piano (ctui-daw); the protocol's other
+ * terminals ignore it, and only presses come. */
+void ctui_kitty_keys_enable_events(void);
+
 /* the mouse pointer's shape over the window (kitty's OSC 22; CSS cursor
  * names: "pointer", "text", "grab", "grabbing", "ew-resize",
  * "not-allowed", "wait", "crosshair", ...). Claimed by a widget while a

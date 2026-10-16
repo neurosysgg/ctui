@@ -237,6 +237,32 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A knob, a fader and key releases** (2026-10-16, ctui-wm session
+  222, for ctui-daw's device chain: ctui-wm's notes/daw.md d2b).
+  `CTUI_LOOK_CTL_KNOB` (control.h): a raised round cap with a pointer
+  line, in a sunken 270-degree groove lit in the accent from `span` to
+  `value` (span 0 from the left end, max / 2 from the top: a pan's);
+  OFF greys the marks, FOCUSED rings it; snapped to the arc's px at the
+  groove's middle (so a 40 px knob is ~65 images, not one per value),
+  and the paint works from the snapped step, so snap keeps the pixels.
+  Too small (under 5 px) it draws nothing. A `CTUI_LOOK_CTL_SLIDER`
+  taller than wide is now a fader: the same drawn upright, its thumb
+  from the bottom (ART_VERSION 4: nothing drew one before, but its
+  pixels changed). look_test pins both (`test_knob`, `test_fader`); the
+  snap invariant covers them over every size and look.
+  Key releases: `ctui_kitty_keys_enable_events()` (term.h) pushes kitty's
+  flags 15 (disambiguate, event types, alternate keys, every key as an
+  escape code -- else a key that types text has no release), or raises
+  the entry `ctui_kitty_keys_enable()` pushed. A release arrives as
+  `CTUI_KEYRELEASE_EVENT` (a type of its own: a handler knowing only
+  presses never takes one for a second press), a repeat as a press with
+  `CTUI_KEYPRESS_EVENT_DATA.repeat` set, `base` the key's place on a US
+  layout (kitty's base layout key) when it differs; shift with its shifted key
+  decodes as legacy does ("A", "!"). input.c parses "p1:shifted:base"
+  and "p2:event"; the CSI tail moved into `resolve_csi_final()`.
+  `ctui_kitty_keys_enable()` called twice no longer pushes twice.
+  input_test's `test_key_events`.
+
 - [x] **A single putc cost ~144 instructions and a stall** (2026-10-15,
   ctui-wm's notes/self-improving.md, session 220). ctui-top draws its
   boxes, bars and graphs a cell at a time, so the puts run path didn't

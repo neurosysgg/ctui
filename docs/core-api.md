@@ -319,12 +319,16 @@ addEventListener()-style: widgets register interest in one
 - `CTUI_EVENTTYPE` — `CTUI_KEYPRESS_EVENT`, `CTUI_MOUSE_EVENT`,
   `CTUI_RESIZE_EVENT`, `CTUI_TICK_EVENT`, `CTUI_TIMER_EVENT`,
   `CTUI_IO_EVENT`, `CTUI_VALUE_CHANGED_EVENT`, `CTUI_FOCUS_EVENT`,
-  `CTUI_OSC_EVENT`, plus unused `CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
+  `CTUI_OSC_EVENT`, `CTUI_KEYRELEASE_EVENT` (after
+  `ctui_kitty_keys_enable_events()`; its data a
+  `CTUI_KEYPRESS_EVENT_DATA`), plus unused `CTUI_WIDGET_REDRAW`/`CTUI_DUMMY_EVENT`.
 - `CTUI_KEYPRESS_EVENT_DATA` — `type` (arrows, ENTER/ESC/TAB, HOME/END/
   PGUP/PGDN/INSERT/DELETE/BACKTAB, F1-F12 (`CTUI_KEY_F1 + n - 1`), CHAR, or NONE for an unrecognised
   sequence), `ch` (a codepoint for CHAR) and `mods`
   (`CTUI_MOD_SHIFT/ALT/CTRL`, where the terminal reports them; on
-  Enter/Tab/Backspace only after `ctui_kitty_keys_enable()`).
+  Enter/Tab/Backspace only after `ctui_kitty_keys_enable()`), `repeat`
+  (a held key's repeat) and `base` (its US-layout place, when it differs),
+  both only after `ctui_kitty_keys_enable_events()`.
 - `CTUI_MOUSE_EVENT_DATA` — `action` (press/release/motion/scroll),
   `button` (0 left, 1 middle, 2 right, `CTUI_MOUSE_BUTTON_BACK` /
   `_FORWARD` for a mouse's side buttons, 5-6 beyond), absolute
@@ -546,6 +550,11 @@ above into the loop described in "Life of a frame".
   byte either way). Every key still decodes to the event its legacy bytes
   would give (ctrl+letter is still the control byte); terminals without
   the protocol ignore it; `ctui_shutdown()` restores the previous mode.
+- `ctui_kitty_keys_enable_events()` — the same plus kitty's key events:
+  releases as `CTUI_KEYRELEASE_EVENT`, repeats as presses with `repeat`
+  set (a computer keyboard played as a piano). Every key comes as an
+  escape code then, decoding as before (shift+a "A"); lone modifiers and
+  keypad keys arrive as `CTUI_KEY_NONE`.
 
 - `ctui_suspend()` / `ctui_resume()` — hand the terminal to a child (an
   editor, a pager) and take it back: suspend leaves the alternate screen,
