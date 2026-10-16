@@ -1,6 +1,7 @@
 #include "control.h"
 
 #include <limits.h>
+#include <math.h>
 
 #include "paint.h"
 
@@ -70,11 +71,47 @@ static int scroll_thumb(const CTUI_LOOK_CONTROL *c, int len, int least) {
   return clamp(share(c->span, c->max, len), least, len);
 }
 
+/* a slider's length along its axis and across it: a fader's (taller than
+ * wide) runs up */
+static void slider_axis(int w, int h, int *along, int *across) {
+  *along = h > w ? h : w;
+  *across = h > w ? w : h;
+}
+
+/* a knob's geometry in doubled px around its box's centre (pixel centres
+ * at odd numbers): the square it fills, its groove's outer and inner
+ * radius, its cap's; steps: the positions its arc tells apart (about its
+ * length in px at the groove's middle) */
+typedef struct {
+  int side, ro, ri, rc, steps;
+} KNOB_GEOM;
+
+static KNOB_GEOM knob_geom(int w, int h) {
+  KNOB_GEOM g;
+  g.side = min2(w, h);
+  int ring = max2(2, g.side / 7), gap = max2(1, g.side / 16);
+  g.ro = g.side;
+  g.ri = g.ro - 2 * ring;
+  g.rc = g.ri - 2 * gap;
+  double mid = (g.ro + g.ri) / 4.0; /* px */
+  g.steps = max2(1, (int)(0.75 * 2.0 * 3.14159265358979 * mid + 0.5));
+  return g;
+}
+
 void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
                             int h) {
   switch (c->kind) {
+  case CTUI_LOOK_CTL_KNOB: {
+    KNOB_GEOM g = knob_geom(w, h);
+    c->value = share(c->value, c->max, g.steps);
+    c->span = share(c->span, c->max, g.steps);
+    c->max = g.steps;
+    break;
+  }
   case CTUI_LOOK_CTL_SLIDER: {
-    int travel = w - slider_thumb(l, w, h);
+    int along, across;
+    slider_axis(w, h, &along, &across);
+    int travel = along - slider_thumb(l, along, across);
     c->value = share(c->value, c->max, travel);
     c->max = travel > 0 ? travel : 1;
     c->span = 0;
@@ -205,6 +242,7 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
     c->glyph = CTUI_LOOK_GLYPH_NONE;
   }
   if (c->kind != CTUI_LOOK_CTL_CHECK && c->kind != CTUI_LOOK_CTL_RADIO &&
+      c->kind != CTUI_LOOK_CTL_KNOB &&
       (c->kind != CTUI_LOOK_CTL_BUTTON || c->picto != CTUI_LOOK_PICTO_NONE)) {
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_FOCUSED;
   }
@@ -237,8 +275,9 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
 
 /* bumped when a control's pixels change for the same state and size: its
  * images outlive a build in drawn.h's cache, named by this key (2: the
- * 24 px pictograms; 3: a disabled check box greyed inside) */
-#define ART_VERSION 3u
+ * 24 px pictograms; 3: a disabled check box greyed inside; 4: a slider
+ * taller than wide drawn upright) */
+#define ART_VERSION 4u
 
 uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
                                int w, int h) {
@@ -467,7 +506,24 @@ static const unsigned char *marks(const CTUI_LOOK_CONTROL *c,
 
 static void paint_slider(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
                          const CTUI_LOOK *l) {
-  int w = cv->w, h = cv->h, tw = slider_thumb(l, w, h);
+  int w = cv->w, h = cv->h;
+  if (h > w) {
+    /* a fader: the same turned upright, its thumb from the bottom */
+    int tw = slider_thumb(l, h, w);
+    int pos = h - tw - share(c->value, c->max, h - tw);
+    int gw = min2(w, 2 * l->groove + max2(2, w / 8)), gx = (w - gw) / 2;
+    int gy = tw / 2, gh = h - 2 * (tw / 2);
+    ctui_look_paint_box(cv, gx, gy, gw, gh, l, CTUI_LOOK_PAINT_SUNKEN,
+                        l->groove, 0, role(l, CTUI_LOOK_GROOVE));
+    int in = l->groove, top = pos + tw / 2;
+    ctui_look_paint_rect(cv, gx + in, top, gw - 2 * in, gy + gh - in - top,
+                         marks(c, l, CTUI_LOOK_ACCENT));
+    int tx = w > 4 ? 1 : 0;
+    ctui_look_paint_box(cv, tx, pos, w - 2 * tx, tw, l, CTUI_LOOK_PAINT_RAISED,
+                        l->bevel, l->outline, role(l, CTUI_LOOK_FACE));
+    return;
+  }
+  int tw = slider_thumb(l, w, h);
   int pos = share(c->value, c->max, w - tw);
   /* the groove's edge plus room inside it for the accent */
   int gh = min2(h, 2 * l->groove + max2(2, h / 8)), gy = (h - gh) / 2;
@@ -480,6 +536,75 @@ static void paint_slider(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   int ty = h > 4 ? 1 : 0;
   ctui_look_paint_box(cv, pos, ty, tw, h - 2 * ty, l, CTUI_LOOK_PAINT_RAISED,
                       l->bevel, l->outline, role(l, CTUI_LOOK_FACE));
+}
+
+static void focus_ring(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
+                       const CTUI_LOOK *l, int in);
+
+/* a knob's angle for step k of n: degrees clockwise from 12 o'clock,
+ * -135 at 0, 135 at n */
+static double knob_angle(int k, int n) { return -135.0 + 270.0 * k / n; }
+
+static void paint_knob(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
+                       const CTUI_LOOK *l) {
+  int w = cv->w, h = cv->h;
+  KNOB_GEOM g = knob_geom(w, h);
+  if (g.side < 5) {
+    return;
+  }
+  /* the steps snap() would give: the same pixels for the snapped state */
+  int k = share(c->value, c->max, g.steps), o = share(c->span, c->max, g.steps);
+  double av = knob_angle(k, g.steps), ao = knob_angle(o, g.steps);
+  double lo = av < ao ? av : ao, hi = av < ao ? ao : av;
+  double rad = av * 3.14159265358979 / 180.0, ux = sin(rad), uy = -cos(rad);
+  /* the cap's edge: an outline, then the bevel's rings (paint_box's
+   * roles; none of either: one dark ring, as a radio button's) */
+  int rim = l->bevel + (l->outline ? 1 : 0);
+  if (!rim) {
+    rim = 1;
+  }
+  double thick = max2(1, g.side / 14), from = 0.1 * g.rc,
+         to = g.rc - 2.0 * (rim + 1);
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      int dx = 2 * x + 1 - w, dy = 2 * y + 1 - h;
+      int d2 = dx * dx + dy * dy, lit = dx + dy < 0;
+      const unsigned char *ink = NULL;
+      if (d2 <= g.rc * g.rc) {
+        /* how many px in from the cap's edge */
+        double d = sqrt((double)d2), in = (g.rc - d) / 2.0;
+        if (in < 1.0 && (l->outline || !l->bevel)) {
+          ink = role(l, CTUI_LOOK_DARK);
+        } else if (in < (double)rim) {
+          int outer = l->bevel == 2 && in < (l->outline ? 2.0 : 1.0);
+          ink = role(l, lit ? (outer || l->bevel == 1 ? CTUI_LOOK_HIGHLIGHT
+                                                      : CTUI_LOOK_LIGHT)
+                            : (outer ? CTUI_LOOK_DARK : CTUI_LOOK_SHADOW));
+        } else {
+          double along = dx * ux + dy * uy, across = fabs(dx * uy - dy * ux);
+          ink = along >= from && along <= to && across <= thick
+                    ? marks(c, l, CTUI_LOOK_TEXT)
+                    : role(l, CTUI_LOOK_FACE);
+        }
+      } else if (d2 > g.ri * g.ri && d2 <= g.ro * g.ro) {
+        double a = atan2((double)dx, (double)-dy) * 180.0 / 3.14159265358979;
+        if (a < -135.0 || a > 135.0) {
+          continue; /* the groove's opening at the bottom */
+        }
+        double d = sqrt((double)d2);
+        if (l->groove && (g.ro - d) / 2.0 < 1.0) {
+          ink = role(l, lit ? CTUI_LOOK_SHADOW : CTUI_LOOK_HIGHLIGHT);
+        } else {
+          ink = a >= lo && a <= hi && k != o ? marks(c, l, CTUI_LOOK_ACCENT)
+                                             : role(l, CTUI_LOOK_GROOVE);
+        }
+      }
+      if (ink) {
+        ctui_look_paint_px(cv, x, y, ink);
+      }
+    }
+  }
+  focus_ring(cv, c, l, 0);
 }
 
 static void paint_level(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
@@ -1105,6 +1230,9 @@ void ctui_look_control_paint(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
   switch (c->kind) {
   case CTUI_LOOK_CTL_SLIDER:
     paint_slider(&cv, c, l);
+    break;
+  case CTUI_LOOK_CTL_KNOB:
+    paint_knob(&cv, c, l);
     break;
   case CTUI_LOOK_CTL_LEVEL:
     paint_level(&cv, c, l);

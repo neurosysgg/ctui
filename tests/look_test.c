@@ -315,6 +315,67 @@ static void test_slider(void) {
                    "a panel look: the face behind it all");
 }
 
+static void test_knob(void) {
+  CTUI_LOOK l = test_look();
+  CTUI_LOOK_CONTROL c = ctl(CTUI_LOOK_CTL_KNOB, 50, 100);
+  ctui_look_control_snap(&c, &l, 40, 44);
+  CTUI_TEST_ASSERT(c.max > 50 && c.max < 100 &&
+                       c.value == c.max / 2 + c.max % 2,
+                   "snapped to the arc's px (%d of %d)", c.value, c.max);
+  /* 40 x 40 in a 40 x 44 box, rows 2-41: the groove's top at (20, 2) */
+  const unsigned char *p = paint(ctl(CTUI_LOOK_CTL_KNOB, 0, 100), &l, 40, 44);
+  CTUI_TEST_ASSERT(count(p, 40, 44, &l, 'a') == 0 &&
+                       px(p, 40, &l, 20, 4) == 'g',
+                   "at 0: no accent, the groove");
+  CTUI_TEST_ASSERT(px(p, 40, &l, 20, 41) == '.' && px(p, 40, &l, 20, 1) == '.',
+                   "the groove open at the bottom, nothing above the square");
+  CTUI_TEST_ASSERT(px(p, 40, &l, 20, 22) == 'f' &&
+                       px(p, 40, &l, 20, 9) == 'h' &&
+                       px(p, 40, &l, 20, 34) == 'd',
+                   "the cap raised: lit at the top, dark at the bottom");
+  /* the pointer at -135 degrees: down and left of the centre */
+  CTUI_TEST_ASSERT(px(p, 40, &l, 15, 27) == 't' && px(p, 40, &l, 25, 17) == 'f',
+                   "the pointer towards 7:30");
+  p = paint(ctl(CTUI_LOOK_CTL_KNOB, 100, 100), &l, 40, 44);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 20, 4) == 'a' && px(p, 40, &l, 4, 22) == 'a' &&
+                       px(p, 40, &l, 35, 22) == 'a' &&
+                       px(p, 40, &l, 25, 27) == 't',
+                   "at max: the whole arc lit, the pointer at 4:30");
+  CTUI_LOOK_CONTROL pan = ctl(CTUI_LOOK_CTL_KNOB, 25, 100);
+  pan.span = 50;
+  p = paint(pan, &l, 40, 44);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 17, 4) == 'a' && px(p, 40, &l, 24, 4) == 'g' &&
+                       px(p, 40, &l, 35, 22) == 'g',
+                   "a pan's arc from the top to the value");
+  pan.value = 50;
+  p = paint(pan, &l, 40, 44);
+  CTUI_TEST_ASSERT(count(p, 40, 44, &l, 'a') == 0, "centred: none lit");
+  CTUI_LOOK_CONTROL off = ctl(CTUI_LOOK_CTL_KNOB, 100, 100);
+  off.flags = CTUI_LOOK_CTL_OFF;
+  p = paint(off, &l, 40, 44);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 20, 4) == 'x' && px(p, 40, &l, 25, 27) == 'x',
+                   "off: arc and pointer disabled");
+  p = paint(ctl(CTUI_LOOK_CTL_KNOB, 50, 100), &l, 4, 4);
+  CTUI_TEST_ASSERT(count(p, 4, 4, &l, '.') == 16, "too small: nothing");
+}
+
+static void test_fader(void) {
+  CTUI_LOOK l = test_look();
+  CTUI_LOOK_CONTROL c = ctl(CTUI_LOOK_CTL_SLIDER, 50, 100);
+  ctui_look_control_snap(&c, &l, 20, 80);
+  /* the thumb 11 px (20 / 2, odd) high: 69 px of travel */
+  CTUI_TEST_ASSERT(c.value == 35 && c.max == 69, "snapped along its height");
+  const unsigned char *p = paint(ctl(CTUI_LOOK_CTL_SLIDER, 0, 100), &l, 20, 80);
+  CTUI_TEST_ASSERT(px(p, 20, &l, 1, 69) == 'h' && px(p, 20, &l, 1, 68) != 'h',
+                   "0: the thumb at the bottom");
+  p = paint(ctl(CTUI_LOOK_CTL_SLIDER, 100, 100), &l, 20, 80);
+  CTUI_TEST_ASSERT(px(p, 20, &l, 1, 0) == 'h' && count(p, 20, 80, &l, 'a') > 60,
+                   "max: at the top, the accent below it");
+  p = paint(ctl(CTUI_LOOK_CTL_SLIDER, 50, 100), &l, 20, 80);
+  CTUI_TEST_ASSERT(px(p, 20, &l, 10, 70) == 'a' && px(p, 20, &l, 10, 15) == 'g',
+                   "the accent under the thumb, the groove above");
+}
+
 static void test_level_signal(void) {
   CTUI_LOOK l = test_look();
   l.chunk = 0;
@@ -1961,6 +2022,8 @@ int main(void) {
   test_config();
   test_primitives();
   test_slider();
+  test_knob();
+  test_fader();
   test_level_signal();
   test_toggles();
   test_buttons();

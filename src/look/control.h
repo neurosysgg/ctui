@@ -13,7 +13,8 @@
 
 typedef enum {
   CTUI_LOOK_CTL_SLIDER, /* a thumb on a groove at value of max, accent up to
-                         * it (volume, brightness) */
+                         * it (volume, brightness); taller than wide a
+                         * fader: value from the bottom up */
   CTUI_LOOK_CTL_LEVEL,  /* value of max as a fill in a sunken field, in the
                          * look's chunks (battery, a progress bar) */
   CTUI_LOOK_CTL_SIGNAL, /* max bars rising left to right, value of them lit */
@@ -75,6 +76,11 @@ typedef enum {
    * tenth of its height in px, or with span > 0 span points across it
    * (a big graph holding minutes) */
   CTUI_LOOK_CTL_GRAPH,
+  /* a rotary knob: a raised round cap with a pointer line, in a sunken
+   * groove of 270 degrees (7:30 to 4:30 o'clock) lit in the accent from
+   * span to value (of max): span 0 lights it from the left end, max / 2
+   * from the top (a pan's); OFF greys the marks, FOCUSED rings it */
+  CTUI_LOOK_CTL_KNOB,
   CTUI_LOOK_CTL_KINDS,
 } CTUI_LOOK_CTL_KIND;
 
