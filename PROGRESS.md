@@ -237,6 +237,22 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **An XML reader and an inflate, promoted from ctui-wm** (2026-10-17,
+  ctui-wm session 230, for ctui-daw's `.dawproject` import: a zip of
+  project.xml and audio -- its second consumer). `json/xml.h`: ctui-wm's
+  markup/xml.c as `ctui_xml_*`, unchanged but for its entities: XML's
+  five and numeric ones by default (`ctui_xml_entity`), or a caller's
+  (`CTUI_XML.entity`, `ctui_xml_unescape`'s argument) -- ctui-wm passes
+  its HTML table, feeds being lenient. core/deflate.h gets an inflate:
+  ctui-wm's xdg/png.c puff-shaped decoder (every block type) as
+  `ctui_inflate_raw` (a zip member) and `ctui_inflate_zlib` (PNG's
+  IDAT; the header checked, not the Adler-32), whole buffers of a known
+  length. tests/xml_test.c (the reader's cases, moved, and the
+  entities); deflate_test round-trips the compressor through the
+  inflate, a dynamic block from zlib's level 9, a stored block, and
+  short / long / broken streams. The fuzzing stays ctui-wm's (its feed
+  and png cases now run this code).
+
 - [x] **ctrl+shift+letter lost its shift under key events** (2026-10-17,
   ctui-wm session 229: ctui-daw's ctrl+shift+M, Z, S did nothing). With
   the alternate keys flag kitty sends ctrl+shift+m as "109:77;6u"; the

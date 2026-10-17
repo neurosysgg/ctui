@@ -1,9 +1,7 @@
-/* Exercises core/deflate.c's compress-only zlib/DEFLATE encoder. There's
- * no inflate path anywhere in core/ (ctui never needs to decompress
- * anything it didn't just compress itself -- see deflate.h), so "is the
- * output actually valid DEFLATE" can't be checked by round-tripping
- * through ctui's own code the way every other headless test in this
- * suite verifies itself. Resolved per GFX_DESIGN.md's flagged-open
+/* Exercises core/deflate.c's zlib/DEFLATE encoder, and its inflate. The
+ * encoder's output is checked against an outside decoder, not only
+ * round-tripped through ctui's own inflate (a bug both shared would pass
+ * that). Resolved per GFX_DESIGN.md's flagged-open
  * Phase 5b test-strategy question: shell out to python3's stdlib zlib
  * module at test time (confirmed present in this environment, and
  * already the project's precedent for a python-at-test-time dependency
@@ -28,8 +26,7 @@
  * python3 (logged to stderr either way so a CI run without python3 fails
  * loudly instead of silently passing). */
 static int zlib_roundtrip_matches(const unsigned char *comp, size_t comp_len,
-                                  const unsigned char *orig,
-                                  size_t orig_len) {
+                                  const unsigned char *orig, size_t orig_len) {
   char in_path[] = "/tmp/ctui_deflate_test_in_XXXXXX";
   char out_path[] = "/tmp/ctui_deflate_test_out_XXXXXX";
   int ok = 0;
@@ -97,9 +94,8 @@ static void test_degenerate_input(void) {
 }
 
 static void test_small_text_roundtrips_and_shrinks(void) {
-  const char *msg =
-      "the quick brown fox jumps over the lazy dog "
-      "the quick brown fox jumps over the lazy dog";
+  const char *msg = "the quick brown fox jumps over the lazy dog "
+                    "the quick brown fox jumps over the lazy dog";
   size_t len = strlen(msg);
 
   size_t out_len = 0;
@@ -168,6 +164,78 @@ static void test_incompressible_input_still_roundtrips(void) {
   free(c);
 }
 
+/* a raw DEFLATE stream with a dynamic Huffman block (python3's zlib at
+ * level 9, wbits -15) of 24 lines like
+ * '<Note time="0.0" duration="0.5" key="36" vel="0.8"/>\n' */
+static const unsigned char dynamic_raw[] = {
+    0x9d, 0xd2, 0x4d, 0x0a, 0x02, 0x31, 0x0c, 0x86, 0xe1, 0xbd, 0xa7, 0x28,
+    0x39, 0x80, 0x36, 0x69, 0xfa, 0x07, 0x33, 0x1e, 0xc1, 0x3b, 0x08, 0x76,
+    0x31, 0xf8, 0x33, 0x20, 0x55, 0xf0, 0xf6, 0x32, 0x3b, 0x37, 0x5f, 0x91,
+    0x2c, 0x13, 0x78, 0x56, 0xdf, 0x3b, 0x9d, 0xd6, 0xde, 0x5c, 0x5f, 0xee,
+    0x6d, 0x26, 0xbf, 0xf7, 0xe4, 0x2e, 0xaf, 0xe7, 0xb9, 0x2f, 0xeb, 0x63,
+    0x3b, 0x23, 0xb9, 0x6b, 0xfb, 0xcc, 0x14, 0x12, 0xb9, 0x77, 0xbb, 0x6d,
+    0xaf, 0x42, 0x87, 0xe3, 0x6e, 0xfa, 0x41, 0x0c, 0x51, 0xc6, 0x48, 0x20,
+    0x2a, 0x18, 0x05, 0x88, 0x2a, 0x46, 0x8a, 0x90, 0x7a, 0x8c, 0x22, 0x44,
+    0x8c, 0x51, 0x82, 0x48, 0x30, 0xca, 0x10, 0x05, 0x8c, 0x0a, 0x44, 0x8a,
+    0x51, 0x85, 0x28, 0x0e, 0xc6, 0x85, 0x49, 0xe8, 0x28, 0x09, 0xd8, 0x84,
+    0x0e, 0x9a, 0x60, 0x31, 0xe5, 0x17, 0x2c, 0xfd, 0xb1, 0x5a, 0x02, 0xe4,
+    0x68, 0x29, 0x90, 0x93, 0x25, 0x41, 0xce, 0x96, 0x06, 0xb9, 0x58, 0x22,
+    0xe4, 0x6a, 0xa9, 0x50, 0xbc, 0x25, 0x43, 0x61, 0x4b, 0x87, 0x22, 0x96,
+    0x0e, 0x25, 0xfc, 0xdb, 0xe1, 0x17,
+};
+
+static void test_inflate(void) {
+  /* ctui's own compressor (fixed blocks) back through the inflate */
+  size_t len = 100000;
+  unsigned char *buf = malloc(len), *back = malloc(len);
+  for (size_t i = 0; i < len; i++) {
+    buf[i] = (unsigned char)((i / 7) % 4);
+  }
+  size_t c_len = 0;
+  unsigned char *c = ctui_deflate_compress(buf, len, &c_len);
+  CTUI_TEST_ASSERT(c && ctui_inflate_zlib(c, c_len, back, len) == 0 &&
+                       memcmp(buf, back, len) == 0,
+                   "the compressor's zlib stream inflates back, past the "
+                   "32 KB window");
+  CTUI_TEST_ASSERT(ctui_inflate_zlib(c, c_len, back, len - 1) == -1 &&
+                       ctui_inflate_zlib(c, c_len / 2, back, len) == -1,
+                   "a stream longer than expected, or cut short, fails");
+  unsigned char bad[2] = {c[0], (unsigned char)(c[1] + 1)};
+  CTUI_TEST_ASSERT(ctui_inflate_zlib(bad, 2, back, len) == -1 &&
+                       ctui_inflate_raw(c + 2, c_len - 2, back, len) == 0,
+                   "a zlib header that fails its check is refused; the "
+                   "same stream without it inflates raw");
+  free(c);
+
+  /* the line the fixture was made from, 24 times with its time and key */
+  char want[2048];
+  size_t n = 0;
+  for (int i = 0; i < 24; i++) {
+    n += (size_t)snprintf(want + n, sizeof want - n,
+                          "<Note time=\"%d.0\" duration=\"0.5\" key=\"%d\" "
+                          "vel=\"0.8\"/>\n",
+                          i, 36 + i % 12);
+  }
+  CTUI_TEST_ASSERT(ctui_inflate_raw(dynamic_raw, sizeof dynamic_raw, back, n) ==
+                           0 &&
+                       memcmp(back, want, n) == 0,
+                   "a dynamic Huffman block (zlib's level 9)");
+
+  /* a stored block: BFINAL 1, BTYPE 00, LEN 5, NLEN ~5 */
+  const unsigned char stored[] = {0x01, 0x05, 0x00, 0xfa, 0xff,
+                                  'h',  'e',  'l',  'l',  'o'};
+  CTUI_TEST_ASSERT(ctui_inflate_raw(stored, sizeof stored, back, 5) == 0 &&
+                       memcmp(back, "hello", 5) == 0,
+                   "a stored block");
+  unsigned char nlen[sizeof stored];
+  memcpy(nlen, stored, sizeof stored);
+  nlen[3] = 0;
+  CTUI_TEST_ASSERT(ctui_inflate_raw(nlen, sizeof nlen, back, 5) == -1,
+                   "a stored block whose NLEN isn't LEN's complement fails");
+  free(buf);
+  free(back);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
 
@@ -175,6 +243,7 @@ int main(void) {
   test_small_text_roundtrips_and_shrinks();
   test_large_repetitive_spans_the_window();
   test_incompressible_input_still_roundtrips();
+  test_inflate();
 
   return ctui_test_summary();
 }

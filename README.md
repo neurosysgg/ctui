@@ -177,7 +177,10 @@ else.
   set / remove / insert / swap a member, saved with a `.bak`), and
   objects -- an NDJSON file's lines -- read straight into an app's own
   fixed records, no tree (`record`: a key -> kind + offset table, strings
-  into an arena; `#include "json/record.h"`).
+  into an arena; `#include "json/record.h"`), and a lenient XML pull
+  reader -- tags, text, CDATA a token at a time, pointing into the
+  document; XML's entities or a caller's (`xml`: `#include
+  "json/xml.h"`).
 - `src/query/` — a search over records an app describes: foobar2000's
   keywords (`artist HAS x`, `AND OR NOT`, `SORT BY`) plus short forms
   (`ext:flac,mp3`, `size>10M`, `age<7d`, `is:link`, `-word`), typed

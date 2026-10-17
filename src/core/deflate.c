@@ -110,8 +110,7 @@ static void bw_flush_byte(BIT_WRITER *bw) {
  * symbol -- no table needed, just the piecewise mapping the RFC gives
  * directly. Covers length codes 257-285 too, since they live in the same
  * alphabet as literals and the end-of-block symbol (256). */
-static void fixed_lit_huffman(unsigned int sym, unsigned int *code,
-                              int *bits) {
+static void fixed_lit_huffman(unsigned int sym, unsigned int *code, int *bits) {
   if (sym <= 143) {
     *bits = 8;
     *code = 0x30 + sym;
@@ -134,16 +133,14 @@ static void fixed_lit_huffman(unsigned int sym, unsigned int *code,
 static const struct {
   int base, extra_bits, code;
 } length_table[] = {
-    {3, 0, 257},   {4, 0, 258},   {5, 0, 259},   {6, 0, 260},
-    {7, 0, 261},   {8, 0, 262},   {9, 0, 263},   {10, 0, 264},
-    {11, 1, 265},  {13, 1, 266},  {15, 1, 267},  {17, 1, 268},
-    {19, 2, 269},  {23, 2, 270},  {27, 2, 271},  {31, 2, 272},
-    {35, 3, 273},  {43, 3, 274},  {51, 3, 275},  {59, 3, 276},
-    {67, 4, 277},  {83, 4, 278},  {99, 4, 279},  {115, 4, 280},
-    {131, 5, 281}, {163, 5, 282}, {195, 5, 283}, {227, 5, 284},
-    {258, 0, 285},
+    {3, 0, 257},   {4, 0, 258},   {5, 0, 259},   {6, 0, 260},   {7, 0, 261},
+    {8, 0, 262},   {9, 0, 263},   {10, 0, 264},  {11, 1, 265},  {13, 1, 266},
+    {15, 1, 267},  {17, 1, 268},  {19, 2, 269},  {23, 2, 270},  {27, 2, 271},
+    {31, 2, 272},  {35, 3, 273},  {43, 3, 274},  {51, 3, 275},  {59, 3, 276},
+    {67, 4, 277},  {83, 4, 278},  {99, 4, 279},  {115, 4, 280}, {131, 5, 281},
+    {163, 5, 282}, {195, 5, 283}, {227, 5, 284}, {258, 0, 285},
 };
-#define CTUI_DEFLATE_LENGTH_TABLE_N \
+#define CTUI_DEFLATE_LENGTH_TABLE_N                                            \
   (int)(sizeof(length_table) / sizeof(length_table[0]))
 
 /* RFC 1951 S3.2.5's distance code table, same shape as length_table
@@ -152,16 +149,16 @@ static const struct {
 static const struct {
   int base, extra_bits, code;
 } dist_table[] = {
-    {1, 0, 0},       {2, 0, 1},       {3, 0, 2},       {4, 0, 3},
-    {5, 1, 4},       {7, 1, 5},       {9, 2, 6},       {13, 2, 7},
-    {17, 3, 8},      {25, 3, 9},      {33, 4, 10},     {49, 4, 11},
-    {65, 5, 12},     {97, 5, 13},     {129, 6, 14},    {193, 6, 15},
-    {257, 7, 16},    {385, 7, 17},    {513, 8, 18},    {769, 8, 19},
-    {1025, 9, 20},   {1537, 9, 21},   {2049, 10, 22},  {3073, 10, 23},
-    {4097, 11, 24},  {6145, 11, 25},  {8193, 12, 26},  {12289, 12, 27},
+    {1, 0, 0},       {2, 0, 1},       {3, 0, 2},      {4, 0, 3},
+    {5, 1, 4},       {7, 1, 5},       {9, 2, 6},      {13, 2, 7},
+    {17, 3, 8},      {25, 3, 9},      {33, 4, 10},    {49, 4, 11},
+    {65, 5, 12},     {97, 5, 13},     {129, 6, 14},   {193, 6, 15},
+    {257, 7, 16},    {385, 7, 17},    {513, 8, 18},   {769, 8, 19},
+    {1025, 9, 20},   {1537, 9, 21},   {2049, 10, 22}, {3073, 10, 23},
+    {4097, 11, 24},  {6145, 11, 25},  {8193, 12, 26}, {12289, 12, 27},
     {16385, 13, 28}, {24577, 13, 29},
 };
-#define CTUI_DEFLATE_DIST_TABLE_N \
+#define CTUI_DEFLATE_DIST_TABLE_N                                              \
   (int)(sizeof(dist_table) / sizeof(dist_table[0]))
 
 static void emit_length(BIT_WRITER *bw, size_t length) {
@@ -175,7 +172,7 @@ static void emit_length(BIT_WRITER *bw, size_t length) {
   bw_put_huffman(bw, code, bits);
   if (length_table[idx].extra_bits > 0) {
     bw_put_bits(bw, (unsigned int)(length - (size_t)length_table[idx].base),
-               length_table[idx].extra_bits);
+                length_table[idx].extra_bits);
   }
 }
 
@@ -190,7 +187,7 @@ static void emit_distance(BIT_WRITER *bw, unsigned int dist) {
   bw_put_huffman(bw, (unsigned int)dist_table[idx].code, 5);
   if (dist_table[idx].extra_bits > 0) {
     bw_put_bits(bw, dist - (unsigned int)dist_table[idx].base,
-               dist_table[idx].extra_bits);
+                dist_table[idx].extra_bits);
   }
 }
 
@@ -356,4 +353,281 @@ unsigned char *ctui_deflate_compress(const unsigned char *src, size_t len,
             "[CTUI:DEFLATE] - compress @ tick %d (%zu bytes -> %zu bytes)\n",
             ctui_tick_advance(), len, bw.len);
   return bw.buf;
+}
+
+/* --- inflate (RFC 1951), after the shape of zlib's puff.c --- */
+
+#define MAXBITS 15
+#define MAXLCODES 286
+#define MAXDCODES 30
+#define FIXLCODES 288
+
+typedef struct {
+  const unsigned char *in;
+  size_t inlen, incnt;
+  unsigned bitbuf, bitcnt;
+  unsigned char *out;
+  size_t outlen, outcnt;
+  int err; /* ran out of input */
+} INFLATE;
+
+typedef struct {
+  short count[MAXBITS + 1];
+  short symbol[FIXLCODES];
+} HUFF;
+
+static unsigned bits(INFLATE *s, int need) {
+  unsigned long val = s->bitbuf;
+  while (s->bitcnt < (unsigned)need) {
+    if (s->incnt >= s->inlen) {
+      s->err = 1;
+      return 0;
+    }
+    val |= (unsigned long)s->in[s->incnt++] << s->bitcnt;
+    s->bitcnt += 8;
+  }
+  s->bitbuf = (unsigned)(val >> need);
+  s->bitcnt -= (unsigned)need;
+  return (unsigned)(val & ((1UL << need) - 1));
+}
+
+static int stored(INFLATE *s) {
+  s->bitbuf = 0;
+  s->bitcnt = 0;
+  if (s->incnt + 4 > s->inlen) {
+    return -1;
+  }
+  unsigned len = s->in[s->incnt] | (unsigned)s->in[s->incnt + 1] << 8;
+  unsigned nlen = s->in[s->incnt + 2] | (unsigned)s->in[s->incnt + 3] << 8;
+  s->incnt += 4;
+  if (len != (~nlen & 0xffff) || s->incnt + len > s->inlen ||
+      s->outcnt + len > s->outlen) {
+    return -1;
+  }
+  memcpy(s->out + s->outcnt, s->in + s->incnt, len);
+  s->outcnt += len;
+  s->incnt += len;
+  return 0;
+}
+
+static int decode(INFLATE *s, const HUFF *h) {
+  int code = 0, first = 0, index = 0;
+  for (int len = 1; len <= MAXBITS; len++) {
+    code |= (int)bits(s, 1);
+    if (s->err) {
+      return -1;
+    }
+    int count = h->count[len];
+    if (code - count < first) {
+      return h->symbol[index + (code - first)];
+    }
+    index += count;
+    first += count;
+    first <<= 1;
+    code <<= 1;
+  }
+  return -1;
+}
+
+/* the canonical code for n lengths: 0 complete, > 0 incomplete, < 0
+ * over-subscribed */
+static int construct(HUFF *h, const short *length, int n) {
+  for (int len = 0; len <= MAXBITS; len++) {
+    h->count[len] = 0;
+  }
+  for (int sym = 0; sym < n; sym++) {
+    h->count[length[sym]]++;
+  }
+  if (h->count[0] == n) {
+    return 0;
+  }
+  int left = 1;
+  for (int len = 1; len <= MAXBITS; len++) {
+    left <<= 1;
+    left -= h->count[len];
+    if (left < 0) {
+      return left;
+    }
+  }
+  short offs[MAXBITS + 1];
+  offs[1] = 0;
+  for (int len = 1; len < MAXBITS; len++) {
+    offs[len + 1] = (short)(offs[len] + h->count[len]);
+  }
+  for (int sym = 0; sym < n; sym++) {
+    if (length[sym] != 0) {
+      h->symbol[offs[length[sym]]++] = (short)sym;
+    }
+  }
+  return left;
+}
+
+static int codes(INFLATE *s, const HUFF *lencode, const HUFF *distcode) {
+  static const short lbase[29] = {3,  4,  5,  6,   7,   8,   9,   10,  11, 13,
+                                  15, 17, 19, 23,  27,  31,  35,  43,  51, 59,
+                                  67, 83, 99, 115, 131, 163, 195, 227, 258};
+  static const short lext[29] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2,
+                                 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+  static const short dbase[30] = {
+      1,    2,    3,    4,    5,    7,    9,    13,    17,    25,
+      33,   49,   65,   97,   129,  193,  257,  385,   513,   769,
+      1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577};
+  static const short dext[30] = {0, 0, 0,  0,  1,  1,  2,  2,  3,  3,
+                                 4, 4, 5,  5,  6,  6,  7,  7,  8,  8,
+                                 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+  for (;;) {
+    int sym = decode(s, lencode);
+    if (sym < 0) {
+      return -1;
+    }
+    if (sym < 256) {
+      if (s->outcnt >= s->outlen) {
+        return -1;
+      }
+      s->out[s->outcnt++] = (unsigned char)sym;
+    } else if (sym == 256) {
+      return 0;
+    } else {
+      sym -= 257;
+      if (sym >= 29) {
+        return -1;
+      }
+      size_t len = (size_t)lbase[sym] + bits(s, lext[sym]);
+      int dsym = decode(s, distcode);
+      if (dsym < 0 || dsym >= 30) {
+        return -1;
+      }
+      size_t dist = (size_t)dbase[dsym] + bits(s, dext[dsym]);
+      if (s->err || dist > s->outcnt || s->outcnt + len > s->outlen) {
+        return -1;
+      }
+      for (; len; len--, s->outcnt++) {
+        s->out[s->outcnt] = s->out[s->outcnt - dist];
+      }
+    }
+  }
+}
+
+static int fixed(INFLATE *s) {
+  /* built each time: a few hundred steps, cheap next to the block */
+  HUFF lencode, distcode;
+  short lengths[FIXLCODES];
+  int sym = 0;
+  for (; sym < 144; sym++) {
+    lengths[sym] = 8;
+  }
+  for (; sym < 256; sym++) {
+    lengths[sym] = 9;
+  }
+  for (; sym < 280; sym++) {
+    lengths[sym] = 7;
+  }
+  for (; sym < FIXLCODES; sym++) {
+    lengths[sym] = 8;
+  }
+  construct(&lencode, lengths, FIXLCODES);
+  for (sym = 0; sym < MAXDCODES; sym++) {
+    lengths[sym] = 5;
+  }
+  construct(&distcode, lengths, MAXDCODES);
+  return codes(s, &lencode, &distcode);
+}
+
+static int dynamic(INFLATE *s) {
+  static const short order[19] = {16, 17, 18, 0, 8,  7, 9,  6, 10, 5,
+                                  11, 4,  12, 3, 13, 2, 14, 1, 15};
+  short lengths[MAXLCODES + MAXDCODES];
+  int nlen = (int)bits(s, 5) + 257;
+  int ndist = (int)bits(s, 5) + 1;
+  int ncode = (int)bits(s, 4) + 4;
+  if (s->err || nlen > MAXLCODES || ndist > MAXDCODES) {
+    return -1;
+  }
+  int index = 0;
+  for (; index < ncode; index++) {
+    lengths[order[index]] = (short)bits(s, 3);
+  }
+  for (; index < 19; index++) {
+    lengths[order[index]] = 0;
+  }
+  HUFF lencode, distcode;
+  if (s->err || construct(&lencode, lengths, 19) != 0) {
+    return -1;
+  }
+  for (index = 0; index < nlen + ndist;) {
+    int sym = decode(s, &lencode);
+    if (sym < 0) {
+      return -1;
+    }
+    if (sym < 16) {
+      lengths[index++] = (short)sym;
+      continue;
+    }
+    short len = 0;
+    int rep;
+    if (sym == 16) {
+      if (index == 0) {
+        return -1;
+      }
+      len = lengths[index - 1];
+      rep = 3 + (int)bits(s, 2);
+    } else if (sym == 17) {
+      rep = 3 + (int)bits(s, 3);
+    } else {
+      rep = 11 + (int)bits(s, 7);
+    }
+    if (s->err || index + rep > nlen + ndist) {
+      return -1;
+    }
+    while (rep--) {
+      lengths[index++] = len;
+    }
+  }
+  if (lengths[256] == 0) {
+    return -1;
+  }
+  int err = construct(&lencode, lengths, nlen);
+  if (err < 0 || (err > 0 && nlen - lencode.count[0] != 1)) {
+    return -1;
+  }
+  err = construct(&distcode, lengths + nlen, ndist);
+  if (err < 0 || (err > 0 && ndist - distcode.count[0] != 1)) {
+    return -1;
+  }
+  return codes(s, &lencode, &distcode);
+}
+
+/* the blocks from s's input until the last; 0 or -1 */
+static int blocks(INFLATE *s) {
+  int last;
+  do {
+    last = (int)bits(s, 1);
+    int type = (int)bits(s, 2);
+    if (s->err) {
+      return -1;
+    }
+    int r = type == 0   ? stored(s)
+            : type == 1 ? fixed(s)
+            : type == 2 ? dynamic(s)
+                        : -1;
+    if (r != 0 || s->err) {
+      return -1;
+    }
+  } while (!last);
+  return s->outcnt == s->outlen ? 0 : -1;
+}
+
+int ctui_inflate_raw(const unsigned char *in, size_t in_len, unsigned char *out,
+                     size_t out_len) {
+  INFLATE s = {.in = in, .inlen = in_len, .out = out, .outlen = out_len};
+  return blocks(&s);
+}
+
+int ctui_inflate_zlib(const unsigned char *in, size_t in_len,
+                      unsigned char *out, size_t out_len) {
+  if (in_len < 2 || (in[0] & 0x0f) != 8 || (in[0] >> 4) > 7 ||
+      ((unsigned)in[0] << 8 | in[1]) % 31 != 0 || (in[1] & 0x20)) {
+    return -1;
+  }
+  return ctui_inflate_raw(in + 2, in_len - 2, out, out_len);
 }

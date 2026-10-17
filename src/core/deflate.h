@@ -3,11 +3,13 @@
 
 #include <stddef.h>
 
-/* compress-only zlib-wrapped DEFLATE (RFC 1950 framing around RFC 1951
- * compressed data) -- ctui's one consumer (core/gfx.c's Kitty transport,
- * `o=z`) never reads a Kitty APC reply and has no other need for
- * compressed data either, so there's no inflate path here, by design (see
- * GFX_DESIGN.md's Phase 5b).
+/* zlib-wrapped DEFLATE (RFC 1950 framing around RFC 1951 compressed
+ * data): a compressor for core/gfx.c's Kitty transport (`o=z`), and an
+ * inflate (the bottom of this header) for the apps' files -- ctui-wm's
+ * PNG icons, ctui-daw's .dawproject zips -- promoted from ctui-wm's
+ * xdg/png.c once ctui-daw needed it too.
+ *
+ * The compressor:
  *
  * v1 scope, deliberately narrow: fixed Huffman codes only (RFC 1951
  * S3.2.6) -- no dynamic Huffman tables (real zlib's biggest ratio win,
@@ -43,5 +45,16 @@
  * encode-time upper bound. */
 unsigned char *ctui_deflate_compress(const unsigned char *src, size_t len,
                                      size_t *out_len);
+
+/* raw DEFLATE (RFC 1951: a zip member's) into out, exactly out_len bytes
+ * expected: 0, or -1 for a broken or short stream or one that inflates to
+ * any other length. Whole buffers, after zlib's puff.c (every block type,
+ * dynamic Huffman too); pure, so fuzzable as is. */
+int ctui_inflate_raw(const unsigned char *in, size_t in_len, unsigned char *out,
+                     size_t out_len);
+/* a zlib stream (RFC 1950: PNG's IDAT) the same way; its header is
+ * checked, its Adler-32 trailer isn't */
+int ctui_inflate_zlib(const unsigned char *in, size_t in_len,
+                      unsigned char *out, size_t out_len);
 
 #endif
