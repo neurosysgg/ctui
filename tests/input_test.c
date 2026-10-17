@@ -305,10 +305,17 @@ static void test_key_events(void) {
   feed("\x1b[97u");
   kp = next_key(&ev);
   CTUI_TEST_ASSERT(kp && kp->base == 0, "the same place: base 0");
-  feed("\x1b[97:65;6u");
+  feed("\x1b[97:65;6u\x1b[97;6u");
   kp = next_key(&ev);
-  CTUI_TEST_ASSERT(kp && kp->ch == 0x01 && kp->mods == 0,
-                   "ctrl+shift+a: the control byte, as legacy ctrl+A");
+  CTUI_TEST_ASSERT(kp && kp->ch == 0x01 && kp->mods == CTUI_MOD_SHIFT,
+                   "ctrl+shift+a: the control byte, shift kept");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == 0x01 && kp->mods == CTUI_MOD_SHIFT,
+                   "... the same without its shifted key");
+  feed("\x1b[49:33;6u");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->ch == '!' && kp->mods == CTUI_MOD_CTRL,
+                   "ctrl+shift+1: still its shifted key, ctrl");
   feed("\x1b[1;1:3A\x1b[13;1:3u\x1b[127u");
   CTUI_TEST_ASSERT(
       ctui_input_loop(&ev, 0) && ev.type == CTUI_KEYRELEASE_EVENT &&

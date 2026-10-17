@@ -330,8 +330,11 @@ static int resolve_csi_final(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
   switch (c) {
   case 'u':
     /* shift with its shifted key (an "A", a "!"): the key alone, as the
-     * legacy bytes give it */
-    if (shifted > 0 && (mods & CTUI_MOD_SHIFT)) {
+     * legacy bytes give it -- but not with ctrl on a letter: that folds to
+     * the control byte, so shift stays the only thing telling ctrl+shift+M
+     * from ctrl+M (as in a report without the shifted key) */
+    if (shifted > 0 && (mods & CTUI_MOD_SHIFT) &&
+        !((mods & CTUI_MOD_CTRL) && p1 >= 'a' && p1 <= 'z')) {
       p1 = shifted;
       mods &= ~(unsigned int)CTUI_MOD_SHIFT;
     }

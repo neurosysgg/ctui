@@ -237,6 +237,15 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **ctrl+shift+letter lost its shift under key events** (2026-10-17,
+  ctui-wm session 229: ctui-daw's ctrl+shift+M, Z, S did nothing). With
+  the alternate keys flag kitty sends ctrl+shift+m as "109:77;6u"; the
+  shifted key ("M") replaced the key and shift was dropped, then ctrl
+  folded it to 0x0d -- the same event as ctrl+M. With ctrl on a letter
+  the shifted key is no longer taken, so shift stays (0x0d + SHIFT, as
+  "109;6u" without the flag already gave); ctrl+shift+1 is still ctrl
+  "!". input_test's `test_key_events` pinned the old way; now both forms.
+
 - [x] **A knob, a fader and key releases** (2026-10-16, ctui-wm session
   222, for ctui-daw's device chain: ctui-wm's notes/daw.md d2b).
   `CTUI_LOOK_CTL_KNOB` (control.h): a raised round cap with a pointer

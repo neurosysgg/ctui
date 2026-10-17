@@ -553,7 +553,8 @@ above into the loop described in "Life of a frame".
 - `ctui_kitty_keys_enable_events()` — the same plus kitty's key events:
   releases as `CTUI_KEYRELEASE_EVENT`, repeats as presses with `repeat`
   set (a computer keyboard played as a piano). Every key comes as an
-  escape code then, decoding as before (shift+a "A"); lone modifiers and
+  escape code then, decoding as before (shift+a "A", ctrl+shift+a
+  0x01 with `CTUI_MOD_SHIFT`); lone modifiers and
   keypad keys arrive as `CTUI_KEY_NONE`.
 
 - `ctui_suspend()` / `ctui_resume()` — hand the terminal to a child (an
