@@ -393,8 +393,10 @@ void ctui_widget_put_kitty_placeholder(CTUI_WIDGET *widget,
   if (rows > CTUI_GFX_KITTY_MAX_ROWS) {
     rows = CTUI_GFX_KITTY_MAX_ROWS;
   }
-  /* the id rides in the fg color; a single row goes without diacritics
-   * (kitty takes row 0 and counts columns up along the run) */
+  /* the id rides in the fg color; a single row goes without a row
+   * diacritic (kitty takes row 0 and counts columns up along the run);
+   * each row's first cell says its column, 0: the same image right
+   * before it would carry its count on */
   CTUI_CELL style = {.fg_r = (unsigned char)(image_id >> 16),
                      .fg_g = (unsigned char)(image_id >> 8),
                      .fg_b = (unsigned char)image_id,
@@ -403,6 +405,7 @@ void ctui_widget_put_kitty_placeholder(CTUI_WIDGET *widget,
   for (int r = 0; r < rows; r++) {
     style.kitty_row = rows > 1 ? (unsigned char)(r + 1) : 0;
     for (int i = 0; i < cols; i++) {
+      style.kitty_col = i == 0 ? 1 : 0;
       widget_put(widget, comp, row + r, col + i, CTUI_GFX_KITTY_PLACEHOLDER,
                  style);
     }

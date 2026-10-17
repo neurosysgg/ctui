@@ -271,6 +271,9 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
   if (!check && c->kind != CTUI_LOOK_CTL_BUTTON) {
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_CHECKED;
   }
+  if (c->kind != CTUI_LOOK_CTL_METER || w >= h) {
+    c->flags &= ~(unsigned)CTUI_LOOK_CTL_ZONED;
+  }
 }
 
 /* bumped when a control's pixels change for the same state and size: its
@@ -675,30 +678,51 @@ static void paint_meter_up(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   }
 }
 
+/* LED i of n: its zone's colour by where it ends (20 of 1 is red from
+ * the 20th), lit or dim */
+static void meter_led(const CTUI_LOOK_CONTROL *c, int i, int n,
+                      unsigned char out[3]) {
+  const unsigned char *z = (i + 1) * 100 > n * 95   ? LED_RED
+                           : (i + 1) * 100 > n * 70 ? LED_AMBER
+                                                    : LED_GREEN;
+  /* snapped or not: the same LEDs (snap's own rule) */
+  int lit = share(c->value, c->max, n);
+  int held = c->span > 0 ? max2(1, share(c->span, c->max, n)) : 0;
+  int clip = (c->flags & CTUI_LOOK_CTL_CHECKED) != 0;
+  if (i < lit || i + 1 == held || (clip && i == n - 1)) {
+    memcpy(out, z, 3);
+  } else {
+    dim(z, out);
+  }
+}
+
 static void paint_meter(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
                         const CTUI_LOOK *l) {
-  if (cv->h > cv->w) {
+  int w = cv->w, h = cv->h, x0, seg, n;
+  unsigned char rgb[3];
+  if (h > w && (c->flags & CTUI_LOOK_CTL_ZONED)) {
+    /* a mixer's channel: one column from the bottom */
+    meter_leds(l, h, w, &x0, &seg, &n);
+    ctui_look_paint_box(cv, 0, 0, w, h, l, CTUI_LOOK_PAINT_SUNKEN,
+                        max2(l->groove, 1), 0, WELL);
+    for (int i = 0, y = h - x0 - seg; i < n; i++, y -= seg + 1) {
+      meter_led(c, i, n, rgb);
+      ctui_look_paint_rect(cv, x0, y, w - 2 * x0, seg, rgb);
+    }
+    return;
+  }
+  if (h > w) {
     paint_meter_up(cv, c, l);
     return;
   }
-  int w = cv->w, h = cv->h, m = margin(h), x0, seg, n;
+  int m = margin(h);
   meter_leds(l, w, h, &x0, &seg, &n);
   ctui_look_paint_box(cv, 0, m, w, h - 2 * m, l, CTUI_LOOK_PAINT_SUNKEN,
                       max2(l->groove, 1), 0, WELL);
   int y = m + x0, lh = h - 2 * m - 2 * x0;
-  int clip = (c->flags & CTUI_LOOK_CTL_CHECKED) != 0;
-  /* snapped or not: the same LEDs (snap's own rule) */
-  int lit = share(c->value, c->max, n);
-  int held = c->span > 0 ? max2(1, share(c->span, c->max, n)) : 0;
   for (int i = 0, x = x0; i < n; i++, x += seg + 1) {
-    /* its zone by where it ends: 20 of 1 is red from the 20th */
-    const unsigned char *z = (i + 1) * 100 > n * 95   ? LED_RED
-                             : (i + 1) * 100 > n * 70 ? LED_AMBER
-                                                      : LED_GREEN;
-    unsigned char off[3];
-    dim(z, off);
-    int on = i < lit || i + 1 == held || (clip && i == n - 1);
-    ctui_look_paint_rect(cv, x, y, seg, lh, on ? z : off);
+    meter_led(c, i, n, rgb);
+    ctui_look_paint_rect(cv, x, y, seg, lh, rgb);
   }
 }
 

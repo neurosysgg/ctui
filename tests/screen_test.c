@@ -17,6 +17,7 @@
 
 #include "ctui_test.h"
 
+#include <stddef.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -184,6 +185,22 @@ static void test_flush_256_and_rgb(void) {
   n = capture_flush(s, out, sizeof out);
   CTUI_TEST_ASSERT(n > strlen("\x1b[0m") && strstr(out, "\xcc\x8e"),
                    "... a changed kitty_row alone repaints the cell");
+  /* a run's first cell names its column: the same image right after
+   * another doesn't take its columns on from it */
+  s->cells[0].kitty_row = 0;
+  s->cells[0].kitty_col = 1;
+  capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(strstr(out, "\xf4\x8e\xbb\xae\xcc\x85\xcc\x85") != NULL,
+                   "kitty_col 1 alone: row 0's and column 0's diacritics "
+                   "(U+0305 twice)");
+  s->cells[0].kitty_row = 2;
+  n = capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(strstr(out, "\xf4\x8e\xbb\xae\xcc\x8d\xcc\x85") != NULL,
+                   "... with a row: the row's, then the column's");
+  s->cells[0].kitty_col = 0;
+  n = capture_flush(s, out, sizeof out);
+  CTUI_TEST_ASSERT(n > 0 && !strstr(out, "\xcc\x8d\xcc\x85"),
+                   "... a changed kitty_col alone repaints the cell");
   CTUI_TEST_ASSERT(ctui_gfx_kitty_diacritic(0) == 0x0305 &&
                        ctui_gfx_kitty_diacritic(CTUI_GFX_KITTY_MAX_ROWS - 1) ==
                            0xA8E4,
@@ -338,7 +355,10 @@ static void test_flush_unused_fields(void) {
       c->fg_r = 7, c->fg_g = 8, c->bg_r = 9, c->bg_b = 10;
       break;
     }
-    ((unsigned char *)c)[sizeof *c - 1] ^= 0x5a; /* the padding byte */
+    /* the padding, if the fields leave any (kitty_col took the last) */
+    for (size_t b = offsetof(CTUI_CELL, attr) + 1; b < sizeof *c; b++) {
+      ((unsigned char *)c)[b] ^= 0x5a;
+    }
   }
   size_t n = capture_flush(s, out, sizeof out);
   CTUI_TEST_ASSERT(n == 0, "cells differing only in fields their mode "

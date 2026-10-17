@@ -194,6 +194,9 @@ static void test_puts_and_color_modes(void) {
                    "image id as their fg");
   CTUI_TEST_ASSERT(p0->kitty_row == 0 && p1->kitty_row == 0,
                    "... a one-row image carries no row diacritic");
+  CTUI_TEST_ASSERT(p0->kitty_col == 1 && p1->kitty_col == 0,
+                   "... its first cell names its column (0), the next follows "
+                   "on from it");
 
   ctui_widget_put_kitty_placeholder(&w, comp, 2, 0, 9, 3, 2,
                                     CTUI_COLOR_DEFAULT);
@@ -206,6 +209,9 @@ static void test_puts_and_color_modes(void) {
                        r1[0].kitty_row == 2 && r1[2].kitty_row == 2 &&
                        r1[1].fg_b == 9,
                    "a cols x rows block tags each cell with its image row + 1");
+  CTUI_TEST_ASSERT(r0[0].kitty_col == 1 && r1[0].kitty_col == 1 &&
+                       r0[1].kitty_col == 0 && r1[2].kitty_col == 0,
+                   "... and each row's first cell with its column");
 
   ctui_compositor_clear(comp);
   CTUI_TEST_ASSERT(r1[0].kitty_row == 0 && r1[0].ch == ' ',

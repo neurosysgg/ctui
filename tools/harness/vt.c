@@ -119,6 +119,7 @@ static void blank(const CTUI_VT *vt, CTUI_CELL *cell) {
   cell->attr = 0;
   cell->ch = ' ';
   cell->kitty_row = 0;
+  cell->kitty_col = 0;
 }
 
 static CTUI_CELL *row_at(const CTUI_VT *vt, int r) {
@@ -185,6 +186,7 @@ static void put(CTUI_VT *vt, uint32_t ch, int w) {
   for (int i = 0; i < used; i++) {
     pen_to_cell(vt, &row[vt->c + i]);
     row[vt->c + i].kitty_row = 0;
+    row[vt->c + i].kitty_col = 0;
   }
   vt->c += used;
   if (vt->c >= vt->cols) {

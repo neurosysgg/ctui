@@ -79,8 +79,8 @@ it.
 read (`RGB_FG`: a 24-bit fg over a basic `bg`); `attr` holds
 `CTUI_ATTR_BOLD/DIM/ITALIC/UNDERLINE/STRIKE` bits (0 = plain, what every
 zero-filled cell is), sent by the flush as SGR in the same escape as the
-colours; `kitty_row` is the
-image row of a Kitty placeholder cell (see `widget.h`) —
+colours; `kitty_row` and `kitty_col` are the
+image row and column of a Kitty placeholder cell (see `widget.h`) —
 independent of `CTUI_GFX_MODE` (`gfx.h`), which is what the *terminal
 session* negotiated, not how one cell is encoded. No functions here,
 just the type and the `CTUI_COLOR_*` basic-color enum.
@@ -298,7 +298,10 @@ ever set; every other widget leaves both `NULL`.
   an image placed with `ctui_gfx_kitty_place_file()` (placed at the same
   size). Taller than one row, each cell carries its image row in
   `kitty_row` (`cell.h`), which the flush sends as kitty's row diacritic;
-  columns are counted from the left edge, so keep it visible.
+  each row's first cell names its column (0) in `kitty_col`, sent as the
+  column diacritic after the row's, so the same image twice side by side
+  shows twice; the other columns are counted from that edge, so keep it
+  visible.
 - `ctui_widget_contains(widget, row, col)` — hit test of an absolute
   cell against `x/y/w/h`, for `CTUI_MOUSE_EVENT_DATA`.
 - `ctui_widget_tick_advance(widget)` — per-widget frame counter, for

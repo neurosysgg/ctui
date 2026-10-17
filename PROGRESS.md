@@ -237,6 +237,28 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A mixer's meter, and the same image twice side by side**
+  (2026-10-17, ctui-wm session 235, for ctui-daw's Mixer: ctui-wm's
+  notes/daw.md d5a). `CTUI_LOOK_CTL_ZONED` (control.h): a METER taller
+  than wide in the level meter's zones -- one column of LEDs from the
+  bottom, green, the top 30 % amber, the top 5 % red, `span` the held
+  peak, CHECKED the clip -- instead of Task Manager's all-green two
+  columns (still the default upright). Snap drops the flag across, and
+  on other kinds, so nothing else's cache entries split. look_test's
+  `test_meter_graph` pins it. The bug it showed: kitty takes a
+  placeholder's column from the cell to its left when no column
+  diacritic says it, so two identical images side by side (a stereo
+  pair of meters at the same level) drew the first and nothing for the
+  second -- its cells continued the first's columns past its width.
+  `CTUI_CELL.kitty_col` (the padding byte it had: still 16 bytes) names
+  a placeholder's column; `ctui_widget_put_kitty_placeholder` sets it on
+  each row's first cell and the flush sends it after the row's diacritic
+  (row 0's when it has none): two more combining marks a run, a single
+  row's first cell 4 bytes longer. screen_test (the diacritics, a
+  changed kitty_col repaints; the padding check now flips whatever
+  padding is left: none), widget_test (each row's first cell); the VT
+  harness clears it as it does kitty_row.
+
 - [x] **An XML reader and an inflate, promoted from ctui-wm** (2026-10-17,
   ctui-wm session 230, for ctui-daw's `.dawproject` import: a zip of
   project.xml and audio -- its second consumer). `json/xml.h`: ctui-wm's

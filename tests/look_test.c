@@ -1994,6 +1994,37 @@ static void test_meter_graph(void) {
                        rgb_is(p, 20, lx, 108 - x0 - 33 * 3 - 1, 9, 44, 16),
                    "lit from the bottom in two columns, all green: the top "
                    "unlit green, not red");
+
+  /* zoned: a mixer's channel, one column in the zones, the peak held */
+  CTUI_LOOK_CONTROL z = ctl(CTUI_LOOK_CTL_METER, 50, 100);
+  z.span = 80;
+  z.flags = CTUI_LOOK_CTL_ZONED;
+  CTUI_LOOK_CONTROL sz = z;
+  ctui_look_control_snap(&sz, &l, 10, 108);
+  CTUI_TEST_ASSERT(sz.max == 34 && sz.value == 17 && sz.span == 27 &&
+                       (sz.flags & CTUI_LOOK_CTL_ZONED),
+                   "zoned: 34 LEDs of 2 px up, 17 lit, the peak the 27th "
+                   "(%d %d %d)",
+                   sz.max, sz.value, sz.span);
+  p = paint(z, &l, 10, 108);
+  int bot = 108 - x0 - 1;
+  CTUI_TEST_ASSERT(rgb_is(p, 10, x0, bot, 48, 224, 80) &&
+                       rgb_is(p, 10, 10 - x0 - 1, bot - 16 * 3, 48, 224, 80) &&
+                       rgb_is(p, 10, x0, bot - 17 * 3, 9, 44, 16) &&
+                       rgb_is(p, 10, x0, bot - 26 * 3, 240, 192, 48) &&
+                       rgb_is(p, 10, x0, bot - 33 * 3, 48, 12, 12),
+                   "green from the bottom, across the well, the held peak "
+                   "amber, the top dim red");
+  z.flags |= CTUI_LOOK_CTL_CHECKED;
+  p = paint(z, &l, 10, 108);
+  CTUI_TEST_ASSERT(rgb_is(p, 10, x0, bot - 33 * 3, 240, 64, 64),
+                   "zoned and clipped: the top lit red");
+  CTUI_LOOK_CONTROL zw = ctl(CTUI_LOOK_CTL_METER, 50, 100);
+  zw.flags = CTUI_LOOK_CTL_ZONED;
+  CTUI_LOOK_CONTROL pw = ctl(CTUI_LOOK_CTL_METER, 50, 100);
+  CTUI_TEST_ASSERT(ctui_look_control_key(&zw, &l, 108, 20) ==
+                       ctui_look_control_key(&pw, &l, 108, 20),
+                   "zoned changes nothing across: one image");
 }
 
 /* a framed box's rows: the place flags, the heading's gap on top only */

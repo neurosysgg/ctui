@@ -98,6 +98,7 @@ void ctui_screen_clear(CTUI_SCREEN *s) {
     s->cells[i].bg = CTUI_COLOR_DEFAULT;
     s->cells[i].color_mode = CTUI_COLOR_MODE_BASIC;
     s->cells[i].kitty_row = 0;
+    s->cells[i].kitty_col = 0;
     s->cells[i].attr = 0;
   }
 }
@@ -155,7 +156,8 @@ static int ansi_bg_code(unsigned char c) {
  * RGB_FG off fg_r.. and plain bg */
 static int ctui_compare_ctuicell(const CTUI_CELL *lhs, const CTUI_CELL *rhs) {
   if (lhs->ch != rhs->ch || lhs->color_mode != rhs->color_mode ||
-      lhs->kitty_row != rhs->kitty_row || lhs->attr != rhs->attr) {
+      lhs->kitty_row != rhs->kitty_row || lhs->kitty_col != rhs->kitty_col ||
+      lhs->attr != rhs->attr) {
     return 0;
   }
   if (lhs->color_mode == CTUI_COLOR_MODE_RGB_FG) {
@@ -575,9 +577,15 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
       uint32_t ch = cur->ch;
       int bytes = ctui_cell_encode(ch, out + len);
       len += (size_t)bytes;
-      if (ch == CTUI_GFX_KITTY_PLACEHOLDER && cur->kitty_row) {
+      if (ch == CTUI_GFX_KITTY_PLACEHOLDER &&
+          (cur->kitty_row || cur->kitty_col)) {
         len += (size_t)ctui_utf8_encode(
-            ctui_gfx_kitty_diacritic(cur->kitty_row - 1), out + len);
+            ctui_gfx_kitty_diacritic(cur->kitty_row ? cur->kitty_row - 1 : 0),
+            out + len);
+        if (cur->kitty_col) {
+          len += (size_t)ctui_utf8_encode(
+              ctui_gfx_kitty_diacritic(cur->kitty_col - 1), out + len);
+        }
       } else if (c + 1 < s->cols && cur[1].ch == ch) {
         int k = repeat_run(s, r, c);
         if (k > 0 && k * bytes > 3 + (k > 1 ? digits_of((unsigned)k) : 0)) {

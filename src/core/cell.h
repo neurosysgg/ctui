@@ -36,6 +36,10 @@ typedef struct {
    * diacritic (the column follows from the placeholder to its left); 0 =
    * no diacritic, i.e. row 0 */
   unsigned char kitty_row;
+  /* its image column + 1, sent as kitty's column diacritic after the row's
+   * (a run's first cell: an image right after the same one would take its
+   * columns on from it); 0 = follows from the left */
+  unsigned char kitty_col;
 
   /* CTUI_ATTR_* bits; 0 = plain text (every zero-filled cell) */
   unsigned char attr;

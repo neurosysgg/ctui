@@ -68,7 +68,9 @@ typedef enum {
    * top 30 % amber, the top 5 % red, in every look; span: a held peak
    * (one more lit, 0 none); CHECKED: clipped (the last one lit red).
    * Taller than wide: NT Task Manager's usage meter instead, its LEDs
-   * rows lit from the bottom, all green */
+   * rows lit from the bottom, all green -- or with ZONED a mixer's
+   * channel: one column of them from the bottom in the zones, the held
+   * peak and the clip as across */
   CTUI_LOOK_CTL_METER,
   /* NT Task Manager's history graph: a black well, a dim green grid, the
    * samples (0-100, the newest at the right) as a bright green line;
@@ -99,6 +101,9 @@ typedef enum {
   /* nothing behind it where the look would put its panel (a pictogram in
    * an app's list, on the list's own background) */
   CTUI_LOOK_CTL_BARE = 32,
+  /* a METER taller than wide in the level meter's zones (a mixer's
+   * channel), not Task Manager's */
+  CTUI_LOOK_CTL_ZONED = 64,
 } CTUI_LOOK_CTL_FLAG;
 
 typedef enum {

@@ -215,8 +215,10 @@ void ctui_widget_putc_rgb_fg(CTUI_WIDGET *widget, CTUI_COMPOSITOR *comp,
  * over bg, and (for rows > 1) its image row in kitty_row. Being ordinary
  * cells, the image moves, clips and clears with the widget's text -- no
  * gfx_render/ctui_gfx_kitty_delete() bookkeeping. rows is capped at
- * CTUI_GFX_KITTY_MAX_ROWS. Kitty takes a cell's column from the placeholder
- * to its left, so the block's left edge must be visible. Only meaningful
+ * CTUI_GFX_KITTY_MAX_ROWS. Each row's first cell names its column (0, in
+ * kitty_col): the same image side by side shows twice; kitty takes the
+ * other cells' columns from the placeholder to their left, so the block's
+ * left edge must be visible. Only meaningful
  * once CTUI_GFX_KITTY was negotiated; any other terminal shows its
  * fallback glyph for U+10EEEE. */
 void ctui_widget_put_kitty_placeholder(CTUI_WIDGET *widget,
