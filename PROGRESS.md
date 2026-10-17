@@ -237,6 +237,19 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A knob's modulation sweep** (2026-10-17, ctui-wm session 236,
+  for ctui-daw's synth matrix: ctui-wm's notes/daw.md "Refinements,
+  round 1"). `CTUI_LOOK_CONTROL.mod_lo / mod_hi` (control.h, appended):
+  what a modulation sweeps a KNOB over, of `max` -- painted in the warm
+  colour along the groove's inner two fifths from one to the other
+  (Serum's ring), the value's accent arc kept on the groove's outer
+  part; OFF greys it. Snap shares them to the arc's steps (swapped when
+  given high to low) and drops them on every other kind and when they're
+  equal, and the cache key mixes them in only when there is a sweep, so
+  every key made before stays the same. look_test's `test_knob`: the
+  sweep's pixels inside its range and none outside, an empty sweep
+  keyed as none, a slider's ignored, off disabled.
+
 - [x] **A mixer's meter, and the same image twice side by side**
   (2026-10-17, ctui-wm session 235, for ctui-daw's Mixer: ctui-wm's
   notes/daw.md d5a). `CTUI_LOOK_CTL_ZONED` (control.h): a METER taller

@@ -81,7 +81,9 @@ typedef enum {
   /* a rotary knob: a raised round cap with a pointer line, in a sunken
    * groove of 270 degrees (7:30 to 4:30 o'clock) lit in the accent from
    * span to value (of max): span 0 lights it from the left end, max / 2
-   * from the top (a pan's); OFF greys the marks, FOCUSED rings it */
+   * from the top (a pan's); OFF greys the marks, FOCUSED rings it; a
+   * modulation's range (mod_lo .. mod_hi of max, Serum's ring) lit in the
+   * warm colour along the groove's inner edge */
   CTUI_LOOK_CTL_KNOB,
   CTUI_LOOK_CTL_KINDS,
 } CTUI_LOOK_CTL_KIND;
@@ -156,6 +158,9 @@ typedef struct {
   const unsigned char *samples;
   const unsigned char *samples2; /* NULL: one line */
   int count;
+  /* CTUI_LOOK_CTL_KNOB's: what a modulation sweeps it over, of max (the
+   * same: none) */
+  int mod_lo, mod_hi;
 } CTUI_LOOK_CONTROL;
 
 #define CTUI_LOOK_CTL_TINT 0x1000000u

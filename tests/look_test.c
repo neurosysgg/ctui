@@ -355,6 +355,34 @@ static void test_knob(void) {
   p = paint(off, &l, 40, 44);
   CTUI_TEST_ASSERT(px(p, 40, &l, 20, 4) == 'x' && px(p, 40, &l, 25, 27) == 'x',
                    "off: arc and pointer disabled");
+  /* a modulation's sweep (25 .. 75: -67.5 .. 67.5 degrees) along the
+   * groove's inner edge, its outer part as it was */
+  CTUI_LOOK_CONTROL mod = ctl(CTUI_LOOK_CTL_KNOB, 50, 100);
+  mod.mod_lo = 75;
+  mod.mod_hi = 25;
+  p = paint(mod, &l, 40, 44);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 20, 6) == 'w' && px(p, 40, &l, 20, 4) == 'g' &&
+                       px(p, 40, &l, 35, 22) == 'g' &&
+                       px(p, 40, &l, 4, 22) == 'a',
+                   "modulated: the warm sweep inside the groove, in its range");
+  CTUI_LOOK_CONTROL plain = ctl(CTUI_LOOK_CTL_KNOB, 50, 100), same = plain;
+  same.mod_lo = same.mod_hi = 30;
+  CTUI_TEST_ASSERT(ctui_look_control_key(&plain, &l, 40, 44) ==
+                           ctui_look_control_key(&same, &l, 40, 44) &&
+                       ctui_look_control_key(&mod, &l, 40, 44) !=
+                           ctui_look_control_key(&plain, &l, 40, 44),
+                   "an empty sweep keys as none, a sweep apart");
+  mod.flags = CTUI_LOOK_CTL_OFF;
+  p = paint(mod, &l, 40, 44);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 20, 6) == 'x', "off: the sweep disabled");
+  CTUI_LOOK_CONTROL slider = ctl(CTUI_LOOK_CTL_SLIDER, 50, 100);
+  ctui_look_control_snap(&slider, &l, 40, 20);
+  CTUI_LOOK_CONTROL slider_mod = ctl(CTUI_LOOK_CTL_SLIDER, 50, 100);
+  slider_mod.mod_lo = 10;
+  slider_mod.mod_hi = 90;
+  CTUI_TEST_ASSERT(ctui_look_control_key(&slider_mod, &l, 40, 20) ==
+                       ctui_look_control_key(&slider, &l, 40, 20),
+                   "only a knob keys its sweep");
   p = paint(ctl(CTUI_LOOK_CTL_KNOB, 50, 100), &l, 4, 4);
   CTUI_TEST_ASSERT(count(p, 4, 4, &l, '.') == 16, "too small: nothing");
 }
