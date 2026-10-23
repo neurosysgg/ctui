@@ -375,6 +375,26 @@ static void test_knob(void) {
   mod.flags = CTUI_LOOK_CTL_OFF;
   p = paint(mod, &l, 40, 44);
   CTUI_TEST_ASSERT(px(p, 40, &l, 20, 6) == 'x', "off: the sweep disabled");
+  /* where the modulation has it now (83 of 100: 90 degrees, 3 o'clock) */
+  CTUI_LOOK_CONTROL now = ctl(CTUI_LOOK_CTL_KNOB, 50, 100);
+  now.mod_lo = 25;
+  now.mod_hi = 100;
+  now.mod_at = 83;
+  CTUI_LOOK_CONTROL unflagged = now, no_dot = now;
+  no_dot.mod_at = 0;
+  now.flags = CTUI_LOOK_CTL_MOD_AT;
+  p = paint(now, &l, 40, 44);
+  CTUI_TEST_ASSERT(
+      px(p, 40, &l, 35, 22) == 't' && px(p, 40, &l, 37, 22) == 't' &&
+          px(p, 40, &l, 4, 22) != 't' && px(p, 40, &l, 20, 6) == 'w',
+      "the dot across the groove where it is, the sweep around");
+  CTUI_LOOK_CONTROL later = now;
+  later.mod_at = 30;
+  CTUI_TEST_ASSERT(ctui_look_control_key(&now, &l, 40, 44) !=
+                           ctui_look_control_key(&later, &l, 40, 44) &&
+                       ctui_look_control_key(&unflagged, &l, 40, 44) ==
+                           ctui_look_control_key(&no_dot, &l, 40, 44),
+                   "the dot keyed where it is, mod_at alone nothing");
   CTUI_LOOK_CONTROL slider = ctl(CTUI_LOOK_CTL_SLIDER, 50, 100);
   ctui_look_control_snap(&slider, &l, 40, 20);
   CTUI_LOOK_CONTROL slider_mod = ctl(CTUI_LOOK_CTL_SLIDER, 50, 100);

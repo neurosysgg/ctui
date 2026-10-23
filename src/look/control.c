@@ -107,6 +107,7 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
     c->span = share(c->span, c->max, g.steps);
     c->mod_lo = share(c->mod_lo, c->max, g.steps);
     c->mod_hi = share(c->mod_hi, c->max, g.steps);
+    c->mod_at = share(c->mod_at, c->max, g.steps);
     if (c->mod_lo > c->mod_hi) {
       int t = c->mod_lo;
       c->mod_lo = c->mod_hi;
@@ -248,6 +249,12 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
   if (c->kind != CTUI_LOOK_CTL_KNOB || c->mod_lo == c->mod_hi) {
     c->mod_lo = c->mod_hi = 0;
   }
+  if (c->kind != CTUI_LOOK_CTL_KNOB) {
+    c->flags &= ~(unsigned)CTUI_LOOK_CTL_MOD_AT;
+  }
+  if (!(c->flags & CTUI_LOOK_CTL_MOD_AT)) {
+    c->mod_at = 0;
+  }
   if (!button) {
     c->glyph = CTUI_LOOK_GLYPH_NONE;
   }
@@ -321,6 +328,9 @@ uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
   if (s.mod_lo != s.mod_hi) {
     k = (k ^ ((uint64_t)(uint32_t)s.mod_lo << 32 | (uint32_t)s.mod_hi)) *
         0x100000001b3u;
+  }
+  if (s.flags & CTUI_LOOK_CTL_MOD_AT) { /* in the flags already */
+    k = (k ^ (uint64_t)(uint32_t)s.mod_at) * 0x100000001b3u;
   }
   /* a graph: the samples it shows, as the rows they land on */
   /* the one past the left edge too: its line runs to the edge */
@@ -580,6 +590,11 @@ static void paint_knob(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   double mlo = knob_angle(m0 < m1 ? m0 : m1, g.steps),
          mhi = knob_angle(m0 < m1 ? m1 : m0, g.steps);
   int rm = g.ri + (2 * (g.ro - g.ri) + 4) / 5;
+  /* where the modulation has it now: a dot across the groove, two steps
+   * wide (at least 6 degrees: a small knob's steps are wide already) */
+  int at = (c->flags & CTUI_LOOK_CTL_MOD_AT) != 0;
+  double aat = knob_angle(share(c->mod_at, c->max, g.steps), g.steps),
+         half = 270.0 / g.steps > 3.0 ? 270.0 / g.steps : 3.0;
   double rad = av * 3.14159265358979 / 180.0, ux = sin(rad), uy = -cos(rad);
   /* the cap's edge: an outline, then the bevel's rings (paint_box's
    * roles; none of either: one dark ring, as a radio button's) */
@@ -618,6 +633,8 @@ static void paint_knob(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
         double d = sqrt((double)d2);
         if (l->groove && (g.ro - d) / 2.0 < 1.0) {
           ink = role(l, lit ? CTUI_LOOK_SHADOW : CTUI_LOOK_HIGHLIGHT);
+        } else if (at && fabs(a - aat) <= half) {
+          ink = marks(c, l, CTUI_LOOK_TEXT);
         } else if (m0 != m1 && d2 <= rm * rm && a >= mlo && a <= mhi) {
           ink = marks(c, l, CTUI_LOOK_WARM);
         } else {

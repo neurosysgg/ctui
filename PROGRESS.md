@@ -237,6 +237,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Where a knob's modulation has it now** (2026-10-23, ctui-wm
+  session 253, for ctui-daw's rack modulators: ctui-wm's notes/daw.md
+  "d13's leftovers"). `CTUI_LOOK_CTL_MOD_AT` with
+  `CTUI_LOOK_CONTROL.mod_at` (control.h, appended): a KNOB's modulated
+  value now, of `max` -- a dot across the groove there, two steps wide
+  (at least 6 degrees), in the text role (OFF greys it). Snap shares it to
+  the arc's steps; the flag is dropped on every other kind and `mod_at`
+  zeroed without it, and the cache key mixes it in only with the flag, so
+  every key made before stays the same. look_test's `test_knob`: the
+  dot's pixels where it is and none opposite, the sweep around it kept,
+  keyed where it is, `mod_at` alone keying as nothing.
+
 - [x] **A knob's modulation sweep** (2026-10-17, ctui-wm session 236,
   for ctui-daw's synth matrix: ctui-wm's notes/daw.md "Refinements,
   round 1"). `CTUI_LOOK_CONTROL.mod_lo / mod_hi` (control.h, appended):

@@ -106,6 +106,9 @@ typedef enum {
   /* a METER taller than wide in the level meter's zones (a mixer's
    * channel), not Task Manager's */
   CTUI_LOOK_CTL_ZONED = 64,
+  /* a KNOB's mod_at is where its modulation has it now: a dot across its
+   * groove there */
+  CTUI_LOOK_CTL_MOD_AT = 128,
 } CTUI_LOOK_CTL_FLAG;
 
 typedef enum {
@@ -161,6 +164,9 @@ typedef struct {
   /* CTUI_LOOK_CTL_KNOB's: what a modulation sweeps it over, of max (the
    * same: none) */
   int mod_lo, mod_hi;
+  /* CTUI_LOOK_CTL_KNOB's with CTUI_LOOK_CTL_MOD_AT: where the modulation
+   * has it now, of max */
+  int mod_at;
 } CTUI_LOOK_CONTROL;
 
 #define CTUI_LOOK_CTL_TINT 0x1000000u
