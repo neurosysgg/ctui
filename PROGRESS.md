@@ -237,6 +237,25 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A popmenu item's colour swatch** (2026-10-29, ctui-wm session
+  301, for ctui-daw's track colours). `CTUI_POPMENU_ITEM.swatch`
+  (popmenu.h, appended): 0xRRGGBB with `CTUI_POPMENU_SWATCH` set paints
+  the mark's cell in that colour (RGB, whatever the style), the item's
+  check or radio dot on it in black or white by its luminance -- a
+  colour picker's rows. popmenu_test's `test_swatch`.
+
+- [x] **A scrollbar over a miniature** (2026-10-29, ctui-wm session 301,
+  for ctui-daw's devices and Arrangement: Ableton's overview).
+  `CTUI_LOOK_CONTROL.map / map_w / map_h` (control.h, appended): a
+  SCROLL's whole range in miniature, colours rows first (TINT set: one
+  there). Painted in a sunken trough (the groove), each pixel the first
+  set colour of the map cells it covers, the part outside the thumb
+  dimmed three quarters of the way to the groove, the thumb an
+  outline in the text role (2 px from 12 px across) instead of 95's raised
+  one. Snap drops the map on every other kind and when empty; the key
+  mixes it in only when there is one, so every key made before stays
+  the same. look_test's `test_scroll_map`.
+
 - [x] **Where a knob's modulation has it now** (2026-10-23, ctui-wm
   session 253, for ctui-daw's rack modulators: ctui-wm's notes/daw.md
   "d13's leftovers"). `CTUI_LOOK_CTL_MOD_AT` with

@@ -38,7 +38,12 @@ struct CTUI_POPMENU_ITEM {
   unsigned flags;    /* CTUI_POPMENU_* */
   const CTUI_POPMENU_ITEM *sub; /* a submenu's items (sub_count), or NULL */
   int sub_count;
+  /* a colour's swatch in the mark's cell (a colour picker's: its check
+   * on it), as 0xRRGGBB with CTUI_POPMENU_SWATCH set; 0 none */
+  uint32_t swatch;
 };
+
+#define CTUI_POPMENU_SWATCH 0x1000000u
 
 #define CTUI_POPMENU_DEPTH 4
 

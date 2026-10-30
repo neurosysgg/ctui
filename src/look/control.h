@@ -38,7 +38,8 @@ typedef enum {
                          * selection) */
   CTUI_LOOK_CTL_SCROLL, /* a scrollbar, vertical when taller than wide:
                          * value = the first shown of max, span = how many
-                         * show */
+                         * show; with a map its trough the whole in
+                         * miniature (an overview, Ableton's) */
   CTUI_LOOK_CTL_PICTO,  /* a pictogram (picto.h) with its state in value of
                          * max; OFF greys it (a muted speaker is crossed) */
   CTUI_LOOK_CTL_RADIO,  /* a sunken round field, a dot in it when CHECKED */
@@ -167,6 +168,15 @@ typedef struct {
   /* CTUI_LOOK_CTL_KNOB's with CTUI_LOOK_CTL_MOD_AT: where the modulation
    * has it now, of max */
   int mod_at;
+  /* CTUI_LOOK_CTL_SCROLL's miniature of all it scrolls over: map_w x
+   * map_h colours, rows first (0xRRGGBB with CTUI_LOOK_CTL_TINT set; else
+   * nothing there), the first along its axis at value 0, squeezed into
+   * a sunken trough -- a pixel shows the first set one it covers; the
+   * part outside the thumb dimmed, the thumb an outline round the part
+   * shown. NULL: 95's checker and raised thumb. The caller's, read as
+   * the samples are */
+  const uint32_t *map;
+  int map_w, map_h;
 } CTUI_LOOK_CONTROL;
 
 #define CTUI_LOOK_CTL_TINT 0x1000000u

@@ -106,9 +106,45 @@ static const CTUI_POPMENU_ITEM ITEMS[] = {
 };
 #define N_ITEMS ((int)(sizeof ITEMS / sizeof ITEMS[0]))
 
+/* a colour picker's items: each colour's cell in the mark's place, the
+ * picked one's check on it in black or white by how light it is */
+static void test_swatch(void) {
+  static const CTUI_POPMENU_ITEM COLOURS[] = {
+      {.label = "&Yellow", .swatch = CTUI_POPMENU_SWATCH | 0xf0e040},
+      {.label = "&Navy",
+       .swatch = CTUI_POPMENU_SWATCH | 0x102060,
+       .flags = CTUI_POPMENU_CHECKED | CTUI_POPMENU_RADIO},
+      {.label = "&None"},
+  };
+  CTUI_SCREEN *screen = ctui_screen_create(10, 30);
+  CTUI_POPMENU m = {0};
+  CTUI_WIDGET w = ctui_widget_make(0, 0, 30, 10, &m, ctui_popmenu_render, NULL);
+  CTUI_WIDGET *widgets[] = {&w};
+  CTUI_APP app;
+  ctui_app_init(&app, widgets, 1, 10, 30);
+  ctui_popmenu_open(&m, COLOURS, 3, 0, 0, 10, 30);
+  ctui_app_render(&app, screen);
+  const CTUI_CELL *y = cell(screen, 1, 2), *n = cell(screen, 2, 2);
+  CTUI_TEST_ASSERT(y->color_mode == CTUI_COLOR_MODE_RGB && y->bg_r == 0xf0 &&
+                       y->bg_g == 0xe0 && y->bg_b == 0x40 &&
+                       ctui_test_cell(screen, 1, 2) == ' ',
+                   "a swatch: its colour's cell, no check");
+  CTUI_TEST_ASSERT(n->bg_b == 0x60 && ctui_test_cell(screen, 2, 2) == 0x2022 &&
+                       n->fg_r == 255,
+                   "the picked one: its dot on it, white on the dark");
+  CTUI_TEST_ASSERT(cell(screen, 3, 2)->color_mode != CTUI_COLOR_MODE_RGB &&
+                       ctui_test_row_contains(screen, 3, "None"),
+                   "an item without one as before");
+  CTUI_TEST_ASSERT(ctui_test_row_contains(screen, 1, "Yellow"),
+                   "the label after it");
+  ctui_app_free(&app);
+  ctui_screen_free(screen);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
   test_label();
+  test_swatch();
 
   int rows = 20, cols = 60;
   CTUI_SCREEN *screen = ctui_screen_create(rows, cols);

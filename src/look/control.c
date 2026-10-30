@@ -252,6 +252,11 @@ void ctui_look_control_snap(CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
   if (c->kind != CTUI_LOOK_CTL_KNOB) {
     c->flags &= ~(unsigned)CTUI_LOOK_CTL_MOD_AT;
   }
+  if (c->kind != CTUI_LOOK_CTL_SCROLL || !c->map || c->map_w <= 0 ||
+      c->map_h <= 0) {
+    c->map = NULL;
+    c->map_w = c->map_h = 0;
+  }
   if (!(c->flags & CTUI_LOOK_CTL_MOD_AT)) {
     c->mod_at = 0;
   }
@@ -331,6 +336,15 @@ uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
   }
   if (s.flags & CTUI_LOOK_CTL_MOD_AT) { /* in the flags already */
     k = (k ^ (uint64_t)(uint32_t)s.mod_at) * 0x100000001b3u;
+  }
+  /* a scrollbar's miniature: its colours (what isn't one as nothing) */
+  if (s.map) {
+    k = (k ^ ((uint64_t)(uint32_t)s.map_w << 32 | (uint32_t)s.map_h)) *
+        0x100000001b3u;
+    for (int i = 0; i < s.map_w * s.map_h; i++) {
+      const uint32_t v = s.map[i] & CTUI_LOOK_CTL_TINT ? s.map[i] : 0;
+      k = (k ^ v) * 0x100000001b3u;
+    }
   }
   /* a graph: the samples it shows, as the rows they land on */
   /* the one past the left edge too: its line runs to the edge */
@@ -1256,10 +1270,80 @@ static void paint_box_row(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   }
 }
 
+/* the first colour set in map's cells [x0, x1) x [y0, y1) (one at least
+ * each way), else NULL */
+static const uint32_t *map_at(const CTUI_LOOK_CONTROL *c, int x0, int x1,
+                              int y0, int y1) {
+  x1 = max2(x1, x0 + 1);
+  y1 = max2(y1, y0 + 1);
+  for (int y = y0; y < y1 && y < c->map_h; y++) {
+    for (int x = x0; x < x1 && x < c->map_w; x++) {
+      const uint32_t *v = &c->map[(size_t)y * (size_t)c->map_w + (size_t)x];
+      if (*v & CTUI_LOOK_CTL_TINT) {
+        return v;
+      }
+    }
+  }
+  return NULL;
+}
+
+/* a scrollbar over a miniature (an overview): a sunken trough holding
+ * the map, dimmed outside the thumb, the thumb an outline round what
+ * shows */
+static void paint_overview(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
+                           const CTUI_LOOK *l, int vertical, int pos, int tl) {
+  int w = cv->w, h = cv->h, e = min2(l->bevel ? 1 : 0, min2(w, h) / 4);
+  ctui_look_paint_box(cv, 0, 0, w, h, l, CTUI_LOOK_PAINT_SUNKEN, e, 0,
+                      role(l, CTUI_LOOK_GROOVE));
+  const unsigned char *bg = role(l, CTUI_LOOK_GROOVE);
+  int iw = w - 2 * e, ih = h - 2 * e;
+  for (int y = 0; y < ih; y++) {
+    for (int x = 0; x < iw; x++) {
+      const uint32_t *v = map_at(c, x * c->map_w / iw, (x + 1) * c->map_w / iw,
+                                 y * c->map_h / ih, (y + 1) * c->map_h / ih);
+      const int along = (vertical ? y : x) + e;
+      const int in = along >= pos && along < pos + tl;
+      if (!v && in) {
+        continue;
+      }
+      unsigned char rgb[3] = {bg[0], bg[1], bg[2]};
+      if (v) {
+        rgb[0] = (unsigned char)(*v >> 16);
+        rgb[1] = (unsigned char)(*v >> 8);
+        rgb[2] = (unsigned char)*v;
+      }
+      if (!in) { /* outside what shows: three quarters to the trough's */
+        for (int k = 0; k < 3; k++) {
+          rgb[k] = (unsigned char)((rgb[k] + bg[k] * 3) / 4);
+        }
+      }
+      ctui_look_paint_px(cv, x + e, y + e, rgb);
+    }
+  }
+  /* the thumb: an outline in the marks' colour (they show on the
+   * trough), 2 px once there's room */
+  const unsigned char *ink = role(l, CTUI_LOOK_TEXT);
+  int th = min2(w, h) >= 12 ? 2 : 1;
+  int x = vertical ? 0 : pos, y = vertical ? pos : 0;
+  int bw = vertical ? w : tl, bh = vertical ? tl : h;
+  for (int k = 0; k < th && 2 * k < bw && 2 * k < bh; k++) {
+    ctui_look_paint_rect(cv, x + k, y + k, bw - 2 * k, 1, ink);
+    ctui_look_paint_rect(cv, x + k, y + bh - 1 - k, bw - 2 * k, 1, ink);
+    ctui_look_paint_rect(cv, x + k, y + k, 1, bh - 2 * k, ink);
+    ctui_look_paint_rect(cv, x + bw - 1 - k, y + k, 1, bh - 2 * k, ink);
+  }
+}
+
 static void paint_scroll(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
                          const CTUI_LOOK *l) {
   int w = cv->w, h = cv->h, vertical = h >= w, len, least;
   scroll_axis(w, h, &len, &least);
+  if (c->map && c->map_w > 0 && c->map_h > 0) {
+    int tl = scroll_thumb(c, len, least), room = c->max - c->span;
+    paint_overview(cv, c, l, vertical,
+                   room > 0 ? share(c->value, room, len - tl) : 0, tl);
+    return;
+  }
   /* 95's track: a checker of highlight and face */
   for (int y = 0; y < h; y++) {
     for (int x = 0; x < w; x++) {

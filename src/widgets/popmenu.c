@@ -351,10 +351,26 @@ static void render_item(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp,
   for (int c = 0; c < inner; c++) {
     ctui_widget_putc_cell(self, comp, row, x + 1 + c, ' ', pen);
   }
-  if (it->flags & CTUI_POPMENU_CHECKED) {
-    ctui_widget_putc_cell(self, comp, row, x + 2,
-                          it->flags & CTUI_POPMENU_RADIO ? 0x2022 : 0x2713,
-                          pen); /* • ✓ */
+  const uint32_t mark =
+      it->flags & CTUI_POPMENU_CHECKED
+          ? (it->flags & CTUI_POPMENU_RADIO ? 0x2022 : 0x2713) /* • ✓ */
+          : ' ';
+  if (it->swatch & CTUI_POPMENU_SWATCH) {
+    /* the colour's cell, its check on it in black or white */
+    const unsigned r = (it->swatch >> 16) & 0xff, g = (it->swatch >> 8) & 0xff,
+                   b = it->swatch & 0xff;
+    const unsigned char ink = 299 * r + 587 * g + 114 * b > 140000 ? 0 : 255;
+    CTUI_CELL sw = {.color_mode = CTUI_COLOR_MODE_RGB,
+                    .fg_r = ink,
+                    .fg_g = ink,
+                    .fg_b = ink,
+                    .bg_r = (unsigned char)r,
+                    .bg_g = (unsigned char)g,
+                    .bg_b = (unsigned char)b,
+                    .attr = CTUI_ATTR_BOLD};
+    ctui_widget_putc_cell(self, comp, row, x + 2, mark, &sw);
+  } else if (mark != ' ') {
+    ctui_widget_putc_cell(self, comp, row, x + 2, mark, pen);
   }
   /* the label, then the keys right-aligned before the arrow's room */
   int col = x + 2 + POPMENU_MARK_COLS;

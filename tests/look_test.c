@@ -695,6 +695,54 @@ static void test_scroll(void) {
                    "all of it shown: the thumb fills the track");
 }
 
+/* a scrollbar over a miniature (an overview): the map in a sunken
+ * trough, dimmed outside the thumb, the thumb an outline */
+static void test_scroll_map(void) {
+  CTUI_LOOK l = test_look();
+  l.bevel = 1;
+  /* 4 x 1: red, nothing, blue, nothing -- 40 px of 40 x 10 */
+  const uint32_t map[] = {CTUI_LOOK_CTL_TINT | 0xff0000u, 0,
+                          CTUI_LOOK_CTL_TINT | 0x0000ffu, 0};
+  CTUI_LOOK_CONTROL c = {.kind = CTUI_LOOK_CTL_SCROLL,
+                         .value = 0,
+                         .max = 4,
+                         .span = 2,
+                         .map = map,
+                         .map_w = 4,
+                         .map_h = 1};
+  const unsigned char *p = paint(c, &l, 40, 10);
+  const unsigned char *red = p + ((size_t)5 * 40 + 5) * 4;
+  const unsigned char *blue = p + ((size_t)5 * 40 + 25) * 4;
+  CTUI_TEST_ASSERT(px(p, 40, &l, 30, 0) == 's' && px(p, 40, &l, 39, 5) == 'h',
+                   "a sunken trough");
+  CTUI_TEST_ASSERT(red[0] == 0xff && red[1] == 0 && red[2] == 0,
+                   "the map in the thumb as it is");
+  CTUI_TEST_ASSERT(blue[2] < 0xff && blue[2] > 0x40 && blue[0] < 0x80,
+                   "outside it dimmed toward the trough (%d %d %d)", blue[0],
+                   blue[1], blue[2]);
+  CTUI_TEST_ASSERT(px(p, 40, &l, 15, 5) == 'g' && px(p, 40, &l, 35, 5) == 'g',
+                   "nothing there: the trough");
+  CTUI_TEST_ASSERT(px(p, 40, &l, 0, 5) == 't' && px(p, 40, &l, 19, 5) == 't' &&
+                       px(p, 40, &l, 10, 0) == 't' &&
+                       px(p, 40, &l, 10, 9) == 't' &&
+                       px(p, 40, &l, 20, 5) != 't',
+                   "the thumb an outline round the first half");
+  uint64_t k = ctui_look_control_key(&c, &l, 40, 10);
+  const uint32_t other[] = {CTUI_LOOK_CTL_TINT | 0xff0000u, 0, 0, 0};
+  c.map = other;
+  CTUI_TEST_ASSERT(ctui_look_control_key(&c, &l, 40, 10) != k,
+                   "another map: another image");
+  c.map = NULL;
+  CTUI_LOOK_CONTROL plain = {
+      .kind = CTUI_LOOK_CTL_SCROLL, .value = 0, .max = 4, .span = 2};
+  CTUI_TEST_ASSERT(ctui_look_control_key(&c, &l, 40, 10) ==
+                       ctui_look_control_key(&plain, &l, 40, 10),
+                   "no map: the plain scrollbar's key");
+  c = (CTUI_LOOK_CONTROL){.kind = CTUI_LOOK_CTL_KNOB, .map = map, .map_w = 4};
+  ctui_look_control_snap(&c, &l, 40, 10);
+  CTUI_TEST_ASSERT(!c.map && !c.map_w, "another kind drops it");
+}
+
 static void test_field(void) {
   CTUI_LOOK l = test_look();
   l.bevel = 2;
@@ -2108,6 +2156,7 @@ int main(void) {
   test_buttons();
   test_caption_glyphs();
   test_scroll();
+  test_scroll_map();
   test_field();
   test_frame();
   test_snap_invariant();
