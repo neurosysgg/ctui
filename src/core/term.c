@@ -11,6 +11,8 @@
 #include "ctui_internal.h"
 #include "log.h"
 
+#include <errno.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +38,35 @@ static int g_pointer_claiming = 0;
 
 volatile sig_atomic_t ctui_g_resize_pending = 0;
 unsigned int ctui_g_gfx_mode = 0;
+
+int ctui_term_write(const void *buf, size_t len) {
+  static int said;
+  const char *p = buf;
+  while (len > 0) {
+    const ssize_t n = write(STDOUT_FILENO, p, len);
+    if (n > 0) {
+      p += n;
+      len -= (size_t)n;
+      continue;
+    }
+    if (n < 0 && errno == EINTR) {
+      continue;
+    }
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      struct pollfd pfd = {.fd = STDOUT_FILENO, .events = POLLOUT};
+      if (poll(&pfd, 1, 1000) > 0) {
+        continue;
+      }
+    }
+    if (!said) {
+      said = 1;
+      ctui_logf(E_WRN, "[CTUI:TERM] - output: %zu bytes not written (%s)\n",
+                len, n < 0 ? strerror(errno) : "nothing taken");
+    }
+    return 0;
+  }
+  return 1;
+}
 
 static void handle_sigwinch(int sig) {
   (void)sig;

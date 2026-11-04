@@ -1,5 +1,6 @@
 #include "screen.h"
 
+#include "ctui_internal.h"
 #include "gfx.h"
 #include "log.h"
 #include "utf8.h"
@@ -550,7 +551,7 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
           /* send what fits; the shadow buffer stays, so the next flush
            * repeats the rest */
           ctui_log(E_ERR, "[CTUI:SCREEN] - flush buffer: out of memory\n");
-          write(STDOUT_FILENO, out, len);
+          ctui_term_write(out, len);
           return;
         }
         s->out = out = p;
@@ -616,7 +617,7 @@ void ctui_screen_flush(CTUI_SCREEN *s) {
   }
   len = (size_t)(PUT_LIT(out + len, "\x1b[0m") - out);
 
-  write(STDOUT_FILENO, out, len);
+  ctui_term_write(out, len);
   ctui_logf(E_INF, "[CTUI:SCREEN] - flush wrote %zu bytes @ tick %d\n", len,
             ctui_tick_advance());
   memcpy(s->buffer, s->cells,

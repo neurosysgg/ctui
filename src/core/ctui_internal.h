@@ -48,4 +48,12 @@ void ctui_input_pushback(const char *bytes, size_t len);
  * same one only now and then), OK at E_DBG */
 void ctui_gfx_kitty_reply(const char *body);
 
+/* len bytes onto STDOUT whole (term.c): again after a signal (EINTR) or a
+ * short write, waiting (up to a second at a time) when the fd is
+ * non-blocking and full -- the terminal's stdin and stdout are often one
+ * open file, so stdin's O_NONBLOCK is stdout's too. 0 if it gave up (the
+ * first time logged), the rest of the bytes dropped; the next frame's
+ * diff is against what was meant, so a lost frame isn't repaired */
+int ctui_term_write(const void *buf, size_t len);
+
 #endif

@@ -109,7 +109,7 @@ static void kitty_batch_append(const void *data, size_t len) {
 void ctui_gfx_kitty_flush(void) {
   CTUI_PROFILE_SPAN sp = ctui_profile_begin();
   if (g_kitty_batch_len > 0) {
-    write(STDOUT_FILENO, g_kitty_batch, g_kitty_batch_len);
+    ctui_term_write(g_kitty_batch, g_kitty_batch_len);
   }
   ctui_profile_end(sp, "gfx.kitty_batch_flush");
   g_kitty_batch_len = 0;

@@ -237,6 +237,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The terminal's output written whole** (2026-11-04, ctui-wm session
+  319, for ctui-daw's CI: Ubuntu's `_FORTIFY_SOURCE` warned on three
+  unchecked `write()`s). `ctui_term_write()` (term.c, ctui_internal.h)
+  carries on after a short write or EINTR and, when stdout is non-blocking
+  (it's stdin's open file, so stdin's O_NONBLOCK is its too) and full,
+  waits on POLLOUT up to a second at a time; giving up logs once. The
+  screen's flush (both writes) and the kitty batch go through it: a frame
+  was lost in part before whenever a signal (SIGWINCH, a timer) landed
+  mid-write or the pty was full. term_write_test: a slow reader behind a
+  non-blocking pipe, and a 1 ms SIGALRM over a blocking one, 1 MiB each,
+  every byte in order (a plain write() fails both).
+
 - [x] **A popmenu item's colour swatch** (2026-10-29, ctui-wm session
   301, for ctui-daw's track colours). `CTUI_POPMENU_ITEM.swatch`
   (popmenu.h, appended): 0xRRGGBB with `CTUI_POPMENU_SWATCH` set paints
