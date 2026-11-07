@@ -258,7 +258,11 @@ terminal resize.
   sent before the ack; batches parsed whole, every `on_check` before any
   `on_write`, their sets between begin / commit; a node removed in its
   own callback freed after it. tests/node_test.c 66 (a fake daemon on a
-  real socket); 1281 passed.
+  real socket); 1281 passed. Then, from ctui-wm's daemon (n2) and its
+  fuzzer: a node without ops isn't advertised writable; labels and units
+  must be UTF-8 (a stray byte came back from the wire's quoting as
+  U+FFFD, three bytes, a different label); a trigger in a batch gets a
+  reply buffer like any write (it was NULL), the reply dropped. 69 checks.
 - [x] **The terminal's output written whole** (2026-11-04, ctui-wm session
   319, for ctui-daw's CI: Ubuntu's `_FORTIFY_SOURCE` warned on three
   unchecked `write()`s). `ctui_term_write()` (term.c, ctui_internal.h)

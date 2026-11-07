@@ -706,9 +706,12 @@ static void handle_batch(CTUI_NODES *ns, const CTUI_JSON *msg, double req) {
   if (!err) {
     ctui_nodes_begin(ns);
     for (int i = 0; i < held && !err; i++) {
-      if ((err = apply(&ws[i], NULL)) != 0) {
+      /* a trigger's reply has nowhere to go from a batch: dropped */
+      CTUI_BUF reply = {0};
+      if ((err = apply(&ws[i], &reply)) != 0) {
         bad = i;
       }
+      free(reply.s);
     }
     ctui_nodes_commit(ns);
   }

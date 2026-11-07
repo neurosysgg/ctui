@@ -272,6 +272,23 @@ static void test_paths_types(void) {
     ctui_json_free(j);
   }
   CTUI_TEST_ASSERT(refused, "types: bad JSON types refused");
+
+  /* the fuzzer's: a label that isn't UTF-8 would come back longer */
+  static const char *const BAD_LABELS[] = {"ok", "\x8c\x8c", NULL};
+  CTUI_NODE_TYPE bad_enum = LAYOUT;
+  bad_enum.labels = BAD_LABELS;
+  bad_enum.def = 0;
+  CTUI_NODE_TYPE bad_unit = LEVEL;
+  bad_unit.unit = "\xff";
+  char lerr[64];
+  CTUI_JSON *lj = ctui_json_parse("{\"kind\":\"enum\",\"labels\":[\"\x8c\"]}",
+                                  lerr, sizeof lerr);
+  CTUI_NODE_TYPE *lt = ctui_node_type_from_json(lj);
+  CTUI_TEST_ASSERT(!ctui_node_type_ok(&bad_enum) &&
+                       !ctui_node_type_ok(&bad_unit) && !lt,
+                   "types: labels and units that aren't UTF-8 refused");
+  free(lt);
+  ctui_json_free(lj);
 }
 
 /* --- the table, no daemon ------------------------------------------------ */
@@ -529,6 +546,12 @@ static void test_daemon(void) {
                        strcmp(ctui_node_text(level), "60") == 0,
                    "a batch with a bad line or a failed check: nothing "
                    "applied, the line said");
+  fake_clear(&f);
+  /* the fuzzer's: a trigger in a batch gets a reply buffer too */
+  fake_say(&f, ns, "{\"batch\":30,\"w\":[[4,\"x\"]]}");
+  CTUI_TEST_ASSERT(has(&f, "{\"ack\":30,\"err\":0}") && !strstr(fake_read(&f),
+                                                                 "reply"),
+                   "a trigger in a batch: its reply dropped, no crash");
   fake_clear(&f);
   fake_say(&f, ns, "{\"batch\":18,\"w\":[[1,\"20\"],[2,\"stack\"]]}");
   CTUI_TEST_ASSERT(strcmp(fake_read(&f),

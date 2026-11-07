@@ -90,7 +90,7 @@ typedef struct {
    * against the node's value): 0 takes it, else an errno the writer gets
    * (EINVAL, EBUSY, ...). On 0 the node takes v, unless the callback set
    * the node itself. A trigger may answer into reply (what the writer
-   * reads back on the same open file). */
+   * reads back on the same open file; dropped when it came in a batch). */
   int (*on_write)(CTUI_NODE *n, const CTUI_NODE_VALUE *v, CTUI_BUF *reply,
                   void *user);
   /* optional: the same, without acting on it. A batch runs every line's

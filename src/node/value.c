@@ -22,6 +22,8 @@ static locale_t c_numeric(void) {
   return loc;
 }
 
+static int utf8_ok(const char *s, size_t len);
+
 static size_t text_cap(const CTUI_NODE_TYPE *t) {
   return t->max_len ? t->max_len : CTUI_NODE_TEXT_MAX;
 }
@@ -43,7 +45,10 @@ int ctui_node_type_ok(const CTUI_NODE_TYPE *t) {
       !isfinite(t->min) || !isfinite(t->max) || !isfinite(t->def)) {
     return 0;
   }
-  if (t->unit && strlen(t->unit) > CTUI_NODE_NAME_MAX) {
+  /* labels and units are UTF-8: quoted for the wire, a stray byte would
+   * come back as U+FFFD, three bytes, another label (the fuzzer's) */
+  if (t->unit && (strlen(t->unit) > CTUI_NODE_NAME_MAX ||
+                  !utf8_ok(t->unit, strlen(t->unit)))) {
     return 0;
   }
   switch (t->kind) {
@@ -64,7 +69,8 @@ int ctui_node_type_ok(const CTUI_NODE_TYPE *t) {
     }
     for (unsigned i = 0; i < n; i++) {
       size_t len = strlen(t->labels[i]);
-      if (len == 0 || len > CTUI_NODE_NAME_MAX || strchr(t->labels[i], '\n')) {
+      if (len == 0 || len > CTUI_NODE_NAME_MAX || strchr(t->labels[i], '\n') ||
+          !utf8_ok(t->labels[i], len)) {
         return 0;
       }
     }
