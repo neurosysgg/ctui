@@ -188,6 +188,15 @@ else.
   terms cheapest first: `#include "query/query.h"`. libc only (`make
   query-alone` checks), so a headless core can link it. Came from
   ctui-mus's library query for ctui-files' search.
+- `src/node/` — control nodes: an app's functions and parameters
+  published as typed values under paths (`volume/sink/level`), for a
+  daemon to serve as files (ctui-wm's `ctui-nodefs`, a FUSE mount):
+  the values' strict text shared with that daemon (`value.c`: int,
+  float, bool, enum, string, trigger; `+=N`, `toggle`; refused with an
+  errno), and an app's table on a unix socket (`nodes.c`: one fd and a
+  dispatch call, no thread; published whole whenever a daemon
+  answers): `#include "node/node.h"`. A study for µOS's typed `/proc`
+  nodes (ctui-wm's notes/nodes.md).
 - `src/look/` — drawn controls: a "look" (colour roles and shape
   parameters, built-ins and from a config's JSON), the controls and
   pictograms painted from it in device pixels, period filters, and

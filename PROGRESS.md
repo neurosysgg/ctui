@@ -237,6 +237,28 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`node/`: control nodes** (2026-11-07, ctui-wm session 321,
+  notes/nodes.md n1 there: the client half of a FUSE filesystem of
+  functions and parameters, a study for µOS's typed `/proc` nodes).
+  `value.c` is the text both sides share: `CTUI_NODE_TYPE` (int / float /
+  bool / enum / string / trigger, a unit, a range, a scale, labels,
+  `CTUI_NODE_WRITABLE`, `CTUI_NODE_CLAMP`), `ctui_node_parse()` strict --
+  decimals in the C locale whatever LC_NUMERIC says (json.c's lesson), no
+  inf / nan / hex, `+=N` / `-=N` / `toggle` against the value, one
+  trailing newline dropped, UTF-8 checked, EINVAL / ERANGE --,
+  `ctui_node_format()` (a float the fewest digits that read back,
+  written plainly), the path rules and the type as JSON both ways.
+  `nodes.c` is an app's table: published before any daemon, sent whole
+  on every connect (`$CTUI_NODES_SOCK` or `$XDG_RUNTIME_DIR/
+  ctui-nodes.sock`, JSON lines like ctui-wm's hub, non-blocking, output
+  queued, dropped past 8 MiB); ids never reused, so a write in flight
+  can't land on a newer node at the same path; paths sorted for lookups,
+  a file can't sit above or under another; writes resolved and checked
+  before `on_write`, the value taken unless the callback set one, the set
+  sent before the ack; batches parsed whole, every `on_check` before any
+  `on_write`, their sets between begin / commit; a node removed in its
+  own callback freed after it. tests/node_test.c 66 (a fake daemon on a
+  real socket); 1281 passed.
 - [x] **The terminal's output written whole** (2026-11-04, ctui-wm session
   319, for ctui-daw's CI: Ubuntu's `_FORTIFY_SOURCE` warned on three
   unchecked `write()`s). `ctui_term_write()` (term.c, ctui_internal.h)
