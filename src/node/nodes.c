@@ -113,7 +113,12 @@ static void send_pub(CTUI_NODES *ns, const CTUI_NODE *n) {
   ctui_buf_printf(&b, "{\"pub\":%u,\"path\":", n->id);
   ctui_json_quote(&b, n->path);
   ctui_buf_add(&b, ",\"type\":", 8);
-  ctui_node_type_json(n->type, &b);
+  /* writable only with someone to take the writes */
+  CTUI_NODE_TYPE t = *n->type;
+  if (!n->ops || !n->ops->on_write) {
+    t.flags &= ~(unsigned)CTUI_NODE_WRITABLE;
+  }
+  ctui_node_type_json(&t, &b);
   if (n->type->kind != CTUI_NODE_TRIGGER) {
     ctui_buf_add(&b, ",\"v\":", 5);
     ctui_json_quote(&b, n->text);

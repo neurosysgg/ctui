@@ -45,8 +45,10 @@ static const CTUI_NODE_TYPE LAYOUT = {
 static const CTUI_NODE_TYPE TITLE = {
     CTUI_NODE_STRING, NULL, 1, 0, 0, CTUI_NODE_LINEAR, NULL, 8,
     CTUI_NODE_WRITABLE};
+/* writable, but published without ops: read-only after all */
 static const CTUI_NODE_TYPE SHOWN = {
-    CTUI_NODE_STRING, NULL, 1, 0, 0, CTUI_NODE_LINEAR, NULL, 0, 0};
+    CTUI_NODE_STRING, NULL, 1, 0, 0, CTUI_NODE_LINEAR, NULL, 0,
+    CTUI_NODE_WRITABLE};
 static const CTUI_NODE_TYPE PRESS = {
     CTUI_NODE_TRIGGER, NULL, 1, 0, 0, CTUI_NODE_LINEAR, NULL, 0,
     CTUI_NODE_WRITABLE};
@@ -466,6 +468,9 @@ static void test_daemon(void) {
                        has(&f, "{\"pub\":4,\"path\":\"notify/new\","
                                "\"type\":{\"kind\":\"trigger\",\"w\":1}}"),
                    "a string's current value quoted; a trigger without one");
+  CTUI_TEST_ASSERT(!strstr(fake_read(&f), "\"path\":\"title\",\"type\":{\"kind\":"
+                                          "\"string\",\"w\""),
+                   "a node without ops isn't advertised writable");
   fake_clear(&f);
 
   ctui_node_set_float(level, 50);
