@@ -583,6 +583,81 @@ void ctui_input_set_source(const CTUI_INPUT_SOURCE *src) {
   g_source = src;
 }
 
+/* --- events posted from outside (ctui_input_post()) --- */
+
+
+typedef struct {
+  CTUI_EVENTTYPE type;
+  union {
+    CTUI_KEYPRESS_EVENT_DATA kp;
+    CTUI_MOUSE_EVENT_DATA md;
+    CTUI_FOCUS_EVENT_DATA fd;
+  } d;
+} POSTED;
+
+static POSTED g_posted[CTUI_INPUT_POST_MAX];
+static int g_posted_head = 0, g_posted_count = 0;
+
+int ctui_input_post(const CTUI_EVENT *ev) {
+  if (g_posted_count == CTUI_INPUT_POST_MAX) {
+    ctui_logf(E_WRN, "[CTUI:INPUT] - posted events full @ tick %d, one "
+                     "dropped\n",
+              ctui_tick_advance());
+    return -1;
+  }
+  POSTED *p =
+      &g_posted[(g_posted_head + g_posted_count) % CTUI_INPUT_POST_MAX];
+  switch (ev->type) {
+  case CTUI_KEYPRESS_EVENT:
+  case CTUI_KEYRELEASE_EVENT:
+    p->d.kp = *(const CTUI_KEYPRESS_EVENT_DATA *)ev->event_data;
+    break;
+  case CTUI_MOUSE_EVENT:
+    p->d.md = *(const CTUI_MOUSE_EVENT_DATA *)ev->event_data;
+    break;
+  case CTUI_FOCUS_EVENT:
+    p->d.fd = *(const CTUI_FOCUS_EVENT_DATA *)ev->event_data;
+    break;
+  default:
+    ctui_logf(E_WRN, "[CTUI:INPUT] - a posted %s refused @ tick %d\n",
+              ctui_eventtype_name(ev->type), ctui_tick_advance());
+    return -1;
+  }
+  p->type = ev->type;
+  g_posted_count++;
+  ctui_logf(E_INF, "[CTUI:INPUT] - %s posted (%d waiting) @ tick %d\n",
+            ctui_eventtype_name(ev->type), g_posted_count,
+            ctui_tick_advance());
+  return 0;
+}
+
+int ctui_input_posted(void) { return g_posted_count; }
+
+/* the oldest posted event into *ev (its data in storage of its own, valid
+ * until the next call): 1, or 0 when none waits */
+static int posted_next(CTUI_EVENT *ev) {
+  static POSTED out;
+  if (g_posted_count == 0) {
+    return 0;
+  }
+  out = g_posted[g_posted_head];
+  g_posted_head = (g_posted_head + 1) % CTUI_INPUT_POST_MAX;
+  g_posted_count--;
+  ev->type = out.type;
+  ev->ev_source = "input";
+  ev->event_data = &out.d;
+  ev->origin = NULL;
+  return 1;
+}
+
+static void (*g_wait_fn)(void *ctx, long timeout_ms) = NULL;
+static void *g_wait_ctx = NULL;
+
+void ctui_input_on_wait(void (*fn)(void *ctx, long timeout_ms), void *ctx) {
+  g_wait_fn = fn;
+  g_wait_ctx = ctx;
+}
+
 /* 1: *ev is the source's event, 0: none, -1: the source ended */
 static int source_next(CTUI_EVENT *ev, int readable) {
   int r = g_source->next(g_source->ctx, ev, readable);
@@ -617,6 +692,11 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
       return 1;
     }
 
+    if (posted_next(ev)) {
+      g_tick_due = 0;
+      return 1;
+    }
+
     if (g_source) {
       int r = source_next(ev, 0);
       if (r != 0) {
@@ -636,8 +716,6 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
         FD_SET(in_fd, &rfds);
         maxfd = in_fd;
       }
-      ctui_io_fill(&rfds, &wfds, &maxfd);
-
       long now = mono_ms();
       long timeout = -1;
       if (tick_ms > 0) {
@@ -650,6 +728,12 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
       if (timer_due >= 0 && (timeout < 0 || timer_due < timeout)) {
         timeout = timer_due;
       }
+      /* before the watches are filled in: what it sends may want one
+       * watching for writes */
+      if (g_wait_fn) {
+        g_wait_fn(g_wait_ctx, timeout);
+      }
+      ctui_io_fill(&rfds, &wfds, &maxfd);
       struct timeval tv = {.tv_sec = timeout / 1000,
                            .tv_usec = (timeout % 1000) * 1000};
 

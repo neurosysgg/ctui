@@ -265,7 +265,13 @@ Cases are data, a `CTUI_HARNESS_STEP` array run by
 harness.h's top comment has an example); a dump prints what
 `pty_harness.py`'s does, and beside it (`ctui_vt_styles()`) a line per
 row that isn't plain: where its colours and attributes change. Not linked into any app: `tests/harness_test.c`
-and ctui-wm's and ctui-mus's screens runners link it. `tools/harness/capture.py` remakes
+and ctui-wm's and ctui-mus's screens runners link it.
+With `CTUI_PTY_SPAWN.nodes` the harness is also the app's control-nodes
+daemon (`hnodes.c`): an app on `node/ui.h` publishes `ui/` (its rows,
+input as triggers, named widgets), the `CTUI_HS_N*` steps write and wait
+on those (`CTUI_HS_NKEY("ctrl+f")` returns once the key's frame is
+drawn: no QUIET), and every DUMP checks the grid against what the app
+says it drew. `tools/harness/capture.py` remakes
 `tests/data/harness/` (examples' output and pty_harness.py's grid of it,
 which the C parser has to match).
 

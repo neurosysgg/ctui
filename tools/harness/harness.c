@@ -26,6 +26,7 @@ struct CTUI_PTY {
   int reaped, status;
   /* $CTUI_PTY_RECORD's file for this app, NULL when not recording */
   FILE *rec;
+  CTUI_HNODES *nodes; /* CTUI_PTY_SPAWN.nodes */
 };
 
 static long now_ms(void) {
@@ -63,7 +64,7 @@ static void record_open(CTUI_PTY *p, const char *argv0, int rows, int cols) {
 }
 
 static void child(const CTUI_PTY_SPAWN *how, const char *slave, int rows,
-                  int cols) {
+                  int cols, const CTUI_HNODES *nodes) {
   setsid();
   int fd = open(slave, O_RDWR);
   if (fd < 0) {
@@ -87,6 +88,10 @@ static void child(const CTUI_PTY_SPAWN *how, const char *slave, int rows,
   }
   for (const char *const *u = how->unset; u && *u; u++) {
     unsetenv(*u);
+  }
+  if (nodes) {
+    setenv("CTUI_NODES_SOCK", ctui_hnodes_path(nodes), 1);
+    setenv("CTUI_UI_NODES", "1", 1);
   }
   for (const char *const *e = how->env; e && *e; e++) {
     const char *eq = strchr(*e, '=');
@@ -121,6 +126,9 @@ CTUI_PTY *ctui_pty_spawn(const CTUI_PTY_SPAWN *how) {
     goto fail;
   }
   ctui_vt_answer_kitty_shm(p->vt, how->kitty_shm);
+  if (how->nodes && !(p->nodes = ctui_hnodes_listen())) {
+    goto fail;
+  }
   char slave[128];
   snprintf(slave, sizeof slave, "%s", ptsname(p->fd));
   set_size(p->fd, rows, cols);
@@ -130,7 +138,7 @@ CTUI_PTY *ctui_pty_spawn(const CTUI_PTY_SPAWN *how) {
     goto fail;
   }
   if (p->pid == 0) {
-    child(how, slave, rows, cols);
+    child(how, slave, rows, cols, p->nodes);
   }
   fcntl(p->fd, F_SETFL, fcntl(p->fd, F_GETFL) | O_NONBLOCK);
   record_open(p, how->argv[0], rows, cols);
@@ -140,6 +148,7 @@ fail:
     close(p->fd);
   }
   ctui_vt_free(p->vt);
+  ctui_hnodes_free(p->nodes);
   free(p);
   return NULL;
 }
@@ -207,9 +216,17 @@ int ctui_pty_pump(CTUI_PTY *p, int ms) {
   if (p->gone) {
     return -1;
   }
-  struct pollfd pfd = {.fd = p->fd, .events = POLLIN};
-  int r = poll(&pfd, 1, ms < 0 ? 0 : ms);
-  if (r <= 0) {
+  struct pollfd pfd[1 + 17];
+  pfd[0] = (struct pollfd){.fd = p->fd, .events = POLLIN};
+  int n = 1;
+  if (p->nodes) {
+    n += ctui_hnodes_fds(p->nodes, pfd + 1, 17);
+  }
+  int r = poll(pfd, (nfds_t)n, ms < 0 ? 0 : ms);
+  if (p->nodes) {
+    ctui_hnodes_pump(p->nodes);
+  }
+  if (r <= 0 || !(pfd[0].revents & (POLLIN | POLLHUP | POLLERR))) {
     return 0;
   }
   return drain(p);
@@ -381,10 +398,193 @@ int ctui_pty_close(CTUI_PTY *p, FILE *out) {
   if (p->rec) {
     fclose(p->rec);
   }
+  ctui_hnodes_free(p->nodes);
   ctui_vt_free(p->vt);
   free(p->out);
   free(p);
   return ret;
+}
+
+/* --- through the nodes --- */
+
+CTUI_HNODES *ctui_pty_nodes(CTUI_PTY *p) { return p->nodes; }
+
+int ctui_pty_node_write(CTUI_PTY *p, const char *path, const char *text,
+                        int timeout_ms, int *err, char *reply, size_t cap) {
+  if (reply && cap) {
+    reply[0] = '\0';
+  }
+  if (!p->nodes) {
+    return -1;
+  }
+  long end = now_ms() + timeout_ms;
+  int req;
+  while ((req = ctui_hnodes_write(p->nodes, path, text)) < 0) {
+    long left = end - now_ms();
+    if (left <= 0 || p->gone) {
+      return -1;
+    }
+    ctui_pty_pump(p, (int)(left < 20 ? left : 20));
+  }
+  for (;;) {
+    const char *got;
+    int r = ctui_hnodes_answer(p->nodes, req, err, &got);
+    if (r < 0) {
+      return -1;
+    }
+    if (r > 0) {
+      if (reply && cap && got) {
+        snprintf(reply, cap, "%s", got);
+      }
+      /* it wrote its frame before it answered: on the pty already */
+      ctui_pty_pump(p, 0);
+      return 0;
+    }
+    long left = end - now_ms();
+    if (left <= 0 || p->gone) {
+      return -1;
+    }
+    ctui_pty_pump(p, (int)(left < 20 ? left : 20));
+  }
+}
+
+int ctui_pty_until_node(CTUI_PTY *p, const char *path, const char *value,
+                        int timeout_ms) {
+  if (!p->nodes) {
+    return -1;
+  }
+  long end = now_ms() + timeout_ms;
+  for (;;) {
+    ctui_pty_pump(p, 0);
+    const char *v = ctui_hnodes_get(p->nodes, path);
+    if (v && strcmp(v, value) == 0) {
+      return 0;
+    }
+    long left = end - now_ms();
+    if (left <= 0 || p->gone) {
+      return -1;
+    }
+    ctui_pty_pump(p, (int)(left < 20 ? left : 20));
+  }
+}
+
+/* row r of text (rows joined by \n) into *line / *len */
+static void nth_line(const char *text, int r, const char **line, size_t *len) {
+  for (; r > 0 && text; r--) {
+    text = strchr(text, '\n');
+    text = text ? text + 1 : NULL;
+  }
+  if (!text) {
+    *line = "";
+    *len = 0;
+    return;
+  }
+  const char *nl = strchr(text, '\n');
+  *line = text;
+  *len = nl ? (size_t)(nl - text) : strlen(text);
+}
+
+/* rows that differ, printed to out when out isn't NULL */
+static int screen_diff(CTUI_PTY *p, FILE *out) {
+  char *text = ctui_vt_text(p->vt);
+  int bad = 0;
+  for (int r = 0; r < ctui_vt_rows(p->vt); r++) {
+    char path[32];
+    snprintf(path, sizeof path, "ui/screen/%03d", r);
+    const char *app = ctui_hnodes_get(p->nodes, path);
+    const char *line;
+    size_t len;
+    nth_line(text, r, &line, &len);
+    if (!app || strlen(app) != len || memcmp(app, line, len) != 0) {
+      bad++;
+      if (out) {
+        fprintf(out, "!! screen row %d: the terminal shows \"%.*s\", the "
+                     "app drew \"%s\"\n",
+                r, (int)len, line, app ? app : "(no node)");
+      }
+    }
+  }
+  free(text);
+  return bad;
+}
+
+int ctui_pty_check_screen(CTUI_PTY *p, FILE *out) {
+  if (!p->nodes) {
+    return 0;
+  }
+  ctui_pty_pump(p, 0);
+  if (!ctui_hnodes_get(p->nodes, "ui/screen/000")) {
+    return 0;
+  }
+  long end = now_ms() + 300;
+  while (screen_diff(p, NULL) && now_ms() < end && !p->gone) {
+    ctui_pty_pump(p, 20);
+  }
+  return screen_diff(p, out) ? -1 : 0;
+}
+
+/* "PATH=VALUE" into path (cap bytes) and *value */
+static int split(const char *s, char *path, size_t cap, const char **value) {
+  const char *eq = strchr(s, '=');
+  if (!eq || (size_t)(eq - s) >= cap) {
+    return -1;
+  }
+  memcpy(path, s, (size_t)(eq - s));
+  path[eq - s] = '\0';
+  *value = eq + 1;
+  return 0;
+}
+
+/* a step through the nodes: 0, or -1 with why to out */
+static int node_step(CTUI_PTY *p, const CTUI_HARNESS_STEP *s, int ms,
+                     FILE *out) {
+  char path[256];
+  const char *value = s->s;
+  int want = 0;
+  switch (s->op) {
+  case CTUI_HS_OP_NKEY:
+    snprintf(path, sizeof path, "ui/input/key");
+    break;
+  case CTUI_HS_OP_NTEXT:
+    snprintf(path, sizeof path, "ui/input/text");
+    break;
+  case CTUI_HS_OP_NMOUSE:
+    snprintf(path, sizeof path, "ui/input/mouse");
+    break;
+  default:
+    if (split(s->s, path, sizeof path, &value) != 0) {
+      fprintf(out, "!! \"%s\": not PATH=VALUE\n", s->s);
+      return -1;
+    }
+    want = s->b;
+    break;
+  }
+  if (!p->nodes) {
+    fprintf(out, "!! %s: the app wasn't spawned with nodes\n", path);
+    return -1;
+  }
+  if (s->op == CTUI_HS_OP_NWAIT || s->op == CTUI_HS_OP_NEQ) {
+    if (ctui_pty_until_node(p, path, value, s->op == CTUI_HS_OP_NEQ ? 0 : ms) ==
+        0) {
+      return 0;
+    }
+    const char *got = ctui_hnodes_get(p->nodes, path);
+    fprintf(out, "!! %s reads \"%s\", not \"%s\"%s\n", path,
+            got ? got : "(no node)", value,
+            s->op == CTUI_HS_OP_NEQ ? "" : " within the wait");
+    return -1;
+  }
+  int err;
+  if (ctui_pty_node_write(p, path, value, ms, &err, NULL, 0) != 0) {
+    fprintf(out, "!! %s \"%s\": no answer within %d ms\n", path, value, ms);
+    return -1;
+  }
+  if (err != want) {
+    fprintf(out, "!! %s \"%s\": %s, not %s\n", path, value,
+            err ? strerror(err) : "taken", want ? strerror(want) : "taken");
+    return -1;
+  }
+  return 0;
 }
 
 static void click(CTUI_PTY *p, const CTUI_HARNESS_STEP *s) {
@@ -459,7 +659,22 @@ int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out,
       click(p, s);
       break;
     case CTUI_HS_OP_DUMP:
+      if (ctui_pty_check_screen(p, out) != 0) {
+        ctui_pty_dump(p, out, styles);
+        return -1;
+      }
       ctui_pty_dump(p, out, styles);
+      break;
+    case CTUI_HS_OP_NKEY:
+    case CTUI_HS_OP_NTEXT:
+    case CTUI_HS_OP_NMOUSE:
+    case CTUI_HS_OP_NWRITE:
+    case CTUI_HS_OP_NWAIT:
+    case CTUI_HS_OP_NEQ:
+      if (node_step(p, s, ms, out) != 0) {
+        ctui_pty_dump(p, out, styles);
+        return -1;
+      }
       break;
     default:
       break;

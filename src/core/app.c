@@ -38,6 +38,7 @@ int ctui_app_init(CTUI_APP *app, CTUI_WIDGET **widgets, int count, int rows,
   app->rendered = NULL;
   app->render_end = NULL;
   app->render_arg = NULL;
+  app->frames = 0;
   ctui_g_app = app;
   ctui_timer_reset();
   ctui_io_reset();
@@ -129,6 +130,7 @@ void ctui_app_render(CTUI_APP *app, CTUI_SCREEN *screen) {
     app->render_end(app->comp, app->render_arg);
   }
   ctui_compositor_blit(app->comp, screen);
+  app->frames++;
 }
 
 void ctui_app_resize(CTUI_APP *app, CTUI_SCREEN *screen, int rows, int cols) {

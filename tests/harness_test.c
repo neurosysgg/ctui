@@ -1,14 +1,18 @@
 /* tools/harness/: the VT parser (vt.c) on streams, ctui's own renderer's
  * output read back cell for cell, captured app output against
  * tools/pty_harness.py's grid (tests/data/harness/, made by
- * tools/harness/capture.py), and the pty side (harness.c) on /bin/sh. */
+ * tools/harness/capture.py), the pty side (harness.c) on /bin/sh, and
+ * the nodes' side (hnodes.c) driving this binary run as a small app
+ * (--toy) through node/ui.h's ui/ tree. */
 #define _POSIX_C_SOURCE 200809L
 
 #include "ctui.h"
+#include "node/ui.h"
 
 #include "ctui_test.h"
 #include "harness/harness.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -672,7 +676,195 @@ static void test_pty(void) {
   ctui_pty_close(p, NULL);
 }
 
-int main(void) {
+/* --- an app driven through its nodes ------------------------------------- */
+
+static int toy_downs;
+static char toy_last[16];
+static char toy_text[32];
+static CTUI_ENTRY toy_entry = {.buf = toy_text, .cap = sizeof toy_text};
+static CTUI_LIST_ITEM toy_items[] = {
+    {"alpha", 0}, {"beta", 0}, {"gamma", 0}, {"delta", 0}, {"echo", 0}};
+static CTUI_LIST toy_list = {toy_items, 5, 0, 0};
+
+static void toy_render(CTUI_WIDGET *w, CTUI_COMPOSITOR *comp) {
+  char line[64];
+  snprintf(line, sizeof line, "count: %d", toy_downs);
+  ctui_widget_puts(w, comp, 0, 0, line, CTUI_COLOR_WHITE, CTUI_COLOR_DEFAULT);
+  snprintf(line, sizeof line, "last: %s", toy_last);
+  ctui_widget_puts(w, comp, 1, 2, line, CTUI_COLOR_CYAN, CTUI_COLOR_DEFAULT);
+  snprintf(line, sizeof line, "> %s", toy_text);
+  ctui_widget_puts(w, comp, 2, 0, line, CTUI_COLOR_WHITE, CTUI_COLOR_DEFAULT);
+}
+
+static void toy_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  self->w = comp->cols;
+  self->h = 3;
+}
+
+static void toy_list_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  self->x = 2;
+  self->y = 3;
+  self->w = comp->cols - 2;
+  self->h = comp->rows - 3;
+}
+
+static int toy_key(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  (void)self;
+  CTUI_KEYPRESS_EVENT_DATA *k = ev->event_data;
+  if (k->type == CTUI_KEY_DOWN) {
+    toy_downs++;
+  } else if (k->type == CTUI_KEY_CHAR) {
+    ctui_entry_key(&toy_entry, k);
+  }
+  return 1;
+}
+
+static int toy_mouse(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  CTUI_MOUSE_EVENT_DATA *m = ev->event_data;
+  if (m->action == CTUI_MOUSE_PRESS && ctui_widget_contains(self, m->row, m->col)) {
+    toy_list.selected = m->row - self->y + toy_list.scroll_offset;
+    return 1;
+  }
+  return 0;
+}
+
+/* a selection written from outside: as if the user had picked it */
+static int toy_picked(CTUI_WIDGET *w, void *user) {
+  (void)w, (void)user;
+  if (strcmp(toy_items[toy_list.selected].label, "delta") == 0) {
+    return EPERM; /* the app's own refusal */
+  }
+  snprintf(toy_last, sizeof toy_last, "%s", toy_items[toy_list.selected].label);
+  return 0;
+}
+
+static int toy_main(void) {
+  CTUI_GFX_MODE gfx = CTUI_GFX_ANSI16;
+  if (ctui_init(E_ERR, &gfx) != 0) {
+    return 1;
+  }
+  int rows, cols;
+  ctui_get_termsize(&rows, &cols);
+  CTUI_SCREEN *screen = ctui_screen_create(rows, cols);
+  CTUI_WIDGET w = ctui_widget_make(0, 0, 0, 0, NULL, toy_render, toy_layout);
+  CTUI_WIDGET lw = ctui_widget_make(0, 0, 0, 0, &toy_list, ctui_list_render,
+                                    toy_list_layout);
+  CTUI_WIDGET *ws[] = {&w, &lw};
+  CTUI_APP app;
+  if (ctui_app_init(&app, ws, 2, rows, cols) != 0) {
+    return 1;
+  }
+  ctui_event_register("input", CTUI_KEYPRESS_EVENT, &w, toy_key);
+  ctui_event_register("input", CTUI_KEYPRESS_EVENT, &lw,
+                      ctui_list_handle_keypress);
+  ctui_event_register("input", CTUI_MOUSE_EVENT, &lw, toy_mouse);
+  CTUI_UI *ui = ctui_ui_auto(&app, "harness-toy");
+  ctui_ui_entry(ui, "search", &w, &toy_entry, CTUI_UI_RDONLY, NULL, NULL);
+  ctui_ui_list(ui, "list", &lw, &toy_list, CTUI_UI_RDWR, toy_picked, NULL);
+  ctui_app_run(&app, screen, 0);
+  ctui_ui_close(ui);
+  ctui_app_free(&app);
+  ctui_screen_free(screen);
+  ctui_shutdown();
+  return 0;
+}
+
+static void test_nodes(void) {
+  const char *argv[] = {"/proc/self/exe", "--toy", NULL};
+  CTUI_PTY *p = ctui_pty_spawn(
+      &(CTUI_PTY_SPAWN){.argv = argv, .rows = 8, .cols = 24, .nodes = 1});
+  CTUI_TEST_ASSERT(p && ctui_pty_nodes(p) &&
+                       ctui_pty_until_node(p, "ui/screen/000", "count: 0",
+                                           3000) == 0,
+                   "the app connects to the harness and publishes ui/");
+  CTUI_TEST_ASSERT(ctui_hnodes_get(ctui_pty_nodes(p), "ui/size") &&
+                       strcmp(ctui_hnodes_get(ctui_pty_nodes(p), "ui/size"),
+                              "8x24") == 0,
+                   "its size");
+  long t0 = ms_now();
+  static const CTUI_HARNESS_STEP keys[] = {
+      CTUI_HS_NKEY("down down"),
+      CTUI_HS_NEQ("ui/screen/000", "count: 2"),
+      CTUI_HS_DUMP,
+      CTUI_HS_NTEXT("hé"),
+      CTUI_HS_NEQ("ui/screen/002", "> hé"),
+      CTUI_HS_NREFUSED("ui/input/key", "hyper+x", EINVAL),
+      CTUI_HS_NIDLE,
+      CTUI_HS_DUMP,
+      CTUI_HS_NEQ("ui/screen/000", "count: 3"),
+      CTUI_HS_DUMP,
+      CTUI_HS_END};
+  char dump[2048] = "";
+  FILE *f = fmemopen(dump, sizeof dump, "w");
+  int r = ctui_harness_steps(p, keys, f, NULL);
+  fclose(f);
+  long took = ms_now() - t0;
+  CTUI_TEST_ASSERT(r == -1, "a NEQ that doesn't hold fails the run");
+  const char *want =
+      "count: 2\n  last:\n>\n  alpha\n  beta\n  gamma\n  delta\n  echo\n"
+      "------------------------\n"
+      "count: 2\n  last:\n> hé\n  alpha\n  beta\n  gamma\n  delta\n  echo\n"
+      "------------------------\n"
+      "!! ui/screen/000 reads \"count: 2\", not \"count: 3\"\n"
+      "count: 2\n  last:\n> hé\n  alpha\n  beta\n  gamma\n  delta\n  echo\n"
+      "------------------------\n";
+  CTUI_TEST_ASSERT(strcmp(dump, want) == 0,
+                   "keys and text through the nodes; the grid already shows "
+                   "each answer's frame (the dumps' check passed), no waits "
+                   "between them");
+  if (strcmp(dump, want) != 0) {
+    printf("%s", dump);
+  }
+  CTUI_TEST_ASSERT(took < 1000, "and quick: %ld ms", took);
+
+  static const CTUI_HARNESS_STEP widgets[] = {
+      CTUI_HS_NEQ("ui/w/search/text", "hé"),
+      CTUI_HS_NEQ("ui/w/search/cursor", "3"),
+      CTUI_HS_NEQ("ui/w/search/rect", "0 0 24 3"),
+      CTUI_HS_NEQ("ui/w/list/rows", "5"),
+      CTUI_HS_NEQ("ui/w/list/selected", "2"),
+      CTUI_HS_NEQ("ui/w/list/selected_text", "gamma"),
+      CTUI_HS_NEQ("ui/w/list/rect", "2 3 22 5"),
+      CTUI_HS_NWRITE("ui/w/list/selected", "4"),
+      CTUI_HS_NEQ("ui/screen/001", "  last: echo"),
+      CTUI_HS_NEQ("ui/w/list/selected_text", "echo"),
+      CTUI_HS_NREFUSED("ui/w/list/selected", "3", EPERM),
+      CTUI_HS_NREFUSED("ui/w/list/selected", "9", ERANGE),
+      CTUI_HS_NREFUSED("ui/w/search/text", "x", EACCES),
+      CTUI_HS_NMOUSE("click w/list 0 1"),
+      CTUI_HS_NEQ("ui/w/list/selected_text", "beta"),
+      CTUI_HS_NMOUSE("click w/list"),
+      CTUI_HS_NEQ("ui/w/list/selected_text", "gamma"),
+      CTUI_HS_NREFUSED("ui/input/mouse", "click w/nothing", ENOENT),
+      CTUI_HS_NREFUSED("ui/input/mouse", "click w/list 0 7", ENOENT),
+      CTUI_HS_DUMP,
+      CTUI_HS_END};
+  dump[0] = '\0';
+  f = fmemopen(dump, sizeof dump, "w");
+  r = ctui_harness_steps(p, widgets, f, NULL);
+  fclose(f);
+  CTUI_TEST_ASSERT(r == 0, "the widgets' nodes: an entry's text and cursor, "
+                           "a list's rows and selection, their rects; a "
+                           "write taken (the app's changed() ran before the "
+                           "frame), the app's refusal, out of range, "
+                           "read-only; clicks aimed by name");
+  if (r != 0) {
+    printf("%s", dump);
+  }
+
+  static const CTUI_HARNESS_STEP bye[] = {
+      CTUI_HS_NREFUSED("ui/input/key", "esc", ECANCELED), CTUI_HS_ENDED,
+      CTUI_HS_END};
+  CTUI_TEST_ASSERT(ctui_harness_steps(p, bye, stdout, NULL) == 0,
+                   "esc quits it: the write cancelled as it closes, then it "
+                   "ends");
+  CTUI_TEST_ASSERT(ctui_pty_close(p, NULL) == 1, "it ended by itself");
+}
+
+int main(int argc, char **argv) {
+  if (argc > 1 && strcmp(argv[1], "--toy") == 0) {
+    return toy_main();
+  }
   ctui_log_init(E_ERR);
   test_text();
   test_swallowed();
@@ -684,5 +876,6 @@ int main(void) {
   test_flush_vs_reference();
   test_captures();
   test_pty();
+  test_nodes();
   return ctui_test_summary();
 }

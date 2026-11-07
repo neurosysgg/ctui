@@ -36,6 +36,9 @@ typedef struct {
   void (*rendered)(CTUI_WIDGET *w, CTUI_COMPOSITOR *comp, void *arg);
   void (*render_end)(CTUI_COMPOSITOR *comp, void *arg);
   void *render_arg;
+
+  /* frames ctui_app_render() drew, counted from ctui_app_init() */
+  unsigned frames;
 } CTUI_APP;
 
 /* app / event loop */

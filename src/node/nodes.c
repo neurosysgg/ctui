@@ -40,11 +40,16 @@ struct CTUI_NODES {
   CTUI_NODE **by_path; /* strcmp order */
   int n, cap;
   uint32_t next_id;
-  int depth; /* begin / commit */
+  int depth;  /* begin / commit */
+  int begun;  /* the begin line sent: only once something changes */
   CTUI_BUF out;
   size_t out_off;
   char *in;
   size_t in_len, in_cap;
+  unsigned conn; /* bumped by every connect: an answer for an older one is
+                    dropped */
+  double write_req; /* the write being handled alone (ctui_node_defer()) */
+  int in_write, deferred;
 };
 
 /* --- the connection ------------------------------------------------------ */
@@ -108,6 +113,16 @@ static void send_line(CTUI_NODES *ns, const char *line) {
   send_buf(ns, &b);
 }
 
+/* a change (pub, set, rm): inside begin / commit, the begin goes first --
+ * a pair with nothing between them isn't sent */
+static void send_change(CTUI_NODES *ns, CTUI_BUF *b) {
+  if (ns->depth && !ns->begun && ns->fd >= 0) {
+    ns->begun = 1;
+    send_line(ns, "{\"begin\":1}");
+  }
+  send_buf(ns, b);
+}
+
 static void send_pub(CTUI_NODES *ns, const CTUI_NODE *n) {
   CTUI_BUF b = {0};
   ctui_buf_printf(&b, "{\"pub\":%u,\"path\":", n->id);
@@ -124,7 +139,7 @@ static void send_pub(CTUI_NODES *ns, const CTUI_NODE *n) {
     ctui_json_quote(&b, n->text);
   }
   ctui_buf_add(&b, "}", 1);
-  send_buf(ns, &b);
+  send_change(ns, &b);
 }
 
 static const char *socket_path(char *buf, size_t cap) {
@@ -164,6 +179,7 @@ int ctui_nodes_connect(CTUI_NODES *ns) {
     return -1;
   }
   ns->fd = fd;
+  ns->conn++;
   ctui_logf(E_INF, "[CTUI:NODE] - %s: connected to %s, %d nodes @ tick %d\n",
             ns->name, path, ns->n, ctui_tick_advance());
 
@@ -173,9 +189,7 @@ int ctui_nodes_connect(CTUI_NODES *ns) {
   ctui_buf_printf(&b, ",\"v\":1%s}",
                   ns->flags & CTUI_NODES_SINGLE ? ",\"single\":true" : "");
   send_buf(ns, &b);
-  if (ns->depth) {
-    send_line(ns, "{\"begin\":1}");
-  }
+  ns->begun = 0;
   for (int i = 0; i < ns->n && ns->fd >= 0; i++) {
     send_pub(ns, ns->by_id[i]);
   }
@@ -407,9 +421,9 @@ void ctui_node_remove(CTUI_NODE *n) {
   memmove(ns->by_path + j, ns->by_path + j + 1,
           (size_t)(ns->n - j - 1) * sizeof *ns->by_path);
   ns->n--;
-  char line[48];
-  snprintf(line, sizeof line, "{\"rm\":%u}", n->id);
-  send_line(ns, line);
+  CTUI_BUF line = {0};
+  ctui_buf_printf(&line, "{\"rm\":%u}", n->id);
+  send_change(ns, &line);
   if (n->busy) {
     n->dead = 1;
   } else {
@@ -476,7 +490,7 @@ static void set_value(CTUI_NODE *n, const CTUI_NODE_VALUE *v) {
   ctui_buf_printf(&line, "{\"set\":%u,\"v\":", n->id);
   ctui_json_quote(&line, n->text);
   ctui_buf_add(&line, "}", 1);
-  send_buf(n->ns, &line);
+  send_change(n->ns, &line);
 }
 
 static int owner_check(const CTUI_NODE *n, CTUI_NODE_KIND kind) {
@@ -549,12 +563,13 @@ void ctui_node_set_str(CTUI_NODE *n, const char *s) {
 
 void ctui_nodes_begin(CTUI_NODES *ns) {
   if (ns->depth++ == 0) {
-    send_line(ns, "{\"begin\":1}");
+    ns->begun = 0;
   }
 }
 
 void ctui_nodes_commit(CTUI_NODES *ns) {
-  if (ns->depth > 0 && --ns->depth == 0) {
+  if (ns->depth > 0 && --ns->depth == 0 && ns->begun) {
+    ns->begun = 0;
     send_line(ns, "{\"commit\":1}");
   }
 }
@@ -654,18 +669,52 @@ static void handle_write(CTUI_NODES *ns, const CTUI_JSON *msg, double req) {
              .text = ctui_json_str(ctui_json_get(msg, "v"), NULL)};
   int err = prepare(&w);
   CTUI_BUF reply = {0};
+  ns->deferred = 0;
   if (!err) {
     w.node->busy++;
     err = check(&w);
     if (!err) {
+      ns->write_req = req;
+      ns->in_write = 1;
       err = apply(&w, &reply);
+      ns->in_write = 0;
     }
     if (--w.node->busy == 0 && w.node->dead) {
       node_free(w.node);
     }
   }
-  ack(ns, req, err, -1, &reply);
+  if (!ns->deferred) {
+    ack(ns, req, err, -1, &reply);
+  }
+  ns->deferred = 0;
   free(reply.s);
+}
+
+int ctui_node_defer(CTUI_NODE *n, CTUI_NODE_LATER *later) {
+  CTUI_NODES *ns = n->ns;
+  if (!ns->in_write) {
+    ctui_logf(E_WRN, "[CTUI:NODE] - %s: \"%s\": an answer deferred outside "
+                     "a write of its own refused\n",
+              ns->name, n->path);
+    return -1;
+  }
+  ns->deferred = 1;
+  later->req = ns->write_req;
+  later->conn = ns->conn;
+  return 0;
+}
+
+void ctui_nodes_answer(CTUI_NODES *ns, const CTUI_NODE_LATER *later, int err,
+                       const char *reply) {
+  if (ns->fd < 0 || later->conn != ns->conn) {
+    return;
+  }
+  CTUI_BUF b = {0};
+  if (reply) {
+    ctui_buf_add(&b, reply, strlen(reply));
+  }
+  ack(ns, later->req, err, -1, &b);
+  free(b.s);
 }
 
 /* every line parsed, every check, then every write: whole or not at all

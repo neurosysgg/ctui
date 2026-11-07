@@ -494,6 +494,8 @@ above into the loop described in "Life of a frame".
   drawing them), the third before the blit. For state an app keeps across
   a frame's widgets (images placed under text that a later widget may draw
   over).
+- `app->frames` — renders since `ctui_app_init()` (`ctui_app_render()`
+  counts them).
 - `ctui_app_quit()` — ends `ctui_app_run()` once the current event
   finishes; callable from any handler.
 - `ctui_app_run_until(app, screen, tick_ms, &done)` — the run loop again
@@ -585,6 +587,23 @@ above into the loop described in "Life of a frame".
   with `*ev` filled (its data in the source's own storage), `0` for none,
   `-1` at the end (the loop returns `0`, ending `ctui_app_run()`). With a
   sink screen this runs an app with no terminal at all.
+- `ctui_input_post(ev)` — an event from outside the terminal (keys, key
+  releases, mouse, focus; copied), handed out by `ctui_input_loop()`
+  before anything is read or waited for, so it goes through the run
+  loop's own branches (ESC quits). `-1` for another type or a full queue
+  (`CTUI_INPUT_POST_MAX`, 256); `ctui_input_posted()` counts what waits.
+- `ctui_input_on_wait(fn, ctx)` — `fn(ctx, timeout_ms)` each time the
+  loop is about to wait: everything posted handled, the frame it made
+  drawn. One at a time; `fn` must not post. `node/ui.h` is its user.
+
+## `keyname.h` — keys as text
+
+- `ctui_key_parse(s, n, out)` — "ctrl+f", "shift+tab", "pgdn", "F5", "é",
+  "ctrl++" into the `CTUI_KEYPRESS_EVENT_DATA` the terminal's bytes for
+  that key would give (ctrl+letter is its control byte without the CTRL
+  bit, shift+tab `BACKTAB`, backspace CHAR 0x7f): names as
+  `ctui_keytype_name()` says them, in any case, a character as written.
+  `0`, or `-1` for text that isn't a key.
 
 ## `log.h` — logging
 

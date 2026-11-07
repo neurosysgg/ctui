@@ -99,6 +99,15 @@ typedef struct {
   int (*on_check)(CTUI_NODE *n, const CTUI_NODE_VALUE *v, void *user);
 } CTUI_NODE_OPS;
 
+/* A write's answer held back past its on_write: for an owner whose write
+ * takes effect later on its loop (a key posted, handled and drawn), so the
+ * writer returns once it has. A value, kept by the owner until it answers.
+ * The daemon waits 2 seconds for it (the writer gets ETIMEDOUT). */
+typedef struct {
+  double req;
+  unsigned conn;
+} CTUI_NODE_LATER;
+
 /* --- the text (shared with the daemon) ---------------------------------- */
 
 /* 1 if t is usable: a known kind, labels for an enum, def in range, a
@@ -179,6 +188,17 @@ void ctui_node_set_float(CTUI_NODE *n, double v);
 void ctui_node_set_bool(CTUI_NODE *n, int v);
 void ctui_node_set_enum(CTUI_NODE *n, unsigned index);
 void ctui_node_set_str(CTUI_NODE *n, const char *s);
+
+/* from inside on_write, for a write that came alone (not in a batch: a
+ * batch is answered whole): 0 and *later filled, and the write's answer
+ * waits for ctui_nodes_answer(); on_write's own return still decides
+ * whether a value is taken. -1 (logged) anywhere else. */
+int ctui_node_defer(CTUI_NODE *n, CTUI_NODE_LATER *later);
+/* that answer: err 0 or the writer's errno, reply (NULL: none) what a
+ * trigger's writer reads back. Nothing is sent when the connection it came
+ * on has dropped since. */
+void ctui_nodes_answer(CTUI_NODES *ns, const CTUI_NODE_LATER *later, int err,
+                       const char *reply);
 
 /* sets between them reach readers as one change (nests) */
 void ctui_nodes_begin(CTUI_NODES *ns);

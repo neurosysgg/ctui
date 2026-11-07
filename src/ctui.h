@@ -15,6 +15,7 @@
 #include "core/group.h"
 #include "core/input.h"
 #include "core/io.h"
+#include "core/keyname.h"
 #include "core/kitty.h"
 #include "core/log.h"
 #include "core/profile.h"

@@ -237,6 +237,36 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **An app's UI as control nodes: a low-level Selenium** (2026-11-08,
+  ctui-wm session 323, notes/ui-nodes.md there). `core/keyname.h`:
+  `ctui_key_parse()`, "ctrl+f" / "shift+tab" / "F5" / "é" into the
+  `CTUI_KEYPRESS_EVENT_DATA` the terminal's bytes give (ctrl+letter its
+  control byte, shift+tab BACKTAB). `core/input.h`: `ctui_input_post()`,
+  events handed out before anything is read or waited for, through the
+  run loop's own branches (ESC quits as typed); `ctui_input_on_wait()`, a
+  hook as the loop is about to wait -- every posted event handled, its
+  frame drawn. `CTUI_APP.frames` counts renders. `node/node.h`:
+  `ctui_node_defer()` / `ctui_nodes_answer()`, a write answered later
+  (from its `on_write`, alone, not in a batch); a begin / commit with no
+  change between them isn't sent any more (the begin goes with the first
+  change). `node/ui.h`: `ctui_ui_open()` / `ctui_ui_auto()` (with
+  `$CTUI_UI_NODES`) publish `ui/`: `frame`, `idle`, `size`,
+  `screen/NNN` (each row's text, sent when it changes), `input/key`,
+  `input/text`, `input/mouse` (click / press / release / move / drag /
+  scroll, at cells or at a named widget), `input/focus`; each write
+  answered with the frame number once its frame is drawn. Widgets named
+  by the app (`ctui_ui_entry/table/list/tabs()`) under `ui/w/NAME/`:
+  rect, text, rows, selected, selected_text, top, label, read at every
+  wait; `CTUI_UI_RDWR` (open(2)'s flags as the model) makes text /
+  selected writable, handed to the app's `changed()`, answered after the
+  frame it asks for. `tools/harness/hnodes.c`: the daemon's end of the
+  wire, small, for the harness (no FUSE): `CTUI_PTY_SPAWN.nodes`,
+  `ctui_pty_node_write()` / `_until_node()` / `_check_screen()`, steps
+  `CTUI_HS_NKEY/NTEXT/NMOUSE/NWRITE/NREFUSED/NWAIT/NEQ/NIDLE`, and with
+  nodes every DUMP compares the grid against the app's `ui/screen` (an
+  app run by another in its terminal, a file chooser, answers first:
+  the newest connection). tests/ui_test.c 31, harness_test's toy app
+  (this binary run with --toy) driven end to end in ~1 ms; 32 suites.
 - [x] **`node/`: control nodes** (2026-11-07, ctui-wm session 321,
   notes/nodes.md n1 there: the client half of a FUSE filesystem of
   functions and parameters, a study for µOS's typed `/proc` nodes).

@@ -23,6 +23,7 @@
  * POSIX only (posix_openpt, no -lutil): glibc and musl alike. Not part of
  * any app: what links it is the tests and the screens runners. */
 
+#include "hnodes.h"
 #include "vt.h"
 
 #include <stddef.h>
@@ -37,6 +38,10 @@ typedef struct {
   const char *const *unset; /* names removed from the child's, NULL-ended */
   int rows, cols;           /* 0: 24 x 80 */
   int kitty_shm;            /* answer ctui's kitty shm probe (vt.h) */
+  /* also drive it through its control nodes: the harness is their daemon
+   * (hnodes.h), the app gets $CTUI_NODES_SOCK and $CTUI_UI_NODES=1 (env
+   * can override them), so one built on node/ui.h publishes ui/ */
+  int nodes;
 } CTUI_PTY_SPAWN;
 
 /* the app running on a new pty of rows x cols; NULL when no pty or no
@@ -87,6 +92,27 @@ void ctui_pty_wait(CTUI_PTY *p, int ms);
  * to styles unless NULL */
 void ctui_pty_dump(CTUI_PTY *p, FILE *out, FILE *styles);
 
+/* --- through the app's nodes (CTUI_PTY_SPAWN.nodes) --- */
+
+/* the table, NULL when the app wasn't spawned with nodes */
+CTUI_HNODES *ctui_pty_nodes(CTUI_PTY *p);
+
+/* text written to path (waiting for the node to be published first):
+ * 0 once answered, *err 0 or the app's errno, its reply into reply (cap
+ * bytes, "" none; NULL: not wanted); -1 when not within timeout_ms or the
+ * app went. What the app wrote to the terminal before answering is read
+ * into the grid too: after a ui/input write, the grid shows its frame. */
+int ctui_pty_node_write(CTUI_PTY *p, const char *path, const char *text,
+                        int timeout_ms, int *err, char *reply, size_t cap);
+/* path reads value: 0 once it does, -1 after timeout_ms */
+int ctui_pty_until_node(CTUI_PTY *p, const char *path, const char *value,
+                        int timeout_ms);
+/* the grid against what the app says it drew (ui/screen/NNN), row by row,
+ * re-read for up to 300 ms while they differ (one may be ahead): 0 when
+ * alike, or nothing to compare (no nodes, no ui/screen); -1 with the rows
+ * that differ to out */
+int ctui_pty_check_screen(CTUI_PTY *p, FILE *out);
+
 /* what a wait gives a condition when the step leaves it 0 */
 #define CTUI_HARNESS_TIMEOUT_MS 5000
 #define CTUI_HARNESS_QUIET_MS 120
@@ -104,6 +130,14 @@ enum {
                       * unless a wheel (64, 65) */
   CTUI_HS_OP_DUMP,
   CTUI_HS_OP_ENDED, /* the app ended, within a ms */
+  /* through the app's nodes (CTUI_PTY_SPAWN.nodes): s "PATH=VALUE" split
+   * at the first '=' (a path has none), a ms (0: the default) */
+  CTUI_HS_OP_NKEY,   /* s written to ui/input/key, its answer waited for */
+  CTUI_HS_OP_NTEXT,  /* s to ui/input/text */
+  CTUI_HS_OP_NMOUSE, /* s to ui/input/mouse */
+  CTUI_HS_OP_NWRITE, /* s "PATH=VALUE" written, answered with errno b */
+  CTUI_HS_OP_NWAIT,  /* s "PATH=VALUE": the node reads VALUE within a ms */
+  CTUI_HS_OP_NEQ,    /* s "PATH=VALUE": it reads VALUE now, or the run fails */
 };
 
 typedef struct {
@@ -127,6 +161,18 @@ typedef struct {
 #define CTUI_HS_WHEEL_DOWN(col, row) {CTUI_HS_OP_CLICK, "65", (col), (row)}
 #define CTUI_HS_DUMP {CTUI_HS_OP_DUMP, NULL, 0, 0}
 #define CTUI_HS_ENDED {CTUI_HS_OP_ENDED, NULL, 0, 0}
+#define CTUI_HS_NKEY(keys) {CTUI_HS_OP_NKEY, (keys), 0, 0}
+#define CTUI_HS_NTEXT(text) {CTUI_HS_OP_NTEXT, (text), 0, 0}
+#define CTUI_HS_NMOUSE(what) {CTUI_HS_OP_NMOUSE, (what), 0, 0}
+#define CTUI_HS_NWRITE(path, value) {CTUI_HS_OP_NWRITE, path "=" value, 0, 0}
+#define CTUI_HS_NREFUSED(path, value, err)                                    \
+  {CTUI_HS_OP_NWRITE, path "=" value, 0, (err)}
+#define CTUI_HS_NWAIT(path, value) {CTUI_HS_OP_NWAIT, path "=" value, 0, 0}
+#define CTUI_HS_NWAIT_MS(path, value, ms)                                     \
+  {CTUI_HS_OP_NWAIT, path "=" value, (ms), 0}
+#define CTUI_HS_NEQ(path, value) {CTUI_HS_OP_NEQ, path "=" value, 0, 0}
+/* the loop had nothing due at its last wait (node/ui.h's ui/idle) */
+#define CTUI_HS_NIDLE {CTUI_HS_OP_NWAIT, "ui/idle=1", 0, 0}
 #define CTUI_HS_END {CTUI_HS_OP_END, NULL, 0, 0}
 
 /* keys as a terminal sends them (kitty's legacy encoding), to put in
@@ -148,7 +194,10 @@ typedef struct {
 #define CTUI_HK_BACKSPACE "\x7f"
 
 /* runs steps against p, dumps to out (and their styles to styles unless
- * NULL: ctui_pty_dump()). A wait that fails prints why
+ * NULL: ctui_pty_dump()). With nodes, a dump checks the grid against the
+ * app's ui/screen first (ctui_pty_check_screen()): a difference fails
+ * the run, as a write answered with another errno than the step's and a
+ * NEQ that doesn't hold do. A wait that fails prints why
  * ("!! until "X": not within N ms") and the screen, and ends the run:
  * what follows depended on it. Returns 0, or -1 after a failed wait. A
  * KEYS step that ends in a lone ESC is followed by 80 ms of reading, so
