@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A resize lost before select()** (2026-11-08, ctui-wm session 323:
+  its screens, once their steps stopped sleeping, caught ctui-vms not
+  redrawing after a resize). The SIGWINCH handler only set a flag, which
+  the input loop reads before it blocks: a signal between the two (or
+  taken by another thread: ctui-mail has sessions on threads) interrupted
+  nothing, and the resize waited for the next wake -- for ever in an app
+  without timers. The handler now also writes a byte to a non-blocking
+  pipe (`ctui_g_winch_pipe`, made at init) that `select()` watches.
+  harness_test's toy raises SIGWINCH from inside the wait hook, the last
+  thing before select(): its frame within 300 ms (failed 3 of 3 before).
 - [x] **An app's UI as control nodes: a low-level Selenium** (2026-11-08,
   ctui-wm session 323, notes/ui-nodes.md there). `core/keyname.h`:
   `ctui_key_parse()`, "ctrl+f" / "shift+tab" / "F5" / "é" into the

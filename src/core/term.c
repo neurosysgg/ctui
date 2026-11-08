@@ -12,6 +12,7 @@
 #include "log.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -37,6 +38,7 @@ static char g_pointer_claim[POINTER_NAME];
 static int g_pointer_claiming = 0;
 
 volatile sig_atomic_t ctui_g_resize_pending = 0;
+int ctui_g_winch_pipe[2] = {-1, -1};
 unsigned int ctui_g_gfx_mode = 0;
 
 int ctui_term_write(const void *buf, size_t len) {
@@ -71,6 +73,12 @@ int ctui_term_write(const void *buf, size_t len) {
 static void handle_sigwinch(int sig) {
   (void)sig;
   ctui_g_resize_pending = 1;
+  if (ctui_g_winch_pipe[1] >= 0) {
+    int saved = errno;
+    ssize_t r = write(ctui_g_winch_pipe[1], "w", 1); /* full: one's there */
+    (void)r;
+    errno = saved;
+  }
 }
 
 /* highest single CTUI_GFX_MODE tier actually present in caps -- used to
@@ -140,6 +148,13 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
   /* no SA_RESTART: we want blocking read() in ctui_input_loop() to return
    * EINTR on SIGWINCH so the event loop can react to the resize promptly
    * instead of waiting for the next keypress */
+  if (ctui_g_winch_pipe[0] < 0 && pipe(ctui_g_winch_pipe) == 0) {
+    for (int i = 0; i < 2; i++) {
+      fcntl(ctui_g_winch_pipe[i], F_SETFL,
+            fcntl(ctui_g_winch_pipe[i], F_GETFL) | O_NONBLOCK);
+      fcntl(ctui_g_winch_pipe[i], F_SETFD, FD_CLOEXEC);
+    }
+  }
   struct sigaction sa = {0};
   sa.sa_handler = handle_sigwinch;
   sigemptyset(&sa.sa_mask);

@@ -12,6 +12,12 @@
 /* set (async-signal-safe: just a flag) by handle_sigwinch() in term.c;
  * polled by ctui_input_loop() in input.c */
 extern volatile sig_atomic_t ctui_g_resize_pending;
+/* the handler's wake-up too: a byte written to [1] (non-blocking), [0] in
+ * ctui_input_loop()'s select(). The flag alone isn't enough: a SIGWINCH
+ * between the loop's look at it and select() -- or one taken by another
+ * thread -- interrupts nothing, and the resize waited for the next wake
+ * (seen in ctui-wm's screens once their steps stopped sleeping). -1: none */
+extern int ctui_g_winch_pipe[2];
 
 /* the currently running app, set by ctui_app_init() (app.c); read by
  * ctui_event_register()/ctui_handle_event() (event.c) so registrations

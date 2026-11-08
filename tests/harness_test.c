@@ -13,6 +13,7 @@
 #include "harness/harness.h"
 
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -678,6 +679,7 @@ static void test_pty(void) {
 /* --- an app driven through its nodes ------------------------------------- */
 
 static int toy_downs, toy_busy;
+static volatile int toy_winch; /* raise SIGWINCH at the next wait */
 static char toy_last[16];
 static char toy_text[32];
 static CTUI_ENTRY toy_entry = {.buf = toy_text, .cap = sizeof toy_text};
@@ -712,6 +714,8 @@ static int toy_key(CTUI_WIDGET *self, CTUI_EVENT *ev) {
   CTUI_KEYPRESS_EVENT_DATA *k = ev->event_data;
   if (k->type == CTUI_KEY_DOWN) {
     toy_downs++;
+  } else if (k->type == CTUI_KEY_F2) {
+    toy_winch = 1;
   } else if (k->type == CTUI_KEY_F1) {
     toy_busy = !toy_busy; /* as if work had started on a thread */
   } else if (k->type == CTUI_KEY_CHAR) {
@@ -742,6 +746,10 @@ static int toy_picked(CTUI_WIDGET *w, void *user) {
 
 static int toy_is_busy(void *user) {
   (void)user;
+  if (toy_winch) {
+    toy_winch = 0;
+    raise(SIGWINCH);
+  }
   return toy_busy;
 }
 
@@ -866,6 +874,23 @@ static void test_nodes(void) {
   if (r != 0) {
     printf("%s", dump);
   }
+
+  /* a SIGWINCH between the loop's look at the resize flag and its
+   * select(): the toy raises one from inside the wait hook (its busy()),
+   * the last thing before select(). It used to wake nothing (this toy has
+   * no timers: it slept for ever); the redraw comes at once now */
+  int err;
+  char reply[32];
+  CTUI_TEST_ASSERT(ctui_pty_node_write(p, "ui/input/key", "F2", 2000, &err,
+                                       reply, sizeof reply) == 0 &&
+                       err == 0,
+                   "F2 arms the toy's SIGWINCH");
+  char next[32];
+  snprintf(next, sizeof next, "%d", atoi(reply) + 1);
+  /* (within 300 ms: ui/'s reconnect timer wakes the loop every second) */
+  CTUI_TEST_ASSERT(ctui_pty_until_node(p, "ui/frame", next, 300) == 0,
+                   "a SIGWINCH just before select() is taken: frame %s",
+                   next);
 
   static const CTUI_HARNESS_STEP bye[] = {
       CTUI_HS_NREFUSED("ui/input/key", "esc", ECANCELED), CTUI_HS_ENDED,

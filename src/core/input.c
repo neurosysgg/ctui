@@ -716,6 +716,11 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
         FD_SET(in_fd, &rfds);
         maxfd = in_fd;
       }
+      int winch = ctui_g_winch_pipe[0];
+      if (winch >= 0) {
+        FD_SET(winch, &rfds);
+        maxfd = winch > maxfd ? winch : maxfd;
+      }
       long now = mono_ms();
       long timeout = -1;
       if (tick_ms > 0) {
@@ -767,6 +772,12 @@ int ctui_input_loop(CTUI_EVENT *ev, int tick_ms) {
                     ctui_tick_advance());
         }
         return 1;
+      }
+      if (winch >= 0 && FD_ISSET(winch, &rfds)) {
+        char drain[16];
+        while (read(winch, drain, sizeof drain) > 0) {
+        }
+        continue; /* the flag is set: the resize at the top */
       }
       if (in_fd < 0 || !FD_ISSET(in_fd, &rfds)) {
         if (ctui_io_ready(&rfds, &wfds, &io_data)) {
