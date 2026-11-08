@@ -4,6 +4,7 @@
 
 void ctui_list_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   CTUI_LIST *data = self->widget_data;
+  ctui_widget_drawn(self, "list", data, 0, 0, self->w, self->h);
   ctui_logf(E_INF,
             "[CTUI:LIST] - rendering @ tick %d (%d items, selected=%d, "
             "scroll_offset=%d)\n",

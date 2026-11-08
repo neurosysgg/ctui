@@ -137,6 +137,7 @@ void ctui_tabs_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   CTUI_TABS *t = self->widget_data;
   const CTUI_STYLE *st = ctui_style_of(t->style);
   t->page = self->h;
+  ctui_widget_drawn(self, "tabs", t, 0, 0, self->w, self->h);
   if (!selectable(t, t->selected)) {
     ctui_tabs_select(t, 0);
   }

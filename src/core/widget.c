@@ -481,3 +481,18 @@ void ctui_widget_gfx_reset(void) {
   ctui_logf(E_INF, "[CTUI:WIDGET] - gfx dispatch queue reset @ tick %d\n",
             ctui_tick_advance());
 }
+
+static CTUI_WIDGET_DRAWN_HOOK drawn_hook;
+static void *drawn_arg;
+
+void ctui_widget_drawn_hook(CTUI_WIDGET_DRAWN_HOOK hook, void *arg) {
+  drawn_hook = hook;
+  drawn_arg = arg;
+}
+
+void ctui_widget_drawn(const CTUI_WIDGET *self, const char *kind, void *obj,
+                       int col, int row, int w, int h) {
+  if (drawn_hook) {
+    drawn_hook(kind, obj, self->x + col, self->y + row, w, h, drawn_arg);
+  }
+}

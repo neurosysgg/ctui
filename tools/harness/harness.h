@@ -138,6 +138,7 @@ enum {
   CTUI_HS_OP_NWRITE, /* s "PATH=VALUE" written, answered with errno b */
   CTUI_HS_OP_NWAIT,  /* s "PATH=VALUE": the node reads VALUE within a ms */
   CTUI_HS_OP_NEQ,    /* s "PATH=VALUE": it reads VALUE now, or the run fails */
+  CTUI_HS_OP_NLIST,  /* the nodes under s into the dump, PATH = VALUE */
 };
 
 typedef struct {
@@ -171,6 +172,9 @@ typedef struct {
 #define CTUI_HS_NWAIT_MS(path, value, ms)                                     \
   {CTUI_HS_OP_NWAIT, path "=" value, (ms), 0}
 #define CTUI_HS_NEQ(path, value) {CTUI_HS_OP_NEQ, path "=" value, 0, 0}
+/* the nodes under prefix written where the dumps go ("ui/w": every
+ * widget's), sorted: what the app holds, diffed with its screens */
+#define CTUI_HS_NLIST(prefix) {CTUI_HS_OP_NLIST, (prefix), 0, 0}
 /* the loop had nothing due at its last wait (node/ui.h's ui/idle) */
 #define CTUI_HS_NIDLE {CTUI_HS_OP_NWAIT, "ui/idle=1", 0, 0}
 #define CTUI_HS_END {CTUI_HS_OP_END, NULL, 0, 0}

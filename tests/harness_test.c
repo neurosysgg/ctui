@@ -8,6 +8,8 @@
 
 #include "ctui.h"
 #include "node/ui.h"
+#include "widgets/entry.h"
+#include "widgets/list.h"
 
 #include "ctui_test.h"
 #include "harness/harness.h"
@@ -695,6 +697,8 @@ static void toy_render(CTUI_WIDGET *w, CTUI_COMPOSITOR *comp) {
   ctui_widget_puts(w, comp, 1, 2, line, CTUI_COLOR_CYAN, CTUI_COLOR_DEFAULT);
   snprintf(line, sizeof line, "> %s", toy_text);
   ctui_widget_puts(w, comp, 2, 0, line, CTUI_COLOR_WHITE, CTUI_COLOR_DEFAULT);
+  /* an entry drawn by hand: told as ctui's own widgets tell theirs */
+  ctui_widget_drawn(w, "entry", &toy_entry, 2, 2, w->w - 2, 1);
 }
 
 static void toy_layout(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
@@ -735,8 +739,8 @@ static int toy_mouse(CTUI_WIDGET *self, CTUI_EVENT *ev) {
 }
 
 /* a selection written from outside: as if the user had picked it */
-static int toy_picked(CTUI_WIDGET *w, void *user) {
-  (void)w, (void)user;
+static int toy_picked(void *obj, void *user) {
+  (void)obj, (void)user;
   if (strcmp(toy_items[toy_list.selected].label, "delta") == 0) {
     return EPERM; /* the app's own refusal */
   }
@@ -774,8 +778,8 @@ static int toy_main(void) {
                       ctui_list_handle_keypress);
   ctui_event_register("input", CTUI_MOUSE_EVENT, &lw, toy_mouse);
   CTUI_UI *ui = ctui_ui_auto(&app, "harness-toy");
-  ctui_ui_entry(ui, "search", &w, &toy_entry, CTUI_UI_RDONLY, NULL, NULL);
-  ctui_ui_list(ui, "list", &lw, &toy_list, CTUI_UI_RDWR, toy_picked, NULL);
+  ctui_ui_name(ui, &toy_entry, "search", CTUI_UI_RDONLY, NULL, NULL);
+  ctui_ui_name(ui, &toy_list, "list", CTUI_UI_RDWR, toy_picked, NULL);
   ctui_ui_busy(ui, toy_is_busy, NULL);
   ctui_app_run(&app, screen, 0);
   ctui_ui_close(ui);
@@ -836,7 +840,8 @@ static void test_nodes(void) {
   static const CTUI_HARNESS_STEP widgets[] = {
       CTUI_HS_NEQ("ui/w/search/text", "hé"),
       CTUI_HS_NEQ("ui/w/search/cursor", "3"),
-      CTUI_HS_NEQ("ui/w/search/rect", "0 0 24 3"),
+      CTUI_HS_NEQ("ui/w/search/rect", "2 2 22 1"),
+      CTUI_HS_NEQ("ui/w/search/shown", "1"),
       CTUI_HS_NEQ("ui/w/list/rows", "5"),
       CTUI_HS_NEQ("ui/w/list/selected", "2"),
       CTUI_HS_NEQ("ui/w/list/selected_text", "gamma"),
@@ -852,13 +857,14 @@ static void test_nodes(void) {
       CTUI_HS_NMOUSE("click w/list"),
       CTUI_HS_NEQ("ui/w/list/selected_text", "gamma"),
       CTUI_HS_NREFUSED("ui/input/mouse", "click w/nothing", ENOENT),
-      CTUI_HS_NREFUSED("ui/input/mouse", "click w/list 0 7", ENOENT),
+      CTUI_HS_NREFUSED("ui/input/mouse", "click w/list 0 7", ERANGE),
       CTUI_HS_NKEY("F1"),
       CTUI_HS_NEQ("ui/busy", "1"),
       CTUI_HS_NEQ("ui/idle", "0"),
       CTUI_HS_NKEY("F1"),
       CTUI_HS_NIDLE,
       CTUI_HS_NEQ("ui/busy", "0"),
+      CTUI_HS_NLIST("ui/w/search"),
       CTUI_HS_DUMP,
       CTUI_HS_END};
   dump[0] = '\0';
@@ -874,6 +880,12 @@ static void test_nodes(void) {
   if (r != 0) {
     printf("%s", dump);
   }
+  CTUI_TEST_ASSERT(strstr(dump, "nodes ui/w/search:\n"
+                                "  ui/w/search/cursor = 3\n"
+                                "  ui/w/search/rect = 2 2 22 1\n"
+                                "  ui/w/search/shown = 1\n"
+                                "  ui/w/search/text = h\xc3\xa9\n"),
+                   "NLIST: the nodes under a prefix, sorted, in the dump");
 
   /* a SIGWINCH between the loop's look at the resize flag and its
    * select(): the toy raises one from inside the wait hook (its busy()),

@@ -277,4 +277,20 @@ void ctui_widget_flush_gfx(CTUI_COMPOSITOR *comp);
  * this themselves. */
 void ctui_widget_gfx_reset(void);
 
+/* What a widget draws, told to whoever asked: node/ui.c finds an app's
+ * widgets this way, wherever they're drawn from (a table inside another
+ * widget's render, an entry in a dialog). kind names what obj is ("entry",
+ * "table", "dialog"; a string literal, compared by its text), obj the
+ * widget's own struct, x/y/w/h its cells on the screen. ctui's widgets
+ * call ctui_widget_drawn() from their draw functions; an app's own widget
+ * may too. No hook (the default): one test per draw. */
+typedef void (*CTUI_WIDGET_DRAWN_HOOK)(const char *kind, void *obj, int x,
+                                       int y, int w, int h, void *arg);
+/* hook (NULL: none) called with arg for every draw from now on */
+void ctui_widget_drawn_hook(CTUI_WIDGET_DRAWN_HOOK hook, void *arg);
+/* obj drawn by self at its cells col, row, w x h (local, as
+ * ctui_widget_putc()'s) */
+void ctui_widget_drawn(const CTUI_WIDGET *self, const char *kind, void *obj,
+                       int col, int row, int w, int h);
+
 #endif

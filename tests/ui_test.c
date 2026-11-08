@@ -7,6 +7,12 @@
 #define _GNU_SOURCE
 
 #include "node/ui.h"
+#include "widgets/dialog.h"
+#include "widgets/entry.h"
+#include "widgets/form.h"
+#include "widgets/popmenu.h"
+#include "widgets/table.h"
+#include "widgets/tabs.h"
 
 #include "ctui.h"
 #include "ctui_test.h"
@@ -370,19 +376,116 @@ static const char *tbl_cell(void *ctx, int row, int col, char *scratch,
   return scratch;
 }
 
-static int tbl_changed(CTUI_WIDGET *w, void *user) {
-  (void)w, (void)user;
+/* a closed picker's cells: its rows freed, its count left */
+static int gone_calls;
+static const char *tbl_gone(void *ctx, int row, int col, char *scratch,
+                            size_t cap) {
+  (void)ctx, (void)row, (void)col, (void)scratch, (void)cap;
+  gone_calls++;
+  return "";
+}
+
+static int tbl_changed(void *obj, void *user) {
+  (void)obj, (void)user;
   return 0;
 }
 
-static int always_busy(void *user) {
-  (void)user;
-  return 1;
+/* what the widget test's app draws: a table and tabs from inside its own
+ * render (stack widgets, as apps do), and while `entries` two entries
+ * nobody named */
+static struct {
+  CTUI_TABLE *t;
+  CTUI_TABS *tabs;
+  CTUI_ENTRY e[2];
+  char text[2][16];
+  int entries, no_table;
+  CTUI_DIALOG *dialog;
+  CTUI_FORM *form;
+  CTUI_POPMENU *menu;
+} wt;
+
+static void wt_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  CTUI_WIDGET tw = *self;
+  tw.h = 3;
+  tw.widget_data = wt.t;
+  if (!wt.no_table) {
+    ctui_table_render(&tw, comp);
+  }
+  CTUI_WIDGET sw = *self;
+  sw.y += 3;
+  sw.h = 1;
+  sw.widget_data = wt.tabs;
+  ctui_tabs_render(&sw, comp);
+  for (int i = 0; i < wt.entries; i++) {
+    ctui_entry_draw(self, comp, 0, 10 * i, 8, &wt.e[i], 0);
+  }
+  CTUI_WIDGET whole = ctui_widget_make(0, 0, 30, 6, NULL, wt_render, NULL);
+  whole.buf = comp->cells;
+  if (wt.form) {
+    whole.widget_data = wt.form;
+    ctui_form_render(&whole, comp);
+  }
+  if (wt.dialog) {
+    whole.widget_data = wt.dialog;
+    ctui_dialog_render(&whole, comp);
+  }
+  if (wt.menu) {
+    whole.widget_data = wt.menu;
+    ctui_popmenu_render(&whole, comp);
+  }
 }
 
 static void a_wait(void) {
   CTUI_EVENT ev;
   ctui_input_loop(&ev, 1);
+}
+
+/* everything the daemon side got so far, after a frame and a wait */
+static char *wt_frame(CTUI_APP *app, CTUI_SCREEN *screen, int fd,
+                      CTUI_BUF *got) {
+  free(got->s);
+  *got = (CTUI_BUF){0};
+  if (screen) {
+    ctui_app_render(app, screen);
+  }
+  a_wait();
+  char buf[16384];
+  ssize_t r;
+  while ((r = read(fd, buf, sizeof buf)) > 0) {
+    ctui_buf_add(got, buf, (size_t)r);
+  }
+  if (getenv("UI_TEST_DUMP")) {
+    printf("---\n%s", got->s ? got->s : "");
+  }
+  return got->s ? got->s : "";
+}
+
+/* path's node id as published in all, or -1 */
+static int pub_id(const char *all, const char *path) {
+  char want[160];
+  snprintf(want, sizeof want, ",\"path\":\"%s\"", path);
+  const char *at = strstr(all, want);
+  if (!at) {
+    return -1;
+  }
+  const char *p = at;
+  while (p > all && p[-1] != ':') {
+    p--;
+  }
+  return atoi(p);
+}
+
+static int count_of(const char *all, const char *what) {
+  int n = 0;
+  for (const char *q = all; (q = strstr(q, what)); q++) {
+    n++;
+  }
+  return n;
+}
+
+static int always_busy(void *user) {
+  (void)user;
+  return 1;
 }
 
 static void test_widgets(void) {
@@ -405,38 +508,46 @@ static void test_widgets(void) {
   int fd = accept(lfd, NULL, NULL);
   fcntl(fd, F_SETFL, O_NONBLOCK);
 
-  CTUI_WIDGET w = ctui_widget_make(1, 2, 20, 4, NULL, toy_render, NULL);
-  CTUI_WIDGET *ws[] = {&w};
-  CTUI_APP app;
-  ctui_app_init(&app, ws, 1, 6, 30);
-  ctui_input_set_source(&NONE);
-  CTUI_UI *ui = ctui_ui_open(ns, &app);
   CTUI_TABLE t = {.count = 3, .selected = 1, .cell = tbl_cell};
   static const CTUI_TABS_ITEM items[] = {{"one", 0}, {"two", 0}};
   CTUI_TABS tabs = {.items = items, .count = 2, .selected = 1};
-  CTUI_TEST_ASSERT(ctui_ui_table(NULL, "x", &w, &t, 0, NULL, NULL) == 0,
+  wt.t = &t;
+  wt.tabs = &tabs;
+  for (int i = 0; i < 2; i++) {
+    wt.e[i] = (CTUI_ENTRY){.buf = wt.text[i], .cap = sizeof wt.text[i]};
+  }
+  ctui_entry_set(&wt.e[1], "second");
+  CTUI_WIDGET w = ctui_widget_make(1, 2, 20, 4, NULL, wt_render, NULL);
+  CTUI_WIDGET *ws[] = {&w};
+  CTUI_APP app;
+  ctui_app_init(&app, ws, 1, 6, 30);
+  CTUI_SCREEN *screen = ctui_screen_create(6, 30);
+  ctui_screen_set_sink(screen, &SINK, NULL);
+  ctui_input_set_source(&NONE);
+  CTUI_UI *ui = ctui_ui_open(ns, &app);
+  CTUI_TEST_ASSERT(ctui_ui_name(NULL, &t, "x", 0, NULL, NULL) == 0,
                    "no ui: nothing, no error");
   CTUI_TEST_ASSERT(
-      ctui_ui_table(ui, "tbl", &w, &t, CTUI_UI_RDWR, tbl_changed, NULL) == 0 &&
-          ctui_ui_tabs(ui, "tabs", &w, &tabs, 0, NULL, NULL) == 0,
-      "a table and tabs published");
+      ctui_ui_name(ui, &t, "tbl", CTUI_UI_RDWR, tbl_changed, NULL) == 0 &&
+          ctui_ui_name(ui, &tabs, "tabs", 0, NULL, NULL) == 0,
+      "a table and tabs named");
+  int dummy;
   CTUI_TEST_ASSERT(
-      ctui_ui_tabs(ui, "tabs", &w, &tabs, 0, NULL, NULL) == -1 &&
-          ctui_ui_table(ui, "rw", &w, &t, CTUI_UI_RDWR, NULL, NULL) == -1 &&
-          ctui_ui_table(ui, "bad name", &w, &t, 0, NULL, NULL) == -1,
-      "refused: a name taken, writable without changed(), a bad "
-      "name");
+      ctui_ui_name(ui, &dummy, "tabs", 0, NULL, NULL) == -1 &&
+          ctui_ui_name(ui, &tabs, "again", 0, NULL, NULL) == -1 &&
+          ctui_ui_name(ui, &dummy, "rw", CTUI_UI_RDWR, NULL, NULL) == -1 &&
+          ctui_ui_name(ui, &dummy, "bad name", 0, NULL, NULL) == -1 &&
+          ctui_ui_name(ui, &dummy, "entry/0", 0, NULL, NULL) == -1,
+      "refused: a name taken, a widget named twice, writable without "
+      "changed(), a bad name, a number last (an unnamed one's)");
   CTUI_BUF got = {0};
-  char buf[16384];
-  ssize_t r;
-  a_wait();
-  while ((r = read(fd, buf, sizeof buf)) > 0) {
-    ctui_buf_add(&got, buf, (size_t)r);
-  }
-  const char *all = got.s ? got.s : "";
-  if (getenv("UI_TEST_DUMP")) {
-    fputs(all, stdout);
-  }
+  const char *all = wt_frame(&app, NULL, fd, &got);
+  int shown_id = pub_id(all, "ui/w/tbl/shown");
+  CTUI_TEST_ASSERT(shown_id > 0 && !strstr(all, "ui/w/tbl/rows"),
+                   "named, not drawn yet: only shown (0)");
+  char shown0[64];
+  snprintf(shown0, sizeof shown0, "{\"set\":%d,\"v\":\"0\"}", shown_id);
+  all = wt_frame(&app, screen, fd, &got);
   CTUI_TEST_ASSERT(
       strstr(all, "\"path\":\"ui/w/tbl/rows\"") &&
           strstr(all, "\"v\":\"3\"}") &&
@@ -448,45 +559,159 @@ static void test_widgets(void) {
           strstr(all, "\"v\":\"two\"}") &&
           strstr(all, "\"path\":\"ui/w/tabs/selected\",\"type\":{\"kind\":"
                       "\"int\",\"def\":0}") &&
-          strstr(all, "\"v\":\"1 2 20 4\"}"),
-      "their state on publishing (in the same begin / commit): rows, the "
-      "selection and its text, the label, the rect; the table's selected "
-      "writable, the tabs' not");
-  free(got.s);
-  got = (CTUI_BUF){0};
+          strstr(all, "\"v\":\"1 2 20 3\"}") &&
+          strstr(all, "\"v\":\"1 5 20 1\"}") && !strstr(all, "ui/w/entry"),
+      "drawn: their state (rows, the selection and its text, the label), "
+      "their rects where they were drawn (inside the app's widget); the "
+      "table's selected writable, the tabs' not");
   t.selected = 2;
   tabs.selected = 0;
-  a_wait();
-  while ((r = read(fd, buf, sizeof buf)) > 0) {
-    ctui_buf_add(&got, buf, (size_t)r);
-  }
-  all = got.s ? got.s : "";
-  CTUI_TEST_ASSERT(strstr(all, "\"v\":\"row2\"}") &&
-                       strstr(all, "\"v\":\"one\"}") &&
-                       !strstr(all, "\"v\":\"3\"}"),
-                   "the app moves them: the next wait sends what changed, "
-                   "only that");
+  wt.entries = 2;
+  all = wt_frame(&app, screen, fd, &got);
+  CTUI_TEST_ASSERT(
+      strstr(all, "\"v\":\"row2\"}") && strstr(all, "\"v\":\"one\"}") &&
+          !strstr(all, "\"v\":\"3\"}") &&
+          strstr(all, "\"path\":\"ui/w/entry/0/text\"") &&
+          strstr(all, "\"path\":\"ui/w/entry/1/text\"") &&
+          strstr(all, "\"v\":\"second\"}") &&
+          strstr(all, "\"v\":\"11 2 8 1\"}"),
+      "the app moves them: the next frame sends what changed, only that; "
+      "the unnamed entries drawn as entry/0 and entry/1, in draw order");
+  wt.entries = 0;
+  all = wt_frame(&app, screen, fd, &got);
+  CTUI_TEST_ASSERT(count_of(all, "{\"rm\":") == 2 * 4,
+                   "not drawn: the unnamed entries' nodes go (%d)",
+                   count_of(all, "{\"rm\":"));
+  wt.no_table = 1;
+  t.cell = tbl_gone;
+  all = wt_frame(&app, screen, fd, &got);
+  CTUI_TEST_ASSERT(strstr(all, shown0) && count_of(all, "{\"rm\":") == 0 &&
+                       gone_calls == 0,
+                   "a named one not drawn: shown 0, its nodes kept, its "
+                   "struct not read (a closed picker's rows may be gone)");
+  t.cell = tbl_cell;
   free(got.s);
   got = (CTUI_BUF){0};
+  /* a dialog and a form: what they hold, generated */
+  char name[16] = "Ada", name2[16] = "", ren[16] = "old.txt";
+  CTUI_ENTRY ne = {.buf = name, .cap = sizeof name},
+             ne2 = {.buf = name2, .cap = sizeof name2},
+             re = {.buf = ren, .cap = sizeof ren};
+  static const char *const profiles[] = {"flat", "adaptive"};
+  CTUI_FORM_ROW rows[] = {
+      {.kind = CTUI_FORM_HEADING, .label = "Pointer"},
+      {.kind = CTUI_FORM_ENTRY, .label = "Name", .entry = &ne},
+      {.kind = CTUI_FORM_TOGGLE, .label = "Natural scroll", .value = 1},
+      {.kind = CTUI_FORM_CHOICE,
+       .label = "Accel profile",
+       .value = 1,
+       .options = profiles,
+       .option_count = 2},
+      {.kind = CTUI_FORM_SLIDER,
+       .label = "Repeat rate",
+       .value = 40,
+       .max = 100},
+      {.kind = CTUI_FORM_ENTRY, .label = "Name", .entry = &ne2},
+      {.kind = CTUI_FORM_BUTTON, .label = "Apply"}};
+  CTUI_FORM form = {.rows = rows, .count = 7, .focus = 3};
+  CTUI_DIALOG dlg = {.open = 1,
+                     .title = "Rename",
+                     .text = "A new name:",
+                     .buttons = {"Rename", "Cancel"},
+                     .button_count = 2,
+                     .focus = 1,
+                     .progress = -1,
+                     .entry = &re};
+  CTUI_TEST_ASSERT(ctui_ui_name(ui, &form, "prefs", 0, NULL, NULL) == 0 &&
+                       ctui_ui_name(ui, &dlg, "ask", 0, NULL, NULL) == 0,
+                   "a form and a dialog named");
+  wt.form = &form;
+  wt.dialog = &dlg;
+  all = wt_frame(&app, screen, fd, &got);
+  static const char *const want[][2] = {
+      {"ui/w/ask/title", "Rename"},
+      {"ui/w/ask/text", "A new name:"},
+      {"ui/w/ask/buttons", "Rename|Cancel"},
+      {"ui/w/ask/focus", "Cancel"},
+      {"ui/w/ask/progress", "-1"},
+      {"ui/w/ask/entry", "old.txt"},
+      {"ui/w/prefs/focus", "accel_profile"},
+      {"ui/w/prefs/fields/name", "Ada"},
+      {"ui/w/prefs/fields/natural_scroll", "1"},
+      {"ui/w/prefs/fields/accel_profile", "adaptive"},
+      {"ui/w/prefs/fields/repeat_rate", "40"},
+      {"ui/w/prefs/fields/name_2", ""}};
+  int found = 0;
+  for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
+    char line[160];
+    int id = pub_id(all, want[i][0]);
+    snprintf(line, sizeof line, "{\"set\":%d,\"v\":\"%s\"}", id, want[i][1]);
+    if (id > 0 && (strstr(all, line) || !*want[i][1])) {
+      found++;
+    } else {
+      printf("    %s: not \"%s\" (id %d)\n", want[i][0], want[i][1], id);
+    }
+  }
+  CTUI_TEST_ASSERT(found == (int)(sizeof want / sizeof want[0]) &&
+                       !strstr(all, "ui/w/entry/") &&
+                       !strstr(all, "ui/w/prefs/fields/pointer") &&
+                       !strstr(all, "ui/w/prefs/fields/apply"),
+                   "a dialog's title, text, buttons, focused button, progress "
+                   "and entry; a form's focus and its fields by label (a "
+                   "repeated one _2; headings and buttons not fields); their "
+                   "entries not unnamed ones too");
+  /* the rows change: the fields follow */
+  form.count = 3;
+  rows[2].value = 0;
+  all = wt_frame(&app, screen, fd, &got);
+  CTUI_TEST_ASSERT(count_of(all, "{\"rm\":") == 5 &&
+                       strstr(all, "\"path\":\"ui/w/prefs/fields/name\"") &&
+                       strstr(all, "ui/w/prefs/fields/natural_scroll\""),
+                   "a form's rows changed: its fields republished (%d gone)",
+                   count_of(all, "{\"rm\":"));
+  /* a menu: the open level's items, the cursor's */
+  static const CTUI_POPMENU_ITEM menu_items[] = {
+      {.label = "&Open"},
+      {.flags = CTUI_POPMENU_SEP},
+      {.label = "Copy && paste", .keys = "Ctrl+C"}};
+  CTUI_POPMENU menu = {0};
+  ctui_popmenu_open(&menu, menu_items, 3, 1, 1, 6, 30);
+  menu.level[0].sel = 2;
+  wt.menu = &menu;
+  ctui_ui_name(ui, &menu, "menu", 0, NULL, NULL);
+  all = wt_frame(&app, screen, fd, &got);
+  CTUI_TEST_ASSERT(
+      strstr(all, "\"v\":\"Open|Copy & paste\"}") &&
+          strstr(all, "\"v\":\"Copy & paste\"}"),
+      "a menu's items (no separators, no '&'s) and the cursor's item");
+  wt.menu = NULL;
+  ctui_ui_forget(ui, "menu");
+  all = wt_frame(&app, NULL, fd, &got);
+  CTUI_TEST_ASSERT(count_of(all, "{\"rm\":") == 5,
+                   "forget: the menu's five nodes gone (%d)",
+                   count_of(all, "{\"rm\":"));
+  dlg.open = 0;
+  all = wt_frame(&app, screen, fd, &got);
+  CTUI_TEST_ASSERT(count_of(all, "{\"rm\":") == 0,
+                   "a dialog closed: shown 0, its nodes kept");
+  wt.form = NULL;
+  wt.dialog = NULL;
+  ctui_ui_forget(ui, "prefs");
+  ctui_ui_forget(ui, "ask");
   ctui_ui_forget(ui, "tbl");
+  char buf[16384];
+  ssize_t r;
   while ((r = read(fd, buf, sizeof buf)) > 0) {
     ctui_buf_add(&got, buf, (size_t)r);
   }
   all = got.s ? got.s : "";
-  int rms = 0;
-  for (const char *q = all; (q = strstr(q, "{\"rm\":")); q++) {
-    rms++;
-  }
-  CTUI_TEST_ASSERT(rms == 5, "forget: its five nodes removed (%d)", rms);
-  free(got.s);
+  CTUI_TEST_ASSERT(count_of(all, "{\"rm\":") == 5 + 8 + 6,
+                   "forget: the form's, the dialog's and the table's nodes "
+                   "removed (%d)",
+                   count_of(all, "{\"rm\":"));
   /* the app busy: ui/busy 1, ui/idle 0 though nothing is due */
   ctui_ui_busy(ui, always_busy, NULL);
-  got = (CTUI_BUF){0};
-  a_wait();
-  while ((r = read(fd, buf, sizeof buf)) > 0) {
-    ctui_buf_add(&got, buf, (size_t)r);
-  }
-  all = got.s ? got.s : "";
+  all = wt_frame(&app, NULL, fd, &got);
   /* (idle was 0 already: this loop's 1 ms tick is due within 50 ms) */
   CTUI_TEST_ASSERT(strstr(all, "{\"set\":3,\"v\":\"1\"}") &&
                        !strstr(all, "{\"set\":2,\"v\":\"1\"}"),
@@ -495,6 +720,7 @@ static void test_widgets(void) {
   ctui_ui_close(ui);
   ctui_nodes_close(ns);
   ctui_input_set_source(NULL);
+  ctui_screen_free(screen);
   ctui_app_free(&app);
   close(fd);
   close(lfd);

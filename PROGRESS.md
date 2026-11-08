@@ -237,6 +237,42 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The widgets found as they're drawn** (2026-11-08, ctui-wm session
+  324, notes/ui-nodes.md w1-w2 there). Naming a widget by its
+  `CTUI_WIDGET` didn't hold: most tables and every entry are drawn from
+  inside another widget's render (a stack widget, `ctui_entry_draw()` at
+  a row), so their rect was the enclosing widget's, and dialogs and forms
+  come and go. Now the widgets say what they draw: `core/widget.h`'s
+  `ctui_widget_drawn(self, kind, obj, col, row, w, h)`, called by table,
+  entry, list, tabs, dialog (its box), form, textview and popmenu (its
+  first level), to a hook (`ctui_widget_drawn_hook()`, NULL by default:
+  one test per draw). `node/ui.c` keeps a frame's draws (the last place of a
+  struct drawn twice) and matches them at the wait: `ctui_ui_name(ui,
+  obj, name, flags, changed, user)` names a struct -- kind and rect come
+  from its draws, `ui/w/NAME/shown` 1 while drawn in the last frame (0
+  and kept when not; its other nodes once it has been) --, the four
+  `ctui_ui_entry/table/list/tabs()` gone (`CTUI_UI_CHANGED` takes the
+  struct). Every app gets the rest for free as `ui/w/KIND/N`, the Nth
+  unnamed KIND drawn, there while drawn (a name whose last part is a
+  number is refused for that). Generated nodes: a dialog's `title`,
+  `text`, `buttons` ("Rename|Cancel"), `focus` (the label), `progress`,
+  `entry`; a form's `focus` and `fields/NAME` by label ("Repeat rate" ->
+  `repeat_rate`, a repeat `_2`; an entry's text, a toggle's 0/1, a
+  choice's option, a slider's value; republished when the rows change);
+  a popmenu's `items`, `focus`, `depth`; an entry inside a drawn form or
+  dialog is theirs, not an unnamed one too. `click w/NAME` refuses one not
+  shown (ENXIO) or a cell outside it (ERANGE). The harness:
+  `ctui_hnodes_list()` and `CTUI_HS_NLIST(prefix)`, the nodes under a
+  prefix into the dump, sorted (`PATH = VALUE`), so a screens case shows
+  what the app holds beside what it drew. A widget's struct is read only
+  at the wait right after a frame that drew it, one not drawn keeping its
+  last values: ctui-settings' keyboard-layout picker, named, crashed once
+  closed (its rows freed, its table's count left; ASan in ctui-wm's
+  screens), and ui_test now checks a named table not drawn isn't read.
+  `ctui_ui_slug()` names things as a form's fields are ("page/keyboard"
+  from a title). The widgets' half is `node/ui_widgets.c`, the state both
+  share `ui_internal.h`. tests/ui_test.c 31 -> 41, harness_test's toy
+  reports its hand-drawn entry; 32 suites.
 - [x] **A resize lost before select()** (2026-11-08, ctui-wm session 323:
   its screens, once their steps stopped sleeping, caught ctui-vms not
   redrawing after a resize). The SIGWINCH handler only set a flag, which

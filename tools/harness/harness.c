@@ -665,6 +665,15 @@ int ctui_harness_steps(CTUI_PTY *p, const CTUI_HARNESS_STEP *steps, FILE *out,
       }
       ctui_pty_dump(p, out, styles);
       break;
+    case CTUI_HS_OP_NLIST:
+      if (!p->nodes) {
+        fprintf(out, "!! nodes %s: the app has no nodes\n", s->s);
+        return -1;
+      }
+      ctui_hnodes_pump(p->nodes);
+      fprintf(out, "nodes %s:\n", s->s);
+      ctui_hnodes_list(p->nodes, s->s, out);
+      break;
     case CTUI_HS_OP_NKEY:
     case CTUI_HS_OP_NTEXT:
     case CTUI_HS_OP_NMOUSE:

@@ -106,6 +106,7 @@ void ctui_dialog_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
           (d->button_count > 0) + (parts > 1 ? parts - 1 : 0);
   h = h > self->h ? self->h : h;
   int x = (self->w - iw - 4) / 2, y = (self->h - h) / 2, w = iw + 4;
+  ctui_widget_drawn(self, "dialog", d, x, y, w, h);
   unsigned char fg = st->fg, bg = st->bg, dim = st->dim_fg;
 
   int tw = d->title && d->title[0] ? ctui_utf8_width(d->title) + 2 : 0;

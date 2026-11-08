@@ -268,10 +268,11 @@ row that isn't plain: where its colours and attributes change. Not linked into a
 and ctui-wm's and ctui-mus's screens runners link it.
 With `CTUI_PTY_SPAWN.nodes` the harness is also the app's control-nodes
 daemon (`hnodes.c`): an app on `node/ui.h` publishes `ui/` (its rows,
-input as triggers, named widgets), the `CTUI_HS_N*` steps write and wait
-on those (`CTUI_HS_NKEY("ctrl+f")` returns once the key's frame is
-drawn: no QUIET), and every DUMP checks the grid against what the app
-says it drew. `tools/harness/capture.py` remakes
+input as triggers, its widgets as they're drawn -- named or KIND/N), the
+`CTUI_HS_N*` steps write and wait on those (`CTUI_HS_NKEY("ctrl+f")`
+returns once the key's frame is drawn: no QUIET), `CTUI_HS_NLIST("ui/w")`
+lists nodes into the dump, and every DUMP checks the grid against what
+the app says it drew. `tools/harness/capture.py` remakes
 `tests/data/harness/` (examples' output and pty_harness.py's grid of it,
 which the C parser has to match).
 

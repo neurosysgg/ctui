@@ -12,6 +12,7 @@
  * when its fds are readable. */
 
 #include <poll.h>
+#include <stdio.h>
 
 typedef struct CTUI_HNODES CTUI_HNODES;
 
@@ -32,6 +33,9 @@ int ctui_hnodes_pump(CTUI_HNODES *h);
 const char *ctui_hnodes_get(const CTUI_HNODES *h, const char *path);
 /* how many nodes are published, over every app */
 int ctui_hnodes_count(const CTUI_HNODES *h);
+/* the nodes under prefix ("ui/w": its own path and below), a line each
+ * "  PATH = VALUE" sorted by path, a newline in a value as \n: how many */
+int ctui_hnodes_list(const CTUI_HNODES *h, const char *prefix, FILE *out);
 
 /* text written to path: the request's number (> 0), -1 when no app has
  * it. The answer comes with a later pump. */

@@ -202,6 +202,7 @@ void ctui_entry_draw(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
   if (width <= 0) {
     return;
   }
+  ctui_widget_drawn(self, "entry", e, col, row, width, 1);
   if (e->cursor > strlen(e->buf)) {
     e->cursor = strlen(e->buf);
   }

@@ -411,6 +411,9 @@ void ctui_popmenu_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   }
   const CTUI_STYLE *st = ctui_style_of(m->style);
   ctui_popmenu_layout(m, comp->rows, comp->cols);
+  /* the menu's first level (a submenu is inside its items) */
+  ctui_widget_drawn(self, "popmenu", m, m->level[0].x - self->x,
+                    m->level[0].y - self->y, m->level[0].w, m->level[0].h);
   CTUI_CELL text =
       ctui_style_cell(st, CTUI_STYLE_FG, CTUI_STYLE_BG, st->fg, st->bg);
   CTUI_CELL dim =

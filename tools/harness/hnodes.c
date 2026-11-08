@@ -301,6 +301,53 @@ int ctui_hnodes_count(const CTUI_HNODES *h) {
   return n;
 }
 
+static int by_path(const void *a, const void *b) {
+  return strcmp((*(NODE *const *)a)->path, (*(NODE *const *)b)->path);
+}
+
+int ctui_hnodes_list(const CTUI_HNODES *h, const char *prefix, FILE *out) {
+  size_t pl = strlen(prefix);
+  NODE **all = NULL;
+  int n = 0, cap = 0;
+  for (int c = 0; c < h->nconns; c++) {
+    const CONN *k = &h->conns[c];
+    for (int i = 0; k->fd >= 0 && i < k->n; i++) {
+      NODE *nd = &k->nodes[i];
+      if (strncmp(nd->path, prefix, pl) != 0 ||
+          (nd->path[pl] && nd->path[pl] != '/' && pl > 0) ||
+          find(h, nd->path, NULL) != nd) { /* a newer app's has it */
+        continue;
+      }
+      if (n == cap) {
+        cap = cap ? cap * 2 : 64;
+        NODE **a = realloc(all, (size_t)cap * sizeof *a);
+        if (!a) {
+          free(all);
+          return -1;
+        }
+        all = a;
+      }
+      all[n++] = nd;
+    }
+  }
+  if (n > 1) {
+    qsort(all, (size_t)n, sizeof *all, by_path);
+  }
+  for (int i = 0; i < n; i++) {
+    fprintf(out, "  %s = ", all[i]->path);
+    for (const char *t = all[i]->text ? all[i]->text : ""; *t; t++) {
+      if (*t == '\n') {
+        fputs("\\n", out);
+      } else {
+        fputc(*t, out);
+      }
+    }
+    fputc('\n', out);
+  }
+  free(all);
+  return n;
+}
+
 int ctui_hnodes_write(CTUI_HNODES *h, const char *path, const char *text) {
   int c;
   NODE *n = find(h, path, &c);

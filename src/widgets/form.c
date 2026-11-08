@@ -641,6 +641,7 @@ void ctui_form_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   CTUI_FORM *f = self->widget_data;
   const CTUI_STYLE *st = ctui_style_of(f->style);
   f->page = self->h;
+  ctui_widget_drawn(self, "form", f, 0, 0, self->w, self->h);
   f->control_col = 2 + label_width(f) + 2;
   if (f->count > 0 && (f->focus < 0 || f->focus >= f->count ||
                        !takes_focus(&f->rows[f->focus]))) {

@@ -233,6 +233,7 @@ void ctui_table_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   if (self->w <= 0) {
     return;
   }
+  ctui_widget_drawn(self, "table", t, 0, 0, self->w, self->h);
   int cols = ctui_table_width(t, self->w, self->h);
   int row = 0;
   if (t->header && self->h > 0) {

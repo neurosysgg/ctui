@@ -2,10 +2,6 @@
 #define CTUI_NODE_UI_H
 
 #include "../ctui.h"
-#include "../widgets/entry.h"
-#include "../widgets/list.h"
-#include "../widgets/table.h"
-#include "../widgets/tabs.h"
 #include "node.h"
 
 /* An app's UI as control nodes, for whatever drives it from outside (a
@@ -44,22 +40,56 @@
  * grammar is EINVAL; more than the queue takes, EAGAIN. Resizes stay the
  * terminal's (its pty).
  *
- * Widgets the app names are published under ui/w/NAME/ -- the selectors:
- * what a widget holds rather than where its text happens to be. Their
- * state is read at every wait (a widget is the app's plain struct, with
- * no hook of its own), so a value changes once a frame and only when it
- * did:
+ * Widgets are found as they're drawn: ctui's widgets tell what they draw
+ * (core/widget.h's ctui_widget_drawn(): a table inside another widget's
+ * render, an entry in a dialog), and each one is published under ui/w/ --
+ * the selectors: what a widget holds rather than where its text happens to
+ * be. The app names the ones a test should find by name
+ * (ctui_ui_name(): ui/w/NAME/); the others are ui/w/KIND/N, the Nth
+ * unnamed KIND drawn in the last frame ("table/0", "entry/2"), there
+ * while they're drawn -- usable, but not stable across versions of the
+ * app. Their state is read at the wait after a frame that drew them (a
+ * widget is the app's plain struct, with no hook of its own; what its draw
+ * read is there then), so a value changes once a frame and only when it
+ * did, and a widget not drawn keeps its last values:
  *
- *   rect                 every one: "X Y W H", its cells on the screen
- *   text                 an entry's text (cursor: its byte offset)
+ *   shown                every one: 1 while drawn in the last frame (a
+ *                        named one not drawn: 0, and its other nodes
+ *                        only once it has been)
+ *   rect                 "X Y W H", its cells on the screen when last
+ *                        drawn (a dialog's: its box)
+ *   text, cursor         an entry's text, the cursor's byte offset
  *   rows, selected,      a table's or list's row count, the cursor row
  *   selected_text, top   (-1: none), that row's first column, the first
  *                        row shown
- *   selected, label      tabs: the selected item, its label
+ *   rows, selected,      tabs: the items, the selected one, its label
+ *   label
  *
- * Read-only unless published CTUI_UI_RDWR, like open(2)'s flags: then
- * text and selected take writes, applied to the widget and handed to the
- * app's changed() (it acts on them as on the user's own: a new selection
+ * A dialog's and a form's own:
+ *
+ *   title, text, buttons a dialog's title, text, its buttons' labels
+ *                        "Rename|Cancel"
+ *   focus                the focused button's label; a form's focused
+ *                        row's field name (a button's label); a menu's
+ *                        item under the cursor ("" none)
+ *   progress, entry      a dialog's bar (-1: none), what its line holds
+ *   fields/NAME          a form's rows by label, letters and digits in
+ *                        lower case and the rest '_' ("Repeat rate":
+ *                        fields/repeat_rate; a repeated one _2, ...):
+ *                        an entry's text, a toggle's 0 / 1, a choice's
+ *                        option, a slider's value; republished when the
+ *                        rows change. Headings and buttons aren't fields.
+ *   items, depth         a popmenu's open level's labels "Open|Copy" (no
+ *                        separators, no '&'s), the levels open
+ *
+ * An entry inside a drawn form or dialog is theirs (fields/NAME, entry),
+ * not an unnamed one too. Other kinds (textview, an app's own) have shown
+ * and rect. "click w/NAME" refuses a widget not shown (ENXIO), a cell
+ * outside it (ERANGE).
+ *
+ * Read-only unless named CTUI_UI_RDWR, like open(2)'s flags: then text
+ * and selected take writes, applied to the widget and handed to the app's
+ * changed() (it acts on them as on the user's own: a new selection
  * previewed, a search run), answered after the frame as input is. Driving
  * the widget through input tests its keys too; a write sets things up. */
 
@@ -93,24 +123,26 @@ enum {
   CTUI_UI_RDWR = 1,   /* writes taken too (changed() is then required) */
 };
 
-/* after a write to a CTUI_UI_RDWR widget's node, the widget already
- * changed: 0, or an errno the writer gets (the app refused it) */
-typedef int (*CTUI_UI_CHANGED)(CTUI_WIDGET *w, void *user);
+/* after a write to a CTUI_UI_RDWR widget's node, the widget (obj, as
+ * named) already changed: 0, or an errno the writer gets (the app refused
+ * it) */
+typedef int (*CTUI_UI_CHANGED)(void *obj, void *user);
 
-/* w (drawn from the widget's own struct, the second argument) published
- * as ui/w/NAME/ (name: a node path of its own, "files" or "dialog/name").
- * NULL ui: nothing (an app whose ui/ is off). 0, or -1 (logged): a name
- * taken or bad, RDWR without changed(). The structs must outlive ui, or
- * be let go of first (ctui_ui_forget()). */
-int ctui_ui_entry(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_ENTRY *e,
-                  unsigned flags, CTUI_UI_CHANGED changed, void *user);
-int ctui_ui_table(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_TABLE *t,
-                  unsigned flags, CTUI_UI_CHANGED changed, void *user);
-int ctui_ui_list(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_LIST *l,
-                 unsigned flags, CTUI_UI_CHANGED changed, void *user);
-int ctui_ui_tabs(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_TABS *t,
-                 unsigned flags, CTUI_UI_CHANGED changed, void *user);
-/* name's nodes removed (a dialog's widgets as it closes) */
+/* the widget whose struct is obj (a CTUI_TABLE, CTUI_ENTRY, ...: what its
+ * draw is given) published as ui/w/NAME/ (name: a node path of its own,
+ * "files" or "dialog/name", its last part not a number); its kind and
+ * place come from its draws. NULL ui: nothing (an app whose ui/ is off). 0,
+ * or -1 (logged): a name taken or bad, obj named already, RDWR without
+ * changed(). obj must outlive ui, or be let go of first
+ * (ctui_ui_forget()). */
+int ctui_ui_name(CTUI_UI *ui, void *obj, const char *name, unsigned flags,
+                 CTUI_UI_CHANGED changed, void *user);
+/* label as a node name, the way a form's fields are named: letters and
+ * digits kept, lower case, the rest one '_' ("Repeat rate" ->
+ * "repeat_rate"), at most 40 bytes; "" for none */
+void ctui_ui_slug(const char *label, char *out, size_t cap);
+
+/* name's nodes removed (a dialog's widgets as it's freed) */
 void ctui_ui_forget(CTUI_UI *ui, const char *name);
 
 #endif

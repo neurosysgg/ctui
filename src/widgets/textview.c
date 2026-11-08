@@ -310,6 +310,7 @@ void ctui_textview_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   CTUI_TEXTVIEW *tv = self->widget_data;
   const CTUI_STYLE *st = ctui_style_of(tv->style);
   tv->page = self->h;
+  ctui_widget_drawn(self, "textview", tv, 0, 0, self->w, self->h);
   tv->bar_shown = self->w > 1 && self->h > 0 && st->control && tv->lines &&
                   overflows(tv, self->w, self->h);
   int w = self->w - tv->bar_shown;

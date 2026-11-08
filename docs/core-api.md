@@ -313,6 +313,13 @@ ever set; every other widget leaves both `NULL`.
   machinery (Kitty images and whatever comes after). See
   `docs/protocol.md`'s "Non-degradable protocols" section before
   touching these; almost no widget needs them.
+- `ctui_widget_drawn(self, kind, obj, col, row, w, h)` — "self drew obj
+  (a `"table"`, an `"entry"`, ...: its own struct) at these local
+  cells". ctui's widgets call it from their draw functions (table, entry,
+  list, tabs, dialog, form, textview, popmenu); an app's own widget may
+  too. It goes to the hook `ctui_widget_drawn_hook(fn, arg)` set
+  (absolute cells), or nowhere: one test per draw. `node/ui.h` is its user,
+  finding an app's widgets wherever they're drawn from.
 
 ## `event.h` — the event registry
 
