@@ -21,6 +21,17 @@ typedef enum {
   W_POPMENU
 } W_KIND;
 
+/* typed writes a widget holds waiting for their frame */
+#define TYPED_MAX 8
+
+/* a typed write's answer waiting: checked against what n reads then */
+typedef struct {
+  CTUI_NODE_LATER later;
+  CTUI_NODE *n;
+  char *want; /* what n should read once its keys are handled, or NULL */
+  unsigned frame; /* the frames drawn when it was written */
+} TYPED;
+
 /* a widget published under ui/w/NAME/: named by the app
  * (ctui_ui_name()), or one it drew without a name as KIND/N */
 typedef struct {
@@ -35,12 +46,20 @@ typedef struct {
   void *user;
   int shown, seen;
   int x, y, w, h; /* its cells when last drawn */
+  int order;      /* its place among the last frame's draws */
   CTUI_NODE *shown_n, *rect, *text, *cursor, *rows, *selected, *selected_text,
-      *top, *label, *title, *buttons, *focus, *progress, *entry, *items, *depth;
-  /* a form's fields/LABEL, as published */
+      *top, *label, *title, *buttons, *focus, *progress, *entry, *items, *depth,
+      *columns, *find, *press;
+  /* a form's fields/LABEL (writable: typed), a table's cells/COLUMN, as
+   * published */
   CTUI_NODE **fields;
   char **field_names;
   int nfields;
+  /* a table's view/N: the rows on screen */
+  CTUI_NODE **view;
+  int nview;
+  TYPED typed[TYPED_MAX];
+  int ntyped;
 } UIW;
 
 /* a frame's draws (ctui_widget_drawn()) */
@@ -87,6 +106,10 @@ extern const CTUI_NODE_TYPE ctui_ui_t_flag, ctui_ui_t_text;
 /* n's answer held for the frame (ui.c): 0, EBUSY when too many wait */
 int ctui_ui_hold(CTUI_UI *ui, CTUI_NODE *n);
 
+/* keys posted as input/key's are: 0, EAGAIN (no room for them all: none
+ * posted) */
+int ctui_ui_post_keys(const CTUI_KEYPRESS_EVENT_DATA *keys, int count);
+
 /* --- ui_widgets.c --- */
 
 /* the widget hook: obj drawn in the frame being drawn */
@@ -99,6 +122,9 @@ void ctui_ui_widgets_sync(CTUI_UI *ui);
  * it) */
 int ctui_ui_widget_cell(CTUI_UI *ui, const char *path, size_t len, int dc,
                         int dr, int *x, int *y);
+/* at a wait, after the sync: the typed writes answered (their keys are
+ * handled by then, and drawn) */
+void ctui_ui_widgets_answer(CTUI_UI *ui);
 /* every widget's state freed (its nodes go with ui's) */
 void ctui_ui_widgets_free(CTUI_UI *ui);
 

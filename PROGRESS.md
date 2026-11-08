@@ -237,6 +237,47 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Dialogs and forms written through ui/** (2026-11-08, ctui-wm
+  session 326, notes/ui-nodes.md). A dialog's `entry` and new `press` (a
+  button by its label), a form's `fields/NAME` and new `press` take writes
+  whatever the naming flags: they're typed as keys, posted as
+  `input/key`'s are, because the apps act on what `ctui_form_key()` /
+  `ctui_dialog_key()` return, so state set directly would go unseen. The
+  focus walked to the row (up / down, the shorter way round: the form
+  wraps), then a toggle's space if it differs, a choice's left / right to
+  the option, a slider's steps (home / end at its ends; EINVAL off its
+  steps, ERANGE outside), an entry's ctrl+e ctrl+u and the text; a press
+  focuses the button (a dialog's set directly: Tab only redraws) and sends
+  Enter. Refused: ENXIO not shown or a closed dialog, ENOENT no such
+  button / option, EPERM a disabled row, EBUSY a form under an open dialog
+  drawn over it in the last frame (its keys would be the dialog's; ui_test
+  saw the dialog's Enter pick Cancel) or with a choice's list down. The
+  keys go where the app sends keys, which no widget can know (settings'
+  pages: the sidebar has them until Enter), so the answer checks: held in
+  the widget (`TYPED`, freed with it -- an unnamed dialog closed by its
+  press is freed that very frame) until the wait after the keys' frame,
+  then EIO if nothing was drawn since or, for a value, the node doesn't
+  read what was written. `ctui_ui_post_keys()` shared with ui.c,
+  `ctui_ui_widgets_answer()` called at each wait. tests/ui_test.c 43 ->
+  49 (its app routes keys as apps do: the dialog while open, else the
+  form).
+- [x] **A table's nodes by column** (2026-11-08, ctui-wm session 326,
+  notes/ui-nodes.md). `ui/w/NAME/` of a table now has `columns` (its
+  titles, "Name|Size|Modified"), `cells/COL` (the cursor row's cell per
+  column, named by title as a form's fields are, `colN` untitled),
+  `view/N` (the rows on screen, cells joined by tabs) and, named
+  `CTUI_UI_RDWR`, a writable `find`: "COLUMN=TEXT" (a cells/ name or a
+  column's number) selects the first row whose cell there is TEXT,
+  through `changed()` as `selected` does (ENOENT none, EINVAL no '=').
+  Only the rows on screen are asked of `cell()`, so a 100 000-row table
+  costs what drawing it does; `find` walks every row, but only when
+  written. Measured under callgrind over ctui-files' screens (a new case
+  in many/'s 2000 files): `ctui_ui_widgets_sync` 2.47M -> 1.79M
+  instructions on `nav` once `view/N` grew and shrank at its tail instead
+  of being republished whole (and a line copied, not `snprintf`'d) --
+  about one table render (2.04M); two finds over 2000 rows 2.16M. A
+  form's `fields/` and a table's `cells/` share `sync_names()`.
+  tests/ui_test.c 41 -> 43.
 - [x] **ui/'s screen rows cheaper per frame** (2026-11-08, ctui-wm session
   325, notes/ui-nodes.md w4). Measured under callgrind over ctui-top's
   ten screens cases with `ui/` on: the draw hook is free (6.6k

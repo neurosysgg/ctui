@@ -131,6 +131,7 @@ static void on_wait(void *ctx, long timeout_ms) {
     }
     ui->nlater = 0;
   }
+  ctui_ui_widgets_answer(ui);
   if (ui->own) {
     sync_watch(ui);
   }
@@ -156,6 +157,16 @@ int ctui_ui_hold(CTUI_UI *ui, CTUI_NODE *n) {
   }
   if (ctui_node_defer(n, &ui->later[ui->nlater]) == 0) {
     ui->nlater++;
+  }
+  return 0;
+}
+
+int ctui_ui_post_keys(const CTUI_KEYPRESS_EVENT_DATA *keys, int count) {
+  if (ctui_input_posted() + count > CTUI_INPUT_POST_MAX) {
+    return EAGAIN;
+  }
+  for (int i = 0; i < count; i++) {
+    post_key(&keys[i]);
   }
   return 0;
 }

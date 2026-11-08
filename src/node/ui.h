@@ -65,6 +65,22 @@
  *   rows, selected,      tabs: the items, the selected one, its label
  *   label
  *
+ * A table's by column (asked of its cell() as its render does, for the
+ * rows on screen only: a 100 000-row table costs what drawing it does):
+ *
+ *   columns              its titles "Name|Size|Modified"
+ *   cells/NAME           the cursor row's cell in each column, named by
+ *                        title like a form's fields (cells/name; "col2"
+ *                        for an untitled one)
+ *   view/N               the Nth row on screen (N from 0; row top + N), its
+ *                        cells joined by tabs; republished as the page
+ *                        grows or shrinks
+ *   find                 named CTUI_UI_RDWR only: "COLUMN=TEXT" (a cells/
+ *                        name or a column's number) selects the first row
+ *                        whose cell there is TEXT, through changed() as
+ *                        selected's writes go; ENOENT for no such row or
+ *                        column, EINVAL without '='
+ *
  * A dialog's and a form's own:
  *
  *   title, text, buttons a dialog's title, text, its buttons' labels
@@ -83,13 +99,32 @@
  *                        separators, no '&'s), the levels open
  *
  * An entry inside a drawn form or dialog is theirs (fields/NAME, entry),
- * not an unnamed one too. Other kinds (textview, an app's own) have shown
+ * not an unnamed one too.
+ *
+ * A dialog's entry and press and a form's fields/NAME and press take
+ * writes whatever the flags: they're typed as keys, as input/key's are,
+ * so the app's own handling of the keys runs (most apps act on what
+ * ctui_form_key() / ctui_dialog_key() return). A field's value as it
+ * reads: an entry's text (ctrl+e ctrl+u, then the text), a toggle's 0 / 1
+ * (space if it differs), a choice's option (left / right), a slider's
+ * value (its steps, home / end at the ends); the focus walked to the row
+ * first (up / down). press: a button by its label (the focus put on it,
+ * Enter). Refused: ENXIO not shown (a dialog: not open), ENOENT no such
+ * button / option, EINVAL a value it can't take (a toggle's 2, a slider
+ * off its steps), ERANGE a slider outside its range, EPERM a disabled
+ * row, EBUSY a form under an open dialog (drawn over it in the last
+ * frame: the keys would be the dialog's) or with a choice's list down,
+ * EAGAIN more keys than the queue takes. The keys go where the app sends
+ * keys, so a test puts the focus in the form first (a pane beside it may
+ * have them): answered after their frame, a write that didn't take is
+ * EIO -- the field not reading what was written then, or nothing drawn
+ * since (a press: nothing drawn). Other kinds (textview, an app's own) have shown
  * and rect. "click w/NAME" refuses a widget not shown (ENXIO), a cell
  * outside it (ERANGE).
  *
- * Read-only unless named CTUI_UI_RDWR, like open(2)'s flags: then text
- * and selected take writes, applied to the widget and handed to the app's
- * changed() (it acts on them as on the user's own: a new selection
+ * Read-only unless named CTUI_UI_RDWR, like open(2)'s flags: then text,
+ * selected and find take writes, applied to the widget and handed to the
+ * app's changed() (it acts on them as on the user's own: a new selection
  * previewed, a search run), answered after the frame as input is. Driving
  * the widget through input tests its keys too; a write sets things up. */
 

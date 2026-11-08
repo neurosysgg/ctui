@@ -143,12 +143,69 @@ static int widget_rows(const UIW *u) {
   }
 }
 
+static void col_name(const CTUI_TABLE *t, int col, char *out, size_t cap);
+
+/* a table's cell, "" for none (a spanning row has column 0 only) */
+static const char *cell_text(const CTUI_TABLE *t, int row, int col,
+                             char *scratch, size_t cap) {
+  if (!t->cell || (col > 0 && t->row_span && t->row_span(t->ctx, row))) {
+    return "";
+  }
+  const char *s = t->cell(t->ctx, row, col, scratch, cap);
+  return s ? s : "";
+}
+
+/* "COLUMN=TEXT" (a cells/ name or a column's number): the first row whose
+ * cell there is TEXT selected; EINVAL, ENOENT (no such column or row) */
+static int table_find(CTUI_TABLE *t, const char *s) {
+  const char *eq = strchr(s, '=');
+  if (!eq || eq == s) {
+    return EINVAL;
+  }
+  size_t klen = (size_t)(eq - s);
+  int col = -1;
+  for (int c = 0; c < t->column_count && col < 0; c++) {
+    char name[48];
+    col_name(t, c, name, sizeof name);
+    if (strlen(name) == klen && memcmp(name, s, klen) == 0) {
+      col = c;
+    }
+  }
+  if (col < 0 && strspn(s, "0123456789") == klen && klen < 6) {
+    col = atoi(s);
+    if (col >= t->column_count && !(col == 0 && t->column_count == 0)) {
+      return ENOENT;
+    }
+  }
+  if (col < 0) {
+    return ENOENT;
+  }
+  for (int r = 0; r < t->count; r++) {
+    char scratch[512];
+    if (strcmp(cell_text(t, r, col, scratch, sizeof scratch), eq + 1) == 0) {
+      ctui_table_select(t, r);
+      return 0;
+    }
+  }
+  return ENOENT;
+}
+
+static int typed_write(UIW *u, CTUI_NODE *n, const char *v);
+
 static int widget_write(CTUI_NODE *n, const CTUI_NODE_VALUE *v, CTUI_BUF *reply,
                         void *user) {
   (void)reply;
   UIW *u = user;
   CTUI_UI *ui = u->ui;
-  if (n == u->text) {
+  if (u->kind == W_DIALOG || u->kind == W_FORM) {
+    return typed_write(u, n, v->s); /* keys: the app's own handling */
+  }
+  if (n == u->find) {
+    int err = table_find(u->obj, v->s);
+    if (err) {
+      return err;
+    }
+  } else if (n == u->text) {
     CTUI_ENTRY *e = u->obj;
     if (v->len >= e->cap) {
       return E2BIG;
@@ -233,6 +290,13 @@ static CTUI_NODE *wnode(UIW *u, const char *leaf, const CTUI_NODE_TYPE *ro,
                             u->name, leaf);
 }
 
+/* a node whose writes are typed as keys: writable whatever the flags,
+ * as input/key is */
+static CTUI_NODE *wnode_typed(UIW *u, const char *leaf) {
+  return ctui_node_publishf(u->ui->ns, &TEXT_RW, &WIDGET_OPS, u, "ui/w/%s/%s",
+                            u->name, leaf);
+}
+
 /* form row's field name: its label's slug ("row3" without one), _2, _3,
  * ... when an earlier field's is the same */
 static void field_name(const CTUI_FORM *f, int row, char *out, size_t cap) {
@@ -255,6 +319,27 @@ static void field_name(const CTUI_FORM *f, int row, char *out, size_t cap) {
   }
 }
 
+/* a table column's cells/ name: its title's slug ("col3" without one), _2,
+ * _3, ... when an earlier one's is the same */
+static void col_name(const CTUI_TABLE *t, int col, char *out, size_t cap) {
+  const char *title = t->columns ? t->columns[col].title : NULL;
+  ctui_ui_slug(title, out, cap);
+  if (!*out) {
+    snprintf(out, cap, "col%d", col);
+    return;
+  }
+  int same = 1;
+  for (int c = 0; c < col; c++) {
+    char other[48];
+    ctui_ui_slug(t->columns[c].title, other, sizeof other);
+    same += strcmp(other, out) == 0;
+  }
+  size_t o = strlen(out);
+  if (same > 1 && o + 4 < cap) {
+    snprintf(out + o, cap - o, "_%d", same);
+  }
+}
+
 static void fields_free(UIW *u) {
   for (int i = 0; i < u->nfields; i++) {
     if (u->fields[i]) {
@@ -269,46 +354,51 @@ static void fields_free(UIW *u) {
   u->nfields = 0;
 }
 
+/* u->fields as DIR/NAME for the n names: republished when they changed */
+static void sync_names(UIW *u, const char *dir, char (*names)[48], int n,
+                       int typed) {
+  int same = n == u->nfields;
+  for (int i = 0; same && i < n; i++) {
+    same = strcmp(u->field_names[i], names[i]) == 0;
+  }
+  if (same) {
+    return;
+  }
+  fields_free(u);
+  u->fields = calloc((size_t)(n ? n : 1), sizeof *u->fields);
+  u->field_names = calloc((size_t)(n ? n : 1), sizeof *u->field_names);
+  if (!u->fields || !u->field_names) {
+    free(u->fields);
+    free(u->field_names);
+    u->fields = NULL;
+    u->field_names = NULL;
+    return;
+  }
+  for (int i = 0; i < n; i++) {
+    char leaf[64];
+    snprintf(leaf, sizeof leaf, "%s/%s", dir, names[i]);
+    u->field_names[u->nfields] = strdup(names[i]);
+    if (!u->field_names[u->nfields]) {
+      break;
+    }
+    u->fields[u->nfields++] =
+        typed ? wnode_typed(u, leaf) : wnode(u, leaf, &TEXT, NULL);
+  }
+}
+
+/* names of a form's fields or a table's columns kept at once */
+#define NAMES_MAX 64
+
 /* a form's fields/NAME: republished when its rows changed */
 static void sync_fields(UIW *u, const CTUI_FORM *f) {
-  int n = 0, same = 1;
-  for (int r = 0; r < f->count; r++) {
-    if (!is_field(&f->rows[r])) {
-      continue;
-    }
-    char name[48];
-    field_name(f, r, name, sizeof name);
-    same = same && n < u->nfields && strcmp(u->field_names[n], name) == 0;
-    n++;
-  }
-  if (!same || n != u->nfields) {
-    fields_free(u);
-    u->fields = calloc((size_t)(n ? n : 1), sizeof *u->fields);
-    u->field_names = calloc((size_t)(n ? n : 1), sizeof *u->field_names);
-    if (!u->fields || !u->field_names) {
-      free(u->fields);
-      free(u->field_names);
-      u->fields = NULL;
-      u->field_names = NULL;
-      return;
-    }
-    for (int r = 0; r < f->count; r++) {
-      if (is_field(&f->rows[r])) {
-        char name[48], leaf[64];
-        field_name(f, r, name, sizeof name);
-        snprintf(leaf, sizeof leaf, "fields/%s", name);
-        u->field_names[u->nfields] = strdup(name);
-        u->fields[u->nfields] = wnode(u, leaf, &TEXT, NULL);
-        if (!u->field_names[u->nfields]) {
-          if (u->fields[u->nfields]) {
-            ctui_node_remove(u->fields[u->nfields]);
-          }
-          break;
-        }
-        u->nfields++;
-      }
+  char names[NAMES_MAX][48];
+  int n = 0;
+  for (int r = 0; r < f->count && n < NAMES_MAX; r++) {
+    if (is_field(&f->rows[r])) {
+      field_name(f, r, names[n++], sizeof names[0]);
     }
   }
+  sync_names(u, "fields", names, n, 1);
   int i = 0;
   for (int r = 0; r < f->count && i < u->nfields; r++) {
     const CTUI_FORM_ROW *row = &f->rows[r];
@@ -336,6 +426,375 @@ static void sync_fields(UIW *u, const CTUI_FORM *f) {
       set_text(u->fields[i], v);
     }
     i++;
+  }
+}
+
+/* --- writes typed as keys: a dialog's and a form's ---------------------- */
+
+typedef struct {
+  CTUI_KEYPRESS_EVENT_DATA k[CTUI_INPUT_POST_MAX];
+  int n, over;
+} KEYS;
+
+static void key_add(KEYS *ks, const char *name) {
+  if (ks->n == CTUI_INPUT_POST_MAX) {
+    ks->over = 1;
+  } else if (ctui_key_parse(name, strlen(name), &ks->k[ks->n]) == 0) {
+    ks->n++;
+  }
+}
+
+static void keys_times(KEYS *ks, const char *name, int times) {
+  for (int i = 0; i < times && !ks->over; i++) {
+    key_add(ks, name);
+  }
+}
+
+/* an entry's line replaced: to its end, everything before it killed, then
+ * the text typed; EINVAL for a control character */
+static int keys_line(KEYS *ks, const char *s) {
+  key_add(ks, "ctrl+e");
+  key_add(ks, "ctrl+u");
+  for (size_t i = 0; s[i];) {
+    uint32_t cp;
+    i += (size_t)ctui_utf8_decode(s + i, &cp);
+    if (cp < 0x20 || cp == 0x7f) {
+      return EINVAL;
+    }
+    if (ks->n == CTUI_INPUT_POST_MAX) {
+      ks->over = 1;
+      break;
+    }
+    ks->k[ks->n++] = (CTUI_KEYPRESS_EVENT_DATA){.type = CTUI_KEY_CHAR, .ch = cp};
+  }
+  return 0;
+}
+
+static int takes_focus(const CTUI_FORM_ROW *r) {
+  return r->kind != CTUI_FORM_HEADING && !r->disabled;
+}
+
+/* the form's focus moved to row the way the keys move it (they wrap): the
+ * shorter of down / up */
+static void keys_focus(KEYS *ks, const CTUI_FORM *f, int row) {
+  if (f->focus == row) {
+    return;
+  }
+  int down = 0, up = 0;
+  for (int i = f->focus; (i = (i + 1) % f->count) != row;) {
+    down += takes_focus(&f->rows[i]);
+  }
+  for (int i = f->focus; (i = (i - 1 + f->count) % f->count) != row;) {
+    up += takes_focus(&f->rows[i]);
+  }
+  if (down <= up) {
+    keys_times(ks, "down", down + 1);
+  } else {
+    keys_times(ks, "up", up + 1);
+  }
+}
+
+/* a number: 0 with *out, EINVAL */
+static int parse_int(const char *s, int *out) {
+  char *end;
+  long v = strtol(s, &end, 10);
+  if (!*s || *end || v < -1000000000L || v > 1000000000L) {
+    return EINVAL;
+  }
+  *out = (int)v;
+  return 0;
+}
+
+/* the keys taking a form's row r to v (its field's text): 0, or an errno */
+static int keys_field(KEYS *ks, const CTUI_FORM_ROW *r, const char *v) {
+  switch (r->kind) {
+  case CTUI_FORM_ENTRY:
+    return r->entry ? keys_line(ks, v) : ENOENT;
+  case CTUI_FORM_TOGGLE:
+    if (strcmp(v, "0") != 0 && strcmp(v, "1") != 0) {
+      return EINVAL;
+    }
+    if ((v[0] == '1') != (r->value != 0)) {
+      key_add(ks, "space");
+    }
+    return 0;
+  case CTUI_FORM_CHOICE: {
+    int j = 0;
+    while (j < r->option_count && strcmp(r->options[j], v) != 0) {
+      j++;
+    }
+    if (j == r->option_count) {
+      return ENOENT;
+    }
+    keys_times(ks, j > r->value ? "right" : "left",
+               j > r->value ? j - r->value : r->value - j);
+    return 0;
+  }
+  case CTUI_FORM_SLIDER: {
+    int want, step = r->step > 0 ? r->step : 1;
+    if (parse_int(v, &want) != 0) {
+      return EINVAL;
+    }
+    if (want < r->min || want > r->max) {
+      return ERANGE;
+    }
+    if (want == r->min || want == r->max) {
+      key_add(ks, want == r->min ? "home" : "end");
+    } else if ((want - r->value) % step == 0) {
+      keys_times(ks, want > r->value ? "right" : "left",
+                 (want > r->value ? want - r->value : r->value - want) / step);
+    } else if ((want - r->min) % step == 0) {
+      key_add(ks, "home");
+      keys_times(ks, "right", (want - r->min) / step);
+    } else {
+      return EINVAL; /* not on a step */
+    }
+    return 0;
+  }
+  default:
+    return EINVAL;
+  }
+}
+
+/* a form's write: fields/NAME's value, or press a button by its label */
+static int form_keys(UIW *u, CTUI_NODE *n, const char *v, KEYS *ks) {
+  const CTUI_FORM *f = u->obj;
+  if (ctui_form_list_open(f)) {
+    return EBUSY; /* a choice's list takes the keys */
+  }
+  int row = -1;
+  if (n == u->press) {
+    for (int r = 0; r < f->count && row < 0; r++) {
+      if (f->rows[r].kind == CTUI_FORM_BUTTON && f->rows[r].label &&
+          strcmp(f->rows[r].label, v) == 0) {
+        row = r;
+      }
+    }
+  } else {
+    int i = 0;
+    while (i < u->nfields && u->fields[i] != n) {
+      i++;
+    }
+    for (int r = 0, k = 0; r < f->count && row < 0; r++) {
+      if (f->rows[r].kind != CTUI_FORM_HEADING &&
+          f->rows[r].kind != CTUI_FORM_BUTTON && k++ == i) {
+        row = r;
+      }
+    }
+  }
+  if (row < 0) {
+    return ENOENT;
+  }
+  if (f->rows[row].disabled) {
+    return EPERM;
+  }
+  keys_focus(ks, f, row);
+  if (n == u->press) {
+    key_add(ks, "enter");
+    return 0;
+  }
+  return keys_field(ks, &f->rows[row], v);
+}
+
+/* a dialog's write: press a button by its label, or its line replaced */
+static int dialog_keys(UIW *u, CTUI_NODE *n, const char *v, KEYS *ks) {
+  CTUI_DIALOG *d = u->obj;
+  if (!d->open) {
+    return ENXIO;
+  }
+  if (n == u->entry) {
+    return d->entry ? keys_line(ks, v) : ENOENT;
+  }
+  for (int i = 0; i < d->button_count && i < CTUI_DIALOG_MAX_BUTTONS; i++) {
+    if (d->buttons[i] && strcmp(d->buttons[i], v) == 0) {
+      d->focus = i; /* (a move by Tab only redraws) */
+      key_add(ks, "enter");
+      return 0;
+    }
+  }
+  return ENOENT;
+}
+
+/* an open dialog drawn over u in the last frame: the keys would be its */
+static int under_dialog(const UIW *u) {
+  const CTUI_UI *ui = u->ui;
+  int n = ui->drawn_frame + 1 == ui->app->frames ? ui->ndrawn : 0;
+  for (int i = u->order + 1; i < n; i++) {
+    if (strcmp(ui->drawn[i].kind, "dialog") == 0 &&
+        ((const CTUI_DIALOG *)ui->drawn[i].obj)->open) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int typed_write(UIW *u, CTUI_NODE *n, const char *v) {
+  if (!u->shown) {
+    return ENXIO;
+  }
+  if (u->kind == W_FORM && under_dialog(u)) {
+    return EBUSY;
+  }
+  KEYS ks;
+  ks.n = ks.over = 0;
+  int err = u->kind == W_FORM ? form_keys(u, n, v, &ks)
+                              : dialog_keys(u, n, v, &ks);
+  if (err) {
+    return err;
+  }
+  if (ks.over) {
+    return EAGAIN;
+  }
+  if (ks.n == 0) {
+    return 0; /* it reads that already */
+  }
+  if (u->ntyped == TYPED_MAX) {
+    return EBUSY;
+  }
+  TYPED *t = &u->typed[u->ntyped];
+  /* a field, a dialog's entry: checked once its keys are handled */
+  t->want = n == u->press ? NULL : strdup(v);
+  if (n != u->press && !t->want) {
+    return ENOMEM;
+  }
+  if ((err = ctui_ui_post_keys(ks.k, ks.n)) != 0 ||
+      (err = ctui_node_defer(n, &t->later) != 0 ? EIO : 0) != 0) {
+    free(t->want);
+    return err;
+  }
+  t->n = n;
+  t->frame = u->ui->app->frames;
+  u->ntyped++;
+  ctui_logf(E_INF, "[CTUI:UI] - w/%s written: %d key(s) @ tick %d\n", u->name,
+            ks.n, ctui_tick_advance());
+  return 0;
+}
+
+/* u's typed writes answered: err, or (err 0) EIO for one that didn't take
+ * -- no frame drawn since; a value's: u not drawn in it, or the node not
+ * reading what was written (the keys went to another pane). A press may
+ * close its dialog. */
+static void typed_answer(UIW *u, int err) {
+  CTUI_UI *ui = u->ui;
+  char reply[24];
+  snprintf(reply, sizeof reply, "%u", ui->app->frames);
+  for (int i = 0; i < u->ntyped; i++) {
+    TYPED *t = &u->typed[i];
+    int e = err;
+    if (!e && (ui->app->frames == t->frame ||
+               (t->want && (!u->shown ||
+                            strcmp(ctui_node_text(t->n), t->want) != 0)))) {
+      e = EIO;
+      ctui_logf(E_WRN, "[CTUI:UI] - w/%s: a write didn't take @ tick %d\n",
+                u->name, ctui_tick_advance());
+    }
+    ctui_nodes_answer(ui->ns, &t->later, e, e ? NULL : reply);
+    free(t->want);
+  }
+  u->ntyped = 0;
+}
+
+void ctui_ui_widgets_answer(CTUI_UI *ui) {
+  for (int i = 0; i < ui->nws; i++) {
+    if (ui->ws[i]->ntyped) {
+      typed_answer(ui->ws[i], 0);
+    }
+  }
+}
+
+static void view_free(UIW *u) {
+  for (int i = 0; i < u->nview; i++) {
+    if (u->view[i]) {
+      ctui_node_remove(u->view[i]);
+    }
+  }
+  free(u->view);
+  u->view = NULL;
+  u->nview = 0;
+}
+
+/* a table's row as "cell\tcell...", whole cells only (set_text cuts
+ * where a node ends) */
+static void row_line(const CTUI_TABLE *t, int row, char *buf, size_t cap) {
+  size_t o = 0;
+  int cols = t->column_count > 0 ? t->column_count : 1;
+  for (int c = 0; c < cols; c++) {
+    char scratch[512];
+    const char *s = cell_text(t, row, c, scratch, sizeof scratch);
+    size_t len = strlen(s);
+    if (o + (c > 0) + len >= cap) {
+      break;
+    }
+    if (c > 0) {
+      buf[o++] = '\t';
+    }
+    memcpy(buf + o, s, len);
+    o += len;
+  }
+  buf[o] = '\0';
+}
+
+/* view/N for lines rows: the tail added or dropped, the rest kept */
+static void view_resize(UIW *u, int lines) {
+  while (u->nview > lines) {
+    if (u->view[--u->nview]) {
+      ctui_node_remove(u->view[u->nview]);
+    }
+  }
+  if (lines > u->nview) {
+    CTUI_NODE **a = realloc(u->view, (size_t)lines * sizeof *a);
+    if (!a) {
+      return;
+    }
+    u->view = a;
+    while (u->nview < lines) {
+      char leaf[32];
+      snprintf(leaf, sizeof leaf, "view/%d", u->nview);
+      u->view[u->nview++] = wnode(u, leaf, &TEXT, NULL);
+    }
+  }
+}
+
+/* a table's columns, the cursor row's cells by column, the rows on screen
+ * (what its last render showed: page rows from scroll) */
+static void sync_table(UIW *u, const CTUI_TABLE *t) {
+  char names[NAMES_MAX][48];
+  int n = 0;
+  char cols[1024] = "";
+  size_t o = 0;
+  for (int c = 0; c < t->column_count && n < NAMES_MAX; c++) {
+    col_name(t, c, names[n++], sizeof names[0]);
+    const char *title = t->columns && t->columns[c].title ? t->columns[c].title
+                                                          : "";
+    int k = snprintf(cols + o, sizeof cols - o, "%s%s", c ? "|" : "", title);
+    if (k > 0 && (size_t)k < sizeof cols - o) {
+      o += (size_t)k;
+    }
+  }
+  set_text(u->columns, cols);
+  sync_names(u, "cells", names, n, 0);
+  int sel = t->count > 0 ? t->selected : -1;
+  for (int c = 0; c < u->nfields; c++) {
+    char scratch[512];
+    if (u->fields[c]) {
+      set_text(u->fields[c],
+               sel >= 0 ? cell_text(t, sel, c, scratch, sizeof scratch) : "");
+    }
+  }
+  int lines = t->count - t->scroll;
+  if (lines > t->page) {
+    lines = t->page;
+  }
+  if (lines < 0) {
+    lines = 0;
+  }
+  view_resize(u, lines);
+  for (int i = 0; i < u->nview; i++) {
+    char line[CTUI_NODE_TEXT_MAX + 1];
+    row_line(t, t->scroll + i, line, sizeof line);
+    if (u->view[i]) {
+      set_text(u->view[i], line);
+    }
   }
 }
 
@@ -368,6 +827,7 @@ static void sync_one(UIW *u) {
                                    strlen(txt))) {
       ctui_node_set_str(u->selected_text, txt);
     }
+    sync_table(u, t);
     break;
   }
   case W_LIST: {
@@ -486,9 +946,11 @@ static void publish_kind(UIW *u, const char *kind) {
     u->buttons = wnode(u, "buttons", &TEXT, NULL);
     u->focus = wnode(u, "focus", &TEXT, NULL);
     u->progress = wnode(u, "progress", &COUNT, NULL);
-    u->entry = wnode(u, "entry", &TEXT, NULL);
+    u->entry = wnode_typed(u, "entry");
+    u->press = wnode_typed(u, "press");
   } else if (u->kind == W_FORM) {
     u->focus = wnode(u, "focus", &TEXT, NULL);
+    u->press = wnode_typed(u, "press");
   } else if (u->kind == W_POPMENU) {
     u->items = wnode(u, "items", &TEXT, NULL);
     u->focus = wnode(u, "focus", &TEXT, NULL);
@@ -502,6 +964,12 @@ static void publish_kind(UIW *u, const char *kind) {
       u->selected_text = wnode(u, "selected_text", &TEXT, NULL);
       u->top = wnode(u, "top", &COUNT, NULL);
     }
+    if (u->kind == W_TABLE) {
+      u->columns = wnode(u, "columns", &TEXT, NULL);
+      if (u->flags & CTUI_UI_RDWR) { /* only writes do anything */
+        u->find = wnode(u, "find", &TEXT_RW, &TEXT_RW);
+      }
+    }
   }
   if (u->named) {
     ctui_logf(E_INF, "[CTUI:UI] - w/%s first drawn (a %s) @ tick %d\n", u->name,
@@ -511,11 +979,14 @@ static void publish_kind(UIW *u, const char *kind) {
 
 /* u's nodes removed and u freed */
 static void uiw_free(UIW *u) {
+  typed_answer(u, 0); /* gone: a press that closed it took */
   fields_free(u);
+  view_free(u);
   CTUI_NODE *ns[] = {u->shown_n,  u->rect,     u->text,          u->cursor,
                      u->rows,     u->selected, u->selected_text, u->top,
                      u->label,    u->title,    u->buttons,       u->focus,
-                     u->progress, u->entry,    u->items,         u->depth};
+                     u->progress, u->entry,    u->items,         u->depth,
+                     u->columns,  u->find,     u->press};
   for (size_t i = 0; i < sizeof ns / sizeof ns[0]; i++) {
     if (ns[i]) {
       ctui_node_remove(ns[i]);
@@ -628,6 +1099,7 @@ static void match_drawn(CTUI_UI *ui) {
     }
     u->shown = u->seen = 1;
     u->x = d->x, u->y = d->y, u->w = d->w, u->h = d->h;
+    u->order = i;
   }
   /* an unnamed one not drawn is gone (its struct may be too) */
   for (int i = 0; i < ui->nws;) {
@@ -721,11 +1193,13 @@ void ctui_ui_widgets_free(CTUI_UI *ui) {
   }
   for (int i = 0; i < ui->nws; i++) {
     UIW *u = ui->ws[i];
+    typed_answer(u, ECANCELED);
     for (int k = 0; k < u->nfields; k++) {
       free(u->field_names[k]);
     }
     free(u->fields);
     free(u->field_names);
+    free(u->view);
     free(u->name);
     free(u->kind_s);
     free(u);

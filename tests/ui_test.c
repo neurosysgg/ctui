@@ -371,8 +371,8 @@ static void test_ui(void) {
 
 static const char *tbl_cell(void *ctx, int row, int col, char *scratch,
                             size_t cap) {
-  (void)ctx, (void)col;
-  snprintf(scratch, cap, "row%d", row);
+  (void)ctx;
+  snprintf(scratch, cap, col ? "%dk" : "row%d", row);
   return scratch;
 }
 
@@ -435,6 +435,26 @@ static void wt_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   }
 }
 
+/* the keys the dialog and the form got, routed as an app does: the dialog
+ * while open, else the form */
+static int wt_chosen, wt_changed, wt_pressed;
+static int wt_keys_elsewhere; /* 1: drawn again, 2: nothing */
+static int wt_key(CTUI_WIDGET *self, CTUI_EVENT *ev) {
+  (void)self;
+  const CTUI_KEYPRESS_EVENT_DATA *kp = ev->event_data;
+  if (wt_keys_elsewhere) {
+    return wt_keys_elsewhere == 1;
+  }
+  if (wt.dialog && wt.dialog->open) {
+    wt_chosen += ctui_dialog_key(wt.dialog, kp) == CTUI_DIALOG_CHOSEN;
+  } else if (wt.form) {
+    int r = ctui_form_key(wt.form, kp);
+    wt_changed += r == CTUI_FORM_CHANGED;
+    wt_pressed += r == CTUI_FORM_PRESSED;
+  }
+  return 1;
+}
+
 static void a_wait(void) {
   CTUI_EVENT ev;
   ctui_input_loop(&ev, 1);
@@ -483,6 +503,30 @@ static int count_of(const char *all, const char *what) {
   return n;
 }
 
+/* path written v as the daemon would, the keys it posted handled as the
+ * app's loop handles them, a frame drawn: the answer's errno, -1 none */
+static int w_write(CTUI_NODES *ns, CTUI_APP *app, CTUI_SCREEN *screen, int fd,
+                   CTUI_BUF *got, const char *all, const char *path,
+                   const char *v) {
+  static int req = 300;
+  int id = pub_id(all, path);
+  char line[256];
+  snprintf(line, sizeof line, "{\"write\":%d,\"node\":%d,\"v\":\"%s\"}\n",
+           ++req, id, v);
+  if (id < 0 || write(fd, line, strlen(line)) != (ssize_t)strlen(line)) {
+    return -1;
+  }
+  ctui_nodes_dispatch(ns);
+  CTUI_EVENT ev;
+  while (ctui_input_posted() > 0 && ctui_input_loop(&ev, 0)) {
+    ctui_handle_event(&ev);
+  }
+  const char *r = wt_frame(app, screen, fd, got);
+  snprintf(line, sizeof line, "{\"ack\":%d,\"err\":", req);
+  const char *at = strstr(r, line);
+  return at ? atoi(at + strlen(line)) : -1;
+}
+
 static int always_busy(void *user) {
   (void)user;
   return 1;
@@ -508,7 +552,12 @@ static void test_widgets(void) {
   int fd = accept(lfd, NULL, NULL);
   fcntl(fd, F_SETFL, O_NONBLOCK);
 
-  CTUI_TABLE t = {.count = 3, .selected = 1, .cell = tbl_cell};
+  static const CTUI_TABLE_COLUMN cols[] = {{"Name", 0, 0}, {"Size", 4, 1}};
+  CTUI_TABLE t = {.columns = cols,
+                  .column_count = 2,
+                  .count = 3,
+                  .selected = 1,
+                  .cell = tbl_cell};
   static const CTUI_TABS_ITEM items[] = {{"one", 0}, {"two", 0}};
   CTUI_TABS tabs = {.items = items, .count = 2, .selected = 1};
   wt.t = &t;
@@ -524,6 +573,7 @@ static void test_widgets(void) {
   CTUI_SCREEN *screen = ctui_screen_create(6, 30);
   ctui_screen_set_sink(screen, &SINK, NULL);
   ctui_input_set_source(&NONE);
+  ctui_event_register("input", CTUI_KEYPRESS_EVENT, &w, wt_key);
   CTUI_UI *ui = ctui_ui_open(ns, &app);
   CTUI_TEST_ASSERT(ctui_ui_name(NULL, &t, "x", 0, NULL, NULL) == 0,
                    "no ui: nothing, no error");
@@ -564,6 +614,68 @@ static void test_widgets(void) {
       "drawn: their state (rows, the selection and its text, the label), "
       "their rects where they were drawn (inside the app's widget); the "
       "table's selected writable, the tabs' not");
+  static const char *const tbl_want[][2] = {
+      {"ui/w/tbl/columns", "Name|Size"},
+      {"ui/w/tbl/cells/name", "row1"},
+      {"ui/w/tbl/cells/size", "1k"},
+      {"ui/w/tbl/view/0", "row0\\u00090k"},
+      {"ui/w/tbl/view/2", "row2\\u00092k"}};
+  int tbl_found = 0;
+  for (size_t i = 0; i < sizeof tbl_want / sizeof tbl_want[0]; i++) {
+    char line[160];
+    int id = pub_id(all, tbl_want[i][0]);
+    snprintf(line, sizeof line, "{\"set\":%d,\"v\":\"%s\"}", id,
+             tbl_want[i][1]);
+    if (id > 0 && strstr(all, line)) {
+      tbl_found++;
+    } else {
+      printf("    %s: not \"%s\" (id %d)\n", tbl_want[i][0], tbl_want[i][1],
+             id);
+    }
+  }
+  CTUI_TEST_ASSERT(tbl_found == (int)(sizeof tbl_want / sizeof tbl_want[0]) &&
+                       pub_id(all, "ui/w/tbl/view/3") < 0 &&
+                       strstr(all, "\"path\":\"ui/w/tbl/find\",\"type\":{"
+                                   "\"kind\":\"string\",\"w\":1}"),
+                   "a table's columns, the cursor row's cells by column, the "
+                   "rows on screen (tab between cells), find writable");
+  /* find: the first row whose cell is that, by column name or number */
+  int find_id = pub_id(all, "ui/w/tbl/find");
+  static const struct {
+    const char *v;
+    int err, sel;
+  } finds[] = {{"size=2k", 0, 2}, {"0=row0", 0, 0}, {"size=9k", ENOENT, 0},
+               {"nope=1", ENOENT, 0}, {"row0", EINVAL, 0}, {"7=x", ENOENT, 0}};
+  int finds_ok = 0;
+  for (size_t i = 0; i < sizeof finds / sizeof finds[0]; i++) {
+    char req[128], ack[64];
+    snprintf(req, sizeof req, "{\"write\":%zu,\"node\":%d,\"v\":\"%s\"}\n",
+             200 + i, find_id, finds[i].v);
+    if (write(fd, req, strlen(req)) != (ssize_t)strlen(req)) {
+      perror("write");
+    }
+    ctui_nodes_dispatch(ns); /* the app's loop would, */
+    usleep(2000);
+    ctui_timer_tick(); /* and its timer asking for a frame */
+    /* answered at the wait after the frame it made */
+    for (int k = 0; k < 3 && !strstr(all = wt_frame(&app, screen, fd, &got),
+                                     "{\"ack\":");
+         k++) {
+    }
+    snprintf(ack, sizeof ack, "{\"ack\":%zu,\"err\":%d", 200 + i,
+             finds[i].err);
+    if (strstr(all, ack) && t.selected == finds[i].sel) {
+      finds_ok++;
+    } else {
+      printf("    find %s: selected %d, got %s\n", finds[i].v, t.selected,
+             all);
+    }
+  }
+  CTUI_TEST_ASSERT(finds_ok == (int)(sizeof finds / sizeof finds[0]),
+                   "find: by a column's name or number, the row selected; no "
+                   "such row or column ENOENT, no '=' EINVAL");
+  t.selected = 1;
+  all = wt_frame(&app, screen, fd, &got);
   t.selected = 2;
   tabs.selected = 0;
   wt.entries = 2;
@@ -660,6 +772,87 @@ static void test_widgets(void) {
                    "and entry; a form's focus and its fields by label (a "
                    "repeated one _2; headings and buttons not fields); their "
                    "entries not unnamed ones too");
+  /* written: typed as keys, the app's own handling of them runs */
+  const char *dall = strdup(all);
+  int e1 = w_write(ns, &app, screen, fd, &got, dall, "ui/w/ask/entry",
+                   "new.txt");
+  int e2 = w_write(ns, &app, screen, fd, &got, dall, "ui/w/ask/press", "Nope");
+  int e3 = w_write(ns, &app, screen, fd, &got, dall, "ui/w/prefs/press",
+                   "Apply"); /* its keys would be the dialog's */
+  CTUI_TEST_ASSERT(e1 == 0 && strcmp(ren, "new.txt") == 0 && e2 == ENOENT &&
+                       e3 == EBUSY && wt_pressed == 0 && dlg.open,
+                   "a dialog's entry written: its line replaced, by keys "
+                   "(\"%s\", %d); no such button ENOENT (%d); a form under "
+                   "the open dialog EBUSY: the keys would be the dialog's "
+                   "(%d)",
+                   ren, e1, e2, e3);
+  int e4 = w_write(ns, &app, screen, fd, &got, dall, "ui/w/ask/press",
+                   "Rename");
+  int e5 = w_write(ns, &app, screen, fd, &got, dall, "ui/w/ask/press",
+                   "Rename");
+  CTUI_TEST_ASSERT(e4 == 0 && wt_chosen == 1 && !dlg.open && dlg.focus == 0 &&
+                       e5 == ENXIO,
+                   "a button pressed by its label: picked, the dialog closed "
+                   "(%d); then closed: ENXIO (%d)",
+                   e4, e5);
+  wt.dialog = NULL;
+  wt_changed = 0;
+  int f1 = w_write(ns, &app, screen, fd, &got, dall,
+                   "ui/w/prefs/fields/repeat_rate", "60");
+  int f2 = w_write(ns, &app, screen, fd, &got, dall,
+                   "ui/w/prefs/fields/natural_scroll", "0");
+  int f3 = w_write(ns, &app, screen, fd, &got, dall,
+                   "ui/w/prefs/fields/accel_profile", "flat");
+  int f4 =
+      w_write(ns, &app, screen, fd, &got, dall, "ui/w/prefs/fields/name", "Bob");
+  int f5 =
+      w_write(ns, &app, screen, fd, &got, dall, "ui/w/prefs/press", "Apply");
+  CTUI_TEST_ASSERT(f1 == 0 && rows[4].value == 60 && f2 == 0 &&
+                       rows[2].value == 0 && f3 == 0 && rows[3].value == 0 &&
+                       f4 == 0 && strcmp(name, "Bob") == 0 && f5 == 0 &&
+                       wt_pressed == 1 && form.focus == 6,
+                   "a form's fields written by keys: a slider stepped, a "
+                   "toggle flipped, a choice stepped, an entry retyped (the "
+                   "focus walked to each); a button pressed by label (%d %d "
+                   "%d %d %d; %d changes)",
+                   f1, f2, f3, f4, f5, wt_changed);
+  CTUI_TEST_ASSERT(
+      wt_changed == 20 + 1 + 1 + 1 + 3,
+      "each key the app's: 20 slider steps, a flip, a step, the line killed, "
+      "three characters typed (%d)",
+      wt_changed);
+  rows[5].disabled = 1;
+  int r1 = w_write(ns, &app, screen, fd, &got, dall,
+                   "ui/w/prefs/fields/repeat_rate", "101");
+  int r2 = w_write(ns, &app, screen, fd, &got, dall,
+                   "ui/w/prefs/fields/accel_profile", "fast");
+  int r3 = w_write(ns, &app, screen, fd, &got, dall,
+                   "ui/w/prefs/fields/natural_scroll", "2");
+  int r4 = w_write(ns, &app, screen, fd, &got, dall,
+                   "ui/w/prefs/fields/name_2", "x");
+  int r5 =
+      w_write(ns, &app, screen, fd, &got, dall, "ui/w/prefs/press", "Nope");
+  rows[5].disabled = 0;
+  CTUI_TEST_ASSERT(r1 == ERANGE && r2 == ENOENT && r3 == EINVAL &&
+                       r4 == EPERM && r5 == ENOENT && rows[4].value == 60,
+                   "refused: a slider outside its range, no such option, a "
+                   "toggle not 0/1, a disabled row, no such button (%d %d %d "
+                   "%d %d)",
+                   r1, r2, r3, r4, r5);
+  wt_keys_elsewhere = 1;
+  int k1 = w_write(ns, &app, screen, fd, &got, dall,
+                   "ui/w/prefs/fields/repeat_rate", "50");
+  int back = strstr(got.s ? got.s : "", "\"v\":\"60\"}") != NULL;
+  wt_keys_elsewhere = 2;
+  int k2 = w_write(ns, &app, NULL, fd, &got, dall,
+                   "ui/w/prefs/fields/repeat_rate", "50"); /* no frame */
+  wt_keys_elsewhere = 0;
+  CTUI_TEST_ASSERT(k1 == EIO && back && k2 == EIO && rows[4].value == 60,
+                   "the keys gone to another pane: EIO, the field reading "
+                   "what it holds again (%d); nothing drawn since: EIO (%d)",
+                   k1, k2);
+  free((void *)dall);
+  wt.dialog = &dlg;
   /* the rows change: the fields follow */
   form.count = 3;
   rows[2].value = 0;
@@ -705,7 +898,7 @@ static void test_widgets(void) {
     ctui_buf_add(&got, buf, (size_t)r);
   }
   all = got.s ? got.s : "";
-  CTUI_TEST_ASSERT(count_of(all, "{\"rm\":") == 5 + 8 + 6,
+  CTUI_TEST_ASSERT(count_of(all, "{\"rm\":") == 6 + 9 + 13,
                    "forget: the form's, the dialog's and the table's nodes "
                    "removed (%d)",
                    count_of(all, "{\"rm\":"));
