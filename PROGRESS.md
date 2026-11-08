@@ -267,6 +267,9 @@ terminal resize.
   app run by another in its terminal, a file chooser, answers first:
   the newest connection). tests/ui_test.c 31, harness_test's toy app
   (this binary run with --toy) driven end to end in ~1 ms; 32 suites.
+  Then `ctui_ui_busy()`: the app's own "working where the loop can't see"
+  (a child, a thread) as `ui/busy`, `ui/idle` 0 meanwhile, so a test
+  waiting on idle waits that work out too.
 - [x] **`node/`: control nodes** (2026-11-07, ctui-wm session 321,
   notes/nodes.md n1 there: the client half of a FUSE filesystem of
   functions and parameters, a study for µOS's typed `/proc` nodes).

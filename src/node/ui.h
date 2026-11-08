@@ -14,9 +14,10 @@
  *
  *   ui/frame         int, ro    frames drawn (CTUI_APP.frames)
  *   ui/idle          bool, ro   1: the loop's last wait had nothing due
- *                               within 50 ms (timers, ticks) -- the loop's
- *                               view only: work on threads is the app's to
- *                               publish
+ *                               within 50 ms (timers, ticks) and the app
+ *                               wasn't busy (ctui_ui_busy())
+ *   ui/busy          bool, ro   the app's busy() at that wait: work on a
+ *                               thread or in a child the loop can't see
  *   ui/size          string, ro "ROWSxCOLS"
  *   ui/screen/NNN    string, ro row NNN's text (000 first), trailing
  *                               blanks dropped; only changed rows are sent
@@ -78,6 +79,12 @@ CTUI_UI *ctui_ui_auto(CTUI_APP *app, const char *name);
  * which drops the watches it holds. NULL: nothing. */
 void ctui_ui_close(CTUI_UI *ui);
 
+/* busy(user), asked at every wait: nonzero while the app works where the
+ * loop can't see it (a search in a child, a copy on a thread); ui/busy,
+ * and ui/idle stays 0 meanwhile, so a test waiting on idle waits for it.
+ * NULL ui: nothing. */
+void ctui_ui_busy(CTUI_UI *ui, int (*busy)(void *user), void *user);
+
 /* the nodes it publishes in (for an app's own next to ui/) */
 CTUI_NODES *ctui_ui_nodes(const CTUI_UI *ui);
 
@@ -95,12 +102,10 @@ typedef int (*CTUI_UI_CHANGED)(CTUI_WIDGET *w, void *user);
  * NULL ui: nothing (an app whose ui/ is off). 0, or -1 (logged): a name
  * taken or bad, RDWR without changed(). The structs must outlive ui, or
  * be let go of first (ctui_ui_forget()). */
-int ctui_ui_entry(CTUI_UI *ui, const char *name, CTUI_WIDGET *w,
-                  CTUI_ENTRY *e, unsigned flags, CTUI_UI_CHANGED changed,
-                  void *user);
-int ctui_ui_table(CTUI_UI *ui, const char *name, CTUI_WIDGET *w,
-                  CTUI_TABLE *t, unsigned flags, CTUI_UI_CHANGED changed,
-                  void *user);
+int ctui_ui_entry(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_ENTRY *e,
+                  unsigned flags, CTUI_UI_CHANGED changed, void *user);
+int ctui_ui_table(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_TABLE *t,
+                  unsigned flags, CTUI_UI_CHANGED changed, void *user);
 int ctui_ui_list(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_LIST *l,
                  unsigned flags, CTUI_UI_CHANGED changed, void *user);
 int ctui_ui_tabs(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_TABS *t,

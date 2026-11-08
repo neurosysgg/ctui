@@ -214,13 +214,13 @@ typedef struct {
 } DRIVER;
 
 static const char *const STEPS[] = {
-    "{\"write\":101,\"node\":4,\"v\":\"down down\"}",
-    "{\"write\":102,\"node\":5,\"v\":\"hé\"}",
-    "{\"write\":103,\"node\":4,\"v\":\"hyper+x\"}",
-    "{\"write\":104,\"node\":6,\"v\":\"click 5 1\"}",
-    "{\"write\":105,\"node\":6,\"v\":\"wiggle 5 1\"}",
-    "{\"write\":106,\"node\":7,\"v\":\"0\"}",
-    "{\"write\":107,\"node\":4,\"v\":\"esc\"}",
+    "{\"write\":101,\"node\":5,\"v\":\"down down\"}",
+    "{\"write\":102,\"node\":6,\"v\":\"hé\"}",
+    "{\"write\":103,\"node\":5,\"v\":\"hyper+x\"}",
+    "{\"write\":104,\"node\":7,\"v\":\"click 5 1\"}",
+    "{\"write\":105,\"node\":7,\"v\":\"wiggle 5 1\"}",
+    "{\"write\":106,\"node\":8,\"v\":\"0\"}",
+    "{\"write\":107,\"node\":5,\"v\":\"esc\"}",
     NULL,
 };
 
@@ -315,6 +315,7 @@ static void test_ui(void) {
   CTUI_TEST_ASSERT(!strstr(all, "{\"begin\":1}\n{\"commit\":1}"),
                    "no begin / commit with nothing between them");
   CTUI_TEST_ASSERT(strstr(all, "\"path\":\"ui/frame\"") &&
+                       strstr(all, "\"path\":\"ui/busy\"") &&
                        strstr(all, "\"path\":\"ui/input/key\"") &&
                        strstr(all, "\"path\":\"ui/screen/005\"") &&
                        !strstr(all, "ui/screen/006") &&
@@ -374,6 +375,11 @@ static int tbl_changed(CTUI_WIDGET *w, void *user) {
   return 0;
 }
 
+static int always_busy(void *user) {
+  (void)user;
+  return 1;
+}
+
 static void a_wait(void) {
   CTUI_EVENT ev;
   ctui_input_loop(&ev, 1);
@@ -410,17 +416,16 @@ static void test_widgets(void) {
   CTUI_TABS tabs = {.items = items, .count = 2, .selected = 1};
   CTUI_TEST_ASSERT(ctui_ui_table(NULL, "x", &w, &t, 0, NULL, NULL) == 0,
                    "no ui: nothing, no error");
-  CTUI_TEST_ASSERT(ctui_ui_table(ui, "tbl", &w, &t, CTUI_UI_RDWR, tbl_changed,
-                                 NULL) == 0 &&
-                       ctui_ui_tabs(ui, "tabs", &w, &tabs, 0, NULL, NULL) == 0,
-                   "a table and tabs published");
-  CTUI_TEST_ASSERT(ctui_ui_tabs(ui, "tabs", &w, &tabs, 0, NULL, NULL) == -1 &&
-                       ctui_ui_table(ui, "rw", &w, &t, CTUI_UI_RDWR, NULL,
-                                     NULL) == -1 &&
-                       ctui_ui_table(ui, "bad name", &w, &t, 0, NULL, NULL) ==
-                           -1,
-                   "refused: a name taken, writable without changed(), a bad "
-                   "name");
+  CTUI_TEST_ASSERT(
+      ctui_ui_table(ui, "tbl", &w, &t, CTUI_UI_RDWR, tbl_changed, NULL) == 0 &&
+          ctui_ui_tabs(ui, "tabs", &w, &tabs, 0, NULL, NULL) == 0,
+      "a table and tabs published");
+  CTUI_TEST_ASSERT(
+      ctui_ui_tabs(ui, "tabs", &w, &tabs, 0, NULL, NULL) == -1 &&
+          ctui_ui_table(ui, "rw", &w, &t, CTUI_UI_RDWR, NULL, NULL) == -1 &&
+          ctui_ui_table(ui, "bad name", &w, &t, 0, NULL, NULL) == -1,
+      "refused: a name taken, writable without changed(), a bad "
+      "name");
   CTUI_BUF got = {0};
   char buf[16384];
   ssize_t r;
@@ -473,6 +478,19 @@ static void test_widgets(void) {
     rms++;
   }
   CTUI_TEST_ASSERT(rms == 5, "forget: its five nodes removed (%d)", rms);
+  free(got.s);
+  /* the app busy: ui/busy 1, ui/idle 0 though nothing is due */
+  ctui_ui_busy(ui, always_busy, NULL);
+  got = (CTUI_BUF){0};
+  a_wait();
+  while ((r = read(fd, buf, sizeof buf)) > 0) {
+    ctui_buf_add(&got, buf, (size_t)r);
+  }
+  all = got.s ? got.s : "";
+  /* (idle was 0 already: this loop's 1 ms tick is due within 50 ms) */
+  CTUI_TEST_ASSERT(strstr(all, "{\"set\":3,\"v\":\"1\"}") &&
+                       !strstr(all, "{\"set\":2,\"v\":\"1\"}"),
+                   "busy: ui/busy 1, ui/idle not 1");
   free(got.s);
   ctui_ui_close(ui);
   ctui_nodes_close(ns);

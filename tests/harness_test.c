@@ -304,8 +304,8 @@ static int ref_same(const CTUI_CELL *a, const CTUI_CELL *b, int with_ch) {
   return a->bg == b->bg;
 }
 
-static size_t ref_flush(const CTUI_CELL *cells, const CTUI_CELL *prev,
-                        int rows, int cols, char *out, size_t cap) {
+static size_t ref_flush(const CTUI_CELL *cells, const CTUI_CELL *prev, int rows,
+                        int cols, char *out, size_t cap) {
   static const char *const sgr[] = {"1;", "2;", "3;", "4;", "9;"};
   size_t len = 0;
   int last_row = -1, last_col = -1;
@@ -317,8 +317,8 @@ static size_t ref_flush(const CTUI_CELL *cells, const CTUI_CELL *prev,
         continue;
       }
       if (r != last_row || c != last_col) {
-        len += (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dH", r + 1,
-                                c + 1);
+        len +=
+            (size_t)snprintf(out + len, cap - len, "\x1b[%d;%dH", r + 1, c + 1);
       }
       if (!ref_same(cur, &last, 0)) {
         int fg = cur->fg == CTUI_COLOR_DEFAULT ? 39 : 30 + (cur->fg - 1);
@@ -339,10 +339,9 @@ static size_t ref_flush(const CTUI_CELL *cells, const CTUI_CELL *prev,
           len += (size_t)snprintf(out + len, cap - len, "38;2;%d;%d;%d;%dm",
                                   cur->fg_r, cur->fg_g, cur->fg_b, bg);
         } else if (cur->color_mode == CTUI_COLOR_MODE_RGB) {
-          len += (size_t)snprintf(out + len, cap - len,
-                                  "38;2;%d;%d;%d;48;2;%d;%d;%dm", cur->fg_r,
-                                  cur->fg_g, cur->fg_b, cur->bg_r, cur->bg_g,
-                                  cur->bg_b);
+          len += (size_t)snprintf(
+              out + len, cap - len, "38;2;%d;%d;%d;48;2;%d;%d;%dm", cur->fg_r,
+              cur->fg_g, cur->fg_b, cur->bg_r, cur->bg_g, cur->bg_b);
         } else {
           len += (size_t)snprintf(out + len, cap - len, "%d;%dm", fg, bg);
         }
@@ -678,7 +677,7 @@ static void test_pty(void) {
 
 /* --- an app driven through its nodes ------------------------------------- */
 
-static int toy_downs;
+static int toy_downs, toy_busy;
 static char toy_last[16];
 static char toy_text[32];
 static CTUI_ENTRY toy_entry = {.buf = toy_text, .cap = sizeof toy_text};
@@ -713,6 +712,8 @@ static int toy_key(CTUI_WIDGET *self, CTUI_EVENT *ev) {
   CTUI_KEYPRESS_EVENT_DATA *k = ev->event_data;
   if (k->type == CTUI_KEY_DOWN) {
     toy_downs++;
+  } else if (k->type == CTUI_KEY_F1) {
+    toy_busy = !toy_busy; /* as if work had started on a thread */
   } else if (k->type == CTUI_KEY_CHAR) {
     ctui_entry_key(&toy_entry, k);
   }
@@ -721,7 +722,8 @@ static int toy_key(CTUI_WIDGET *self, CTUI_EVENT *ev) {
 
 static int toy_mouse(CTUI_WIDGET *self, CTUI_EVENT *ev) {
   CTUI_MOUSE_EVENT_DATA *m = ev->event_data;
-  if (m->action == CTUI_MOUSE_PRESS && ctui_widget_contains(self, m->row, m->col)) {
+  if (m->action == CTUI_MOUSE_PRESS &&
+      ctui_widget_contains(self, m->row, m->col)) {
     toy_list.selected = m->row - self->y + toy_list.scroll_offset;
     return 1;
   }
@@ -736,6 +738,11 @@ static int toy_picked(CTUI_WIDGET *w, void *user) {
   }
   snprintf(toy_last, sizeof toy_last, "%s", toy_items[toy_list.selected].label);
   return 0;
+}
+
+static int toy_is_busy(void *user) {
+  (void)user;
+  return toy_busy;
 }
 
 static int toy_main(void) {
@@ -761,6 +768,7 @@ static int toy_main(void) {
   CTUI_UI *ui = ctui_ui_auto(&app, "harness-toy");
   ctui_ui_entry(ui, "search", &w, &toy_entry, CTUI_UI_RDONLY, NULL, NULL);
   ctui_ui_list(ui, "list", &lw, &toy_list, CTUI_UI_RDWR, toy_picked, NULL);
+  ctui_ui_busy(ui, toy_is_busy, NULL);
   ctui_app_run(&app, screen, 0);
   ctui_ui_close(ui);
   ctui_app_free(&app);
@@ -773,14 +781,14 @@ static void test_nodes(void) {
   const char *argv[] = {"/proc/self/exe", "--toy", NULL};
   CTUI_PTY *p = ctui_pty_spawn(
       &(CTUI_PTY_SPAWN){.argv = argv, .rows = 8, .cols = 24, .nodes = 1});
-  CTUI_TEST_ASSERT(p && ctui_pty_nodes(p) &&
-                       ctui_pty_until_node(p, "ui/screen/000", "count: 0",
-                                           3000) == 0,
-                   "the app connects to the harness and publishes ui/");
-  CTUI_TEST_ASSERT(ctui_hnodes_get(ctui_pty_nodes(p), "ui/size") &&
-                       strcmp(ctui_hnodes_get(ctui_pty_nodes(p), "ui/size"),
-                              "8x24") == 0,
-                   "its size");
+  CTUI_TEST_ASSERT(
+      p && ctui_pty_nodes(p) &&
+          ctui_pty_until_node(p, "ui/screen/000", "count: 0", 3000) == 0,
+      "the app connects to the harness and publishes ui/");
+  CTUI_TEST_ASSERT(
+      ctui_hnodes_get(ctui_pty_nodes(p), "ui/size") &&
+          strcmp(ctui_hnodes_get(ctui_pty_nodes(p), "ui/size"), "8x24") == 0,
+      "its size");
   long t0 = ms_now();
   static const CTUI_HARNESS_STEP keys[] = {
       CTUI_HS_NKEY("down down"),
@@ -837,6 +845,12 @@ static void test_nodes(void) {
       CTUI_HS_NEQ("ui/w/list/selected_text", "gamma"),
       CTUI_HS_NREFUSED("ui/input/mouse", "click w/nothing", ENOENT),
       CTUI_HS_NREFUSED("ui/input/mouse", "click w/list 0 7", ENOENT),
+      CTUI_HS_NKEY("F1"),
+      CTUI_HS_NEQ("ui/busy", "1"),
+      CTUI_HS_NEQ("ui/idle", "0"),
+      CTUI_HS_NKEY("F1"),
+      CTUI_HS_NIDLE,
+      CTUI_HS_NEQ("ui/busy", "0"),
       CTUI_HS_DUMP,
       CTUI_HS_END};
   dump[0] = '\0';
@@ -847,7 +861,8 @@ static void test_nodes(void) {
                            "a list's rows and selection, their rects; a "
                            "write taken (the app's changed() ran before the "
                            "frame), the app's refusal, out of range, "
-                           "read-only; clicks aimed by name");
+                           "read-only; clicks aimed by name; busy keeps idle "
+                           "0");
   if (r != 0) {
     printf("%s", dump);
   }

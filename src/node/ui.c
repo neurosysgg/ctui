@@ -53,7 +53,9 @@ struct CTUI_UI {
   unsigned watched_events;
   CTUI_TIMER *retry;
 
-  CTUI_NODE *frame, *idle, *size, *key, *text, *mouse, *focus;
+  CTUI_NODE *frame, *idle, *busy_n, *size, *key, *text, *mouse, *focus;
+  int (*busy)(void *user);
+  void *busy_user;
   CTUI_NODE **rows;
   int nrows;
   unsigned frames_seen;
@@ -149,7 +151,10 @@ static void on_wait(void *ctx, long timeout_ms) {
   ctui_nodes_begin(ui->ns);
   update_screen(ui);
   sync_widgets(ui);
-  ctui_node_set_bool(ui->idle, timeout_ms < 0 || timeout_ms > IDLE_MS);
+  int busy = ui->busy && ui->busy(ui->busy_user);
+  ctui_node_set_bool(ui->busy_n, busy);
+  ctui_node_set_bool(ui->idle,
+                     !busy && (timeout_ms < 0 || timeout_ms > IDLE_MS));
   ctui_nodes_commit(ui->ns);
   /* a widget written waits for the frame it asked for */
   if (ui->nlater && !ui->frame_soon) {
@@ -458,10 +463,10 @@ static int focus_write(CTUI_NODE *n, const CTUI_NODE_VALUE *v, CTUI_BUF *reply,
 static const CTUI_NODE_TYPE COUNT = {CTUI_NODE_INT,    NULL, 1, 0, 0,
                                      CTUI_NODE_LINEAR, NULL, 0, 0};
 static const CTUI_NODE_TYPE ROW_RW = {
-    CTUI_NODE_INT, NULL, 1, 0, -1, CTUI_NODE_LINEAR, NULL, 0,
+    CTUI_NODE_INT,     NULL, 1, 0, -1, CTUI_NODE_LINEAR, NULL, 0,
     CTUI_NODE_WRITABLE};
 static const CTUI_NODE_TYPE TEXT_RW = {
-    CTUI_NODE_STRING, NULL, 1, 0, 0, CTUI_NODE_LINEAR, NULL, 0,
+    CTUI_NODE_STRING,  NULL, 1, 0, 0, CTUI_NODE_LINEAR, NULL, 0,
     CTUI_NODE_WRITABLE};
 
 /* w/NAME (len bytes) 's cell dc, dr into it (-1: its middle) */
@@ -517,8 +522,8 @@ static int widget_rows(const UIW *u) {
   }
 }
 
-static int widget_write(CTUI_NODE *n, const CTUI_NODE_VALUE *v,
-                        CTUI_BUF *reply, void *user) {
+static int widget_write(CTUI_NODE *n, const CTUI_NODE_VALUE *v, CTUI_BUF *reply,
+                        void *user) {
   (void)reply;
   UIW *u = user;
   CTUI_UI *ui = u->ui;
@@ -577,9 +582,9 @@ static void sync_one(UIW *u) {
     ctui_node_set_int(u->selected, sel);
     ctui_node_set_int(u->top, t->scroll);
     char scratch[512];
-    const char *txt =
-        sel >= 0 && t->cell ? t->cell(t->ctx, sel, 0, scratch, sizeof scratch)
-                            : "";
+    const char *txt = sel >= 0 && t->cell
+                          ? t->cell(t->ctx, sel, 0, scratch, sizeof scratch)
+                          : "";
     if (txt && ctui_node_string_ok(ctui_node_type(u->selected_text), txt,
                                    strlen(txt))) {
       ctui_node_set_str(u->selected_text, txt);
@@ -592,7 +597,8 @@ static void sync_one(UIW *u) {
     ctui_node_set_int(u->rows, l->count);
     ctui_node_set_int(u->selected, sel);
     ctui_node_set_int(u->top, l->scroll_offset);
-    const char *txt = sel >= 0 && l->items[sel].label ? l->items[sel].label : "";
+    const char *txt =
+        sel >= 0 && l->items[sel].label ? l->items[sel].label : "";
     if (ctui_node_string_ok(ctui_node_type(u->selected_text), txt,
                             strlen(txt))) {
       ctui_node_set_str(u->selected_text, txt);
@@ -692,15 +698,13 @@ static int add_widget(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, void *obj,
   return 0;
 }
 
-int ctui_ui_entry(CTUI_UI *ui, const char *name, CTUI_WIDGET *w,
-                  CTUI_ENTRY *e, unsigned flags, CTUI_UI_CHANGED changed,
-                  void *user) {
+int ctui_ui_entry(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_ENTRY *e,
+                  unsigned flags, CTUI_UI_CHANGED changed, void *user) {
   return add_widget(ui, name, w, e, W_ENTRY, flags, changed, user);
 }
 
-int ctui_ui_table(CTUI_UI *ui, const char *name, CTUI_WIDGET *w,
-                  CTUI_TABLE *t, unsigned flags, CTUI_UI_CHANGED changed,
-                  void *user) {
+int ctui_ui_table(CTUI_UI *ui, const char *name, CTUI_WIDGET *w, CTUI_TABLE *t,
+                  unsigned flags, CTUI_UI_CHANGED changed, void *user) {
   return add_widget(ui, name, w, t, W_TABLE, flags, changed, user);
 }
 
@@ -760,6 +764,7 @@ static CTUI_UI *ui_new(CTUI_NODES *ns, CTUI_APP *app) {
   ctui_nodes_begin(ns);
   ui->frame = ctui_node_publish(ns, "ui/frame", &FRAME, NULL, NULL);
   ui->idle = ctui_node_publish(ns, "ui/idle", &FLAG, NULL, NULL);
+  ui->busy_n = ctui_node_publish(ns, "ui/busy", &FLAG, NULL, NULL);
   ui->size = ctui_node_publish(ns, "ui/size", &TEXT, NULL, NULL);
   ui->key = ctui_node_publish(ns, "ui/input/key", &INPUT, &KEY_OPS, ui);
   ui->text = ctui_node_publish(ns, "ui/input/text", &INPUT, &TEXT_OPS, ui);
@@ -870,3 +875,10 @@ void ctui_ui_close(CTUI_UI *ui) {
 }
 
 CTUI_NODES *ctui_ui_nodes(const CTUI_UI *ui) { return ui->ns; }
+
+void ctui_ui_busy(CTUI_UI *ui, int (*busy)(void *user), void *user) {
+  if (ui) {
+    ui->busy = busy;
+    ui->busy_user = user;
+  }
+}
