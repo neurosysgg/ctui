@@ -237,6 +237,22 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **ui/'s screen rows cheaper per frame** (2026-11-08, ctui-wm session
+  325, notes/ui-nodes.md w4). Measured under callgrind over ctui-top's
+  ten screens cases with `ui/` on: the draw hook is free (6.6k
+  instructions in all, 0.01 %; a frame draws a handful of widgets), but
+  the rows weren't -- `on_wait` cost 66.7M instructions against the
+  renders' 56.0M. Each frame every row was built cell by cell
+  (`ctui_cell_encode()` + `ctui_buf_add()` each), UTF-8-checked a
+  codepoint at a time, copied and compared in `set_value()`, and a
+  changed one JSON-quoted with a `printf` per escape (the braille graphs:
+  all escapes). Now: `row_text()` writes printable ASCII straight into a
+  stack buffer; a row equal to its node's text isn't set at all;
+  `utf8_ok()` steps over ASCII bytes; `ctui_json_quote()` adds runs of
+  plain ASCII at once and writes `\uXXXX` by hand -- byte for byte the
+  same output (ctui-wm's supervisor compares signatures written by older
+  binaries; json_test pins the bytes, old code and new). `on_wait` 66.7M
+  -> 17.0M, the run 153.6M -> 103.8M, the screens identical.
 - [x] **The widgets found as they're drawn** (2026-11-08, ctui-wm session
   324, notes/ui-nodes.md w1-w2 there). Naming a widget by its
   `CTUI_WIDGET` didn't hold: most tables and every entry are drawn from

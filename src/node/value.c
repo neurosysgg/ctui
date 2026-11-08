@@ -132,6 +132,10 @@ static int utf8_ok(const char *s, size_t len) {
     if (s[i] == '\0') {
       return 0;
     }
+    if ((unsigned char)s[i] < 0x80) {
+      i++;
+      continue;
+    }
     char tmp[5] = {0};
     size_t n = len - i < 4 ? len - i : 4;
     memcpy(tmp, s + i, n); /* decode never reads past a NUL */

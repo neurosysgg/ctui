@@ -426,23 +426,45 @@ int ctui_json_equal(const CTUI_JSON *a, const CTUI_JSON *b) {
 
 /* --- writing --- */
 
+/* \uXXXX for one UTF-16 unit */
+static void quote_unit(char *out, unsigned u) {
+  static const char hex[] = "0123456789abcdef";
+  out[0] = '\\';
+  out[1] = 'u';
+  for (int i = 0; i < 4; i++) {
+    out[2 + i] = hex[(u >> (12 - 4 * i)) & 0xf];
+  }
+}
+
 void ctui_json_quote(CTUI_BUF *b, const char *s) {
   s = s ? s : ""; /* a hand-built tree's missing string */
   ctui_buf_add(b, "\"", 1);
   while (*s) {
+    /* a run of plain ASCII in one go */
+    size_t run = 0;
+    while (s[run] >= 0x20 && s[run] < 0x7f && s[run] != '"' && s[run] != '\\') {
+      run++;
+    }
+    if (run) {
+      ctui_buf_add(b, s, run);
+      s += run;
+      continue;
+    }
     uint32_t cp;
     s += ctui_utf8_decode(s, &cp);
+    char esc[12];
     if (cp == '"' || cp == '\\') {
-      ctui_buf_printf(b, "\\%c", (int)cp);
-    } else if (cp >= 0x20 && cp < 0x7f) {
-      char c = (char)cp;
-      ctui_buf_add(b, &c, 1);
+      esc[0] = '\\';
+      esc[1] = (char)cp;
+      ctui_buf_add(b, esc, 2);
     } else if (cp < 0x10000) {
-      ctui_buf_printf(b, "\\u%04x", (unsigned)cp);
+      quote_unit(esc, (unsigned)cp);
+      ctui_buf_add(b, esc, 6);
     } else {
       cp -= 0x10000;
-      ctui_buf_printf(b, "\\u%04x\\u%04x", 0xd800 + (unsigned)(cp >> 10),
-                      0xdc00 + (unsigned)(cp & 0x3ff));
+      quote_unit(esc, 0xd800 + (unsigned)(cp >> 10));
+      quote_unit(esc + 6, 0xdc00 + (unsigned)(cp & 0x3ff));
+      ctui_buf_add(b, esc, 12);
     }
   }
   ctui_buf_add(b, "\"", 1);

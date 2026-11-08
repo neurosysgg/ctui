@@ -30,29 +30,37 @@ static const CTUI_NODE_TYPE FOCUS = {
 
 /* --- the screen ---------------------------------------------------------- */
 
-/* row r of the compositor as text, trailing blanks dropped, cut to what a
- * node holds */
-static void row_text(const CTUI_COMPOSITOR *comp, int r, CTUI_BUF *b) {
+/* row r of the compositor as text into out (CTUI_NODE_TEXT_MAX + 1 bytes),
+ * trailing blanks dropped, cut to what a node holds: printable ASCII as
+ * is, the rest encoded */
+static void row_text(const CTUI_COMPOSITOR *comp, int r, char *out) {
   const CTUI_CELL *row = comp->cells + (size_t)r * (size_t)comp->cols;
-  size_t keep = 0;
+  size_t len = 0, keep = 0;
   for (int c = 0; c < comp->cols; c++) {
-    if (row[c].ch == CTUI_CELL_CONT) {
+    uint32_t ch = row[c].ch ? row[c].ch : ' ';
+    if (ch >= 0x20 && ch < 0x7f) {
+      if (len == CTUI_NODE_TEXT_MAX) {
+        break;
+      }
+      out[len++] = (char)ch;
+      if (ch != ' ') {
+        keep = len;
+      }
+      continue;
+    }
+    if (ch == CTUI_CELL_CONT) {
       continue;
     }
     char enc[CTUI_CLUSTER_MAX * 4];
-    int n = ctui_cell_encode(row[c].ch ? row[c].ch : ' ', enc);
-    if (b->len + (size_t)n > CTUI_NODE_TEXT_MAX) {
+    int n = ctui_cell_encode(ch, enc);
+    if (len + (size_t)n > CTUI_NODE_TEXT_MAX) {
       break;
     }
-    ctui_buf_add(b, enc, (size_t)n);
-    if (!(n == 1 && enc[0] == ' ')) {
-      keep = b->len;
-    }
+    memcpy(out + len, enc, (size_t)n);
+    len += (size_t)n;
+    keep = len;
   }
-  b->len = keep;
-  if (b->s) {
-    b->s[keep] = '\0';
-  }
+  out[keep] = '\0';
 }
 
 static void publish_rows(CTUI_UI *ui, int rows) {
@@ -90,13 +98,13 @@ static void update_screen(CTUI_UI *ui) {
   snprintf(size, sizeof size, "%dx%d", comp->rows, comp->cols);
   publish_rows(ui, comp->rows);
   ctui_node_set_str(ui->size, size);
+  char text[CTUI_NODE_TEXT_MAX + 1];
   for (int r = 0; r < ui->nrows; r++) {
-    CTUI_BUF b = {0};
-    row_text(comp, r, &b);
-    if (ui->rows[r]) {
-      ctui_node_set_str(ui->rows[r], b.s ? b.s : "");
+    row_text(comp, r, text);
+    /* most rows are as they were: no check, copy or compare of the value */
+    if (ui->rows[r] && strcmp(ctui_node_text(ui->rows[r]), text) != 0) {
+      ctui_node_set_str(ui->rows[r], text);
     }
-    free(b.s);
   }
   ctui_node_set_int(ui->frame, (int64_t)ui->app->frames);
 }

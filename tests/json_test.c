@@ -154,11 +154,24 @@ static void test_notes(void) {
   }
 }
 
+/* the quoting's bytes exactly: ASCII in runs, escapes as before (written
+ * signatures are compared across binaries) */
+static void test_quote_bytes(void) {
+  CTUI_BUF b = {0};
+  ctui_json_quote(&b, "ab\"c\\d\t\x7f\xc3\xa9\xe2\xa3\xbf\xf0\x9f\x98\x80"
+                      "\xffz");
+  CTUI_TEST_ASSERT(b.s && strcmp(b.s, "\"ab\\\"c\\\\d\\u0009\\u007f\\u00e9"
+                                   "\\u28ff\\ud83d\\ude00\\ufffdz\"") == 0,
+                   "quoted byte for byte (%s)", b.s ? b.s : "(null)");
+  free(b.s);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
   test_round_trip();
   test_numbers();
   test_notes();
+  test_quote_bytes();
   ctui_log_shutdown();
   return ctui_test_summary();
 }
