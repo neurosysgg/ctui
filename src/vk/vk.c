@@ -1,3 +1,6 @@
+/* clock_gettime() is POSIX, not C11 */
+#define _POSIX_C_SOURCE 200809L
+
 #include "vk.h"
 
 #include "fonts/spleen.h"
@@ -5,6 +8,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static const uint32_t k_cells_spv[] =
 #include "shaders/cells.spv.h"
@@ -25,8 +29,10 @@ typedef struct {
  * images' texels, the image table (placeholder cells' images by id) */
 #define BINDINGS 7u
 /* an image on the card for placeholder cells: id, offset, w h (texels),
- * its virtual placement's cols rows */
-#define TAB_WORDS 6u
+ * its virtual placement's cols rows; a wipe's split column (NO_WIPE:
+ * none), its left image's offset, its marker's offset, w h (w 0: none) */
+#define TAB_WORDS 12u
+#define NO_WIPE 0xffffffffu
 /* a placement on the card: x y w h (pixels), the image's offset in the
  * arena (words), its w h (texels), z */
 #define PLACE_WORDS 8u
@@ -42,6 +48,12 @@ typedef struct {
   int vcols, vrows;   /* place_file()'s cells; 0: none */
   uint32_t off, room; /* where in the arena, how many words */
   int up;             /* texels to go up */
+  /* a wipe (gfx.h's): left of split from left, the marker over it; x
+   * from x0 at t0 (CLOCK_MONOTONIC ns) at v px a second, to x_end */
+  unsigned left, marker;
+  double x0, v, x_end;
+  uint64_t t0;
+  int split;
 } IMG;
 
 /* a placement: display()/image_commit() are placement 0 of their image,
@@ -645,6 +657,22 @@ const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void) {
   return &sink;
 }
 
+static uint64_t mono_ns(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+}
+
+/* a wipe's x at now, held at x_end */
+static double wipe_x(const IMG *im, uint64_t now) {
+  double t = now > im->t0 ? (double)(now - im->t0) / 1e9 : 0.0;
+  double x = im->x0 + im->v * t;
+  return im->v >= 0 ? (x < im->x_end ? x : im->x_end)
+                    : (x > im->x_end ? x : im->x_end);
+}
+
+static int split_at(double x) { return x < 0 ? 0 : (int)x; }
+
 int ctui_vk_pending(const CTUI_VK *vk) {
   return vk->sized && memchr(vk->tdirty, 1, (size_t)vk->tx * vk->ty) != NULL;
 }
@@ -914,6 +942,15 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
       t[3] = (uint32_t)im->h;
       t[4] = (uint32_t)im->vcols;
       t[5] = (uint32_t)im->vrows;
+      const IMG *lf = im->left ? img_find(vk, im->left) : NULL;
+      const IMG *mk = im->marker ? img_find(vk, im->marker) : NULL;
+      int wipe = lf && lf->room && lf->w == im->w && lf->h == im->h;
+      t[6] = wipe ? (uint32_t)im->split : NO_WIPE;
+      t[7] = wipe ? lf->off : 0;
+      t[8] = mk && mk->room ? mk->off : 0;
+      t[9] = mk && mk->room ? (uint32_t)mk->w : 0;
+      t[10] = mk && mk->room ? (uint32_t)mk->h : 0;
+      t[11] = 0;
     }
     tab.size = (size_t)ntab * TAB_WORDS * 4u;
     vk->shown = shown;
@@ -1124,6 +1161,70 @@ static void s_free(void *ctx, unsigned int image_id) {
   (void)ctx, (void)image_id;
 }
 
+static void s_wipe(void *ctx, unsigned int image_id, unsigned int left_id,
+                   unsigned int marker_id, double x, double px_per_s,
+                   double x_end) {
+  CTUI_VK *vk = ctx;
+  IMG *im = img_find(vk, image_id);
+  if (!im) {
+    ctui_logf(E_WRN, "[CTUI:VK] - wipe of image %u: no such image\n", image_id);
+    return;
+  }
+  uint64_t now = mono_ns();
+  if (left_id && im->left == left_id && im->marker == marker_id &&
+      im->v == px_per_s && im->x_end == x_end) {
+    double at = wipe_x(im, now) - x;
+    if (at > -1.0 && at < 1.0) {
+      return; /* where it is already: no step back */
+    }
+  }
+  im->left = left_id;
+  im->marker = marker_id;
+  im->x0 = x;
+  im->v = left_id ? px_per_s : 0.0;
+  im->x_end = x_end;
+  im->t0 = now;
+  im->split = split_at(x);
+  mark_id(vk, image_id);
+  vk->places_up = 1;
+}
+
+int ctui_vk_at(CTUI_VK *vk, uint64_t now_ns, uint64_t *next_ns) {
+  uint64_t next = 0;
+  int moving = 0;
+  for (unsigned i = 0; i < vk->nimg; i++) {
+    IMG *im = &vk->imgs[i];
+    if (!im->left) {
+      continue;
+    }
+    double x = wipe_x(im, now_ns);
+    int split = split_at(x);
+    if (split != im->split) {
+      im->split = split;
+      mark_id(vk, im->id);
+      vk->places_up = 1;
+    }
+    if (im->v == 0.0 || x == im->x_end) {
+      continue;
+    }
+    moving = 1;
+    /* when the split next moves a column (or x reaches its end) */
+    double to = im->v > 0 ? (double)split + 1.0 : (double)split;
+    if (im->v > 0 ? to > im->x_end : to < im->x_end) {
+      to = im->x_end;
+    }
+    double dt = (to - x) / im->v;
+    uint64_t in = dt > 0 ? (uint64_t)(dt * 1e9) + 1u : 1u;
+    if (!next || in < next) {
+      next = in;
+    }
+  }
+  if (next_ns) {
+    *next_ns = next;
+  }
+  return moving;
+}
+
 static void s_delete(void *ctx, unsigned int image_id) {
   CTUI_VK *vk = ctx;
   mark_id(vk, image_id);
@@ -1208,7 +1309,7 @@ const CTUI_GFX_SINK *ctui_vk_gfx_sink(void) {
   static const CTUI_GFX_SINK sink = {
       s_display,    s_begin,      s_commit,     s_free,
       s_delete,     s_place_file, s_place_rgba, s_display_px,
-      s_put,        s_unput,      s_flush};
+      s_wipe,       s_put,        s_unput,      s_flush};
   return &sink;
 }
 

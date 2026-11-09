@@ -69,6 +69,26 @@ void ctui_drawn_path(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l, int w,
            ctui_look_control_key(c, l, w, h));
 }
 
+/* c painted w x h into a graphics sink: the pixels, no file (painted once
+ * a slot: the key names them), fit into cols x rows */
+static unsigned int sunk_id(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
+                            int w, int h, int cols, int rows) {
+  char path[4096];
+  ctui_drawn_path(c, l, w, h, path, sizeof path);
+  int fresh;
+  unsigned int id = ctui_icon_slot(path, &fresh);
+  if (id && fresh) {
+    unsigned char *rgba = malloc((size_t)w * (size_t)h * 4);
+    if (!rgba) {
+      return 0;
+    }
+    ctui_look_control_paint(c, l, rgba, w, h);
+    ctui_gfx_place_rgba(id, rgba, w, h, cols, rows);
+    free(rgba);
+  }
+  return id;
+}
+
 unsigned int ctui_drawn_id(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
                            int cols, int rows) {
   int cw, ch;
@@ -77,24 +97,11 @@ unsigned int ctui_drawn_id(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
     return 0;
   }
   int w = cols * cw, h = rows * ch;
+  if (ctui_gfx_sunk()) {
+    return sunk_id(c, l, w, h, cols, rows);
+  }
   char path[4096];
   ctui_drawn_path(c, l, w, h, path, sizeof path);
-  if (ctui_gfx_sunk()) {
-    /* images go to a graphics sink: the pixels, no file (painted once a
-     * slot: the key names them) */
-    int fresh;
-    unsigned int id = ctui_icon_slot(path, &fresh);
-    if (id && fresh) {
-      unsigned char *rgba = malloc((size_t)w * (size_t)h * 4);
-      if (!rgba) {
-        return 0;
-      }
-      ctui_look_control_paint(c, l, rgba, w, h);
-      ctui_gfx_place_rgba(id, rgba, w, h, cols, rows);
-      free(rgba);
-    }
-    return id;
-  }
   struct stat st;
   if (stat(path, &st) != 0) {
     mkdir(ctui_drawn_dir(), 0700);
@@ -108,6 +115,36 @@ unsigned int ctui_drawn_id(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
     }
   }
   return ctui_icon_id_box(path, cols, rows);
+}
+
+unsigned int ctui_drawn_wipe_id(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
+                                int cols, double value_per_s) {
+  int cw, ch;
+  if (!ctui_gfx_sunk() || !ctui_icon_enabled() || c->kind != CTUI_LOOK_CTL_SLIDER ||
+      c->max <= 0 || cols <= 0 || ctui_drawn_cell_px(&cw, &ch) != 0 || cols * cw <= ch) {
+    return 0;
+  }
+  int w = cols * cw, h = ch, tw;
+  CTUI_LOOK_CONTROL part = *c;
+  part.flags |= CTUI_LOOK_CTL_PART_TRACK;
+  part.value = 0;
+  unsigned int empty = sunk_id(&part, l, w, h, cols, 1);
+  part.value = part.max;
+  unsigned int full = sunk_id(&part, l, w, h, cols, 1);
+  ctui_look_slider_split(l, w, h, 0, c->max, &tw);
+  part.flags = (c->flags & ~CTUI_LOOK_CTL_PART_TRACK) | CTUI_LOOK_CTL_PART_THUMB;
+  part.value = 0;
+  unsigned int thumb = sunk_id(&part, l, tw, h, 1, 1);
+  if (!empty || !full || !thumb) {
+    return 0;
+  }
+  /* share()'s rounding as a line: its floor is the split at every value */
+  double len = w - tw, per = len / c->max;
+  int value = c->value < 0 ? 0 : c->value > c->max ? c->max : c->value;
+  double x = value * per + 0.5 + tw / 2;
+  double end = value_per_s > 0 ? len + tw / 2 : value_per_s < 0 ? tw / 2 : x;
+  ctui_gfx_wipe(empty, full, thumb, x, value_per_s * per, end);
+  return empty;
 }
 
 static unsigned g_live_slots;

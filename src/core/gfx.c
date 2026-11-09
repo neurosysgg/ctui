@@ -116,6 +116,16 @@ int ctui_gfx_display_px(int row, int col, int cell_cols, int cell_rows, int x,
   return 0;
 }
 
+int ctui_gfx_wipe(unsigned int image_id, unsigned int left_id,
+                  unsigned int marker_id, double x, double px_per_s,
+                  double x_end) {
+  if (!g_sink) {
+    return -1;
+  }
+  g_sink->wipe(g_sink_ctx, image_id, left_id, marker_id, x, px_per_s, x_end);
+  return 0;
+}
+
 void ctui_gfx_set_mode(unsigned int mode) {
   ctui_g_gfx_mode = mode;
   ctui_logf(E_INF, "[CTUI:GFX] - tier set to 0x%x @ tick %d\n", mode,

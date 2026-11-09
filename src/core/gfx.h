@@ -76,6 +76,10 @@ typedef struct {
                      int cell_rows, int x, int y, int w, int h,
                      const unsigned char *rgba, int width, int height,
                      unsigned int image_id, int z);
+  /* image_id shown as a wipe that moves (ctui_gfx_wipe()) */
+  void (*wipe)(void *ctx, unsigned int image_id, unsigned int left_id,
+               unsigned int marker_id, double x, double px_per_s,
+               double x_end);
   void (*put)(void *ctx, unsigned int image_id, unsigned int placement_id,
               int row, int col, int cols, int rows, int z);
   void (*unput)(void *ctx, unsigned int image_id, unsigned int placement_id);
@@ -106,6 +110,21 @@ int ctui_gfx_place_rgba(unsigned int image_id, const unsigned char *rgba,
 int ctui_gfx_display_px(int row, int col, int cell_cols, int cell_rows, int x,
                         int y, int w, int h, const unsigned char *rgba,
                         int width, int height, unsigned int image_id, int z);
+
+/* image_id (place_rgba()'s, shown by its placeholder cells) as a wipe:
+ * left_id's pixels left of column x (in the image's texels), its own from
+ * x on, and marker_id's centred on x (opaque where it has any alpha; 0:
+ * none) -- a slider from its track filled, empty and its thumb
+ * (look/control.h's CTUI_LOOK_CTL_PART_*). x moves at px_per_s from now
+ * until x_end, the sink drawing each frame it presents where x is then,
+ * so the motion is as smooth as the display, not the app's tick. Set
+ * again each tick from the real position: one within a pixel of where
+ * the sink has it already keeps its timeline (no step back). left_id 0
+ * ends the wipe. Only through a sink: 0 once the sink took it, -1 when
+ * there's none (the caller draws the control as a whole) */
+int ctui_gfx_wipe(unsigned int image_id, unsigned int left_id,
+                  unsigned int marker_id, double x, double px_per_s,
+                  double x_end);
 
 /* transmits and displays a width x height RGBA image via the Kitty
  * graphics protocol (https://sw.kovidgoyal.net/kitty/graphics-protocol/),

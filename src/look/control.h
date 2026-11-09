@@ -110,6 +110,12 @@ typedef enum {
   /* a KNOB's mod_at is where its modulation has it now: a dot across its
    * groove there */
   CTUI_LOOK_CTL_MOD_AT = 128,
+  /* a SLIDER (wider than tall) in the parts a sink moves it with
+   * (ctui_gfx_wipe()): its track alone, filled up to value as the slider
+   * would be; its thumb alone, at the canvas's left on nothing (painted
+   * ctui_look_slider_split()'s thumb px wide) */
+  CTUI_LOOK_CTL_PART_TRACK = 256,
+  CTUI_LOOK_CTL_PART_THUMB = 512,
 } CTUI_LOOK_CTL_FLAG;
 
 typedef enum {
@@ -247,6 +253,13 @@ uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
  * left of the oldest, or too small to draw (what a pointer over the
  * graph is over) */
 int ctui_look_graph_at(const CTUI_LOOK_CONTROL *c, int w, int h, int x);
+
+/* a SLIDER w x h px wide (wider than tall) at value of max: where its
+ * fill ends (px from the left; its thumb centred there) and the thumb's
+ * width in *thumb_w. The track filled left of it, empty right of it, and
+ * the thumb at split - thumb_w / 2 make the slider's own pixels. */
+int ctui_look_slider_split(const CTUI_LOOK *l, int w, int h, int value,
+                           int max, int *thumb_w);
 
 /* paints c into rgba (w x h, cleared first: what the control doesn't
  * cover stays transparent, or the face with the look's panel) */

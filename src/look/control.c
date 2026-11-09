@@ -549,6 +549,13 @@ static const unsigned char *marks(const CTUI_LOOK_CONTROL *c,
 static void paint_slider(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
                          const CTUI_LOOK *l) {
   int w = cv->w, h = cv->h;
+  if (c->flags & CTUI_LOOK_CTL_PART_THUMB) {
+    /* (its canvas the thumb's width: taller than wide, not a fader) */
+    int ty = h > 4 ? 1 : 0;
+    ctui_look_paint_box(cv, 0, ty, w, h - 2 * ty, l, CTUI_LOOK_PAINT_RAISED,
+                        l->bevel, l->outline, role(l, CTUI_LOOK_FACE));
+    return;
+  }
   if (h > w) {
     /* a fader: the same turned upright, its thumb from the bottom */
     int tw = slider_thumb(l, h, w);
@@ -567,6 +574,7 @@ static void paint_slider(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   }
   int tw = slider_thumb(l, w, h);
   int pos = share(c->value, c->max, w - tw);
+  int ty = h > 4 ? 1 : 0;
   /* the groove's edge plus room inside it for the accent */
   int gh = min2(h, 2 * l->groove + max2(2, h / 8)), gy = (h - gh) / 2;
   int gx = tw / 2, gw = w - 2 * (tw / 2);
@@ -575,9 +583,18 @@ static void paint_slider(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
   int in = l->groove;
   ctui_look_paint_rect(cv, gx + in, gy + in, pos + tw / 2 - gx - in,
                        gh - 2 * in, marks(c, l, CTUI_LOOK_ACCENT));
-  int ty = h > 4 ? 1 : 0;
+  if (c->flags & CTUI_LOOK_CTL_PART_TRACK) {
+    return;
+  }
   ctui_look_paint_box(cv, pos, ty, tw, h - 2 * ty, l, CTUI_LOOK_PAINT_RAISED,
                       l->bevel, l->outline, role(l, CTUI_LOOK_FACE));
+}
+
+int ctui_look_slider_split(const CTUI_LOOK *l, int w, int h, int value,
+                           int max, int *thumb_w) {
+  int tw = slider_thumb(l, w, h);
+  *thumb_w = tw;
+  return share(value, max, w - tw) + tw / 2;
 }
 
 static void focus_ring(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
@@ -1371,7 +1388,7 @@ void ctui_look_control_paint(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
                                 (unsigned char)c->under};
     ctui_look_paint_rect(&cv, 0, 0, w, h, u);
   } else if (l->panel && c->kind != CTUI_LOOK_CTL_BOX &&
-             !(c->flags & CTUI_LOOK_CTL_BARE)) {
+             !(c->flags & (CTUI_LOOK_CTL_BARE | CTUI_LOOK_CTL_PART_THUMB))) {
     /* (a frame's icon is over its box: clear round it) */
     ctui_look_paint_rect(&cv, 0, 0, w, h, role(l, CTUI_LOOK_FACE));
   }

@@ -82,6 +82,16 @@ void ctui_drawn_end_chip(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row,
                          CTUI_LOOK_GLYPH g, const char *text, unsigned char fg,
                          unsigned char bg);
 
+/* the image id showing SLIDER c (wider than tall) over cols x 1 cells in
+ * l as a graphics sink's wipe (ctui_gfx_wipe()): its track filled, empty
+ * and its thumb painted once each, the split where c->value has it and
+ * moving value_per_s (of c->max) a second from now -- a playbar the sink
+ * moves at the display's rate between the app's ticks. Called again each
+ * tick with the real value. 0 without a sink, icons off or not a
+ * horizontal slider (the caller draws it whole: ctui_drawn_id()) */
+unsigned int ctui_drawn_wipe_id(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
+                                int cols, double value_per_s);
+
 /* shows it at (row, col) over bg; nothing for id 0 */
 void ctui_drawn_put(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp, int row, int col,
                     unsigned int id, int cols, int rows, unsigned char bg);

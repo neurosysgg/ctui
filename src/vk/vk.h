@@ -88,6 +88,13 @@ const CTUI_GFX_SINK *ctui_vk_gfx_sink(void);
  * before acquiring a swapchain image, so an idle app presents nothing */
 int ctui_vk_pending(const CTUI_VK *vk);
 
+/* the frame's time (CLOCK_MONOTONIC ns, the one ctui_gfx_wipe() counts
+ * from): each moving wipe's split where it is then, its cells marked
+ * when it moved a column. 1 while something still moves, with the ns
+ * until the next column in *next_ns (a host wakes then to present it:
+ * the motion at the display's rate, nothing presented in between) */
+int ctui_vk_at(CTUI_VK *vk, uint64_t now_ns, uint64_t *next_ns);
+
 /* into cmd (recording): what changed since the last record uploaded and
  * painted, between barriers, so the caller may copy from the surface
  * after it. The tiles painted (0: nothing recorded at all) */

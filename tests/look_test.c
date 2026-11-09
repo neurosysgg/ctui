@@ -2233,6 +2233,55 @@ static void test_paint_rows(void) {
                    bad);
 }
 
+/* a slider in a sink's parts (ctui_gfx_wipe()): the track filled left of
+ * the split, empty right of it, the thumb over it there, give the
+ * slider's own pixels at every value, in every look */
+static void test_slider_parts(void) {
+  enum { MW = 200, MH = 24 };
+  static unsigned char want[MW * MH * 4], full[MW * MH * 4], empty[MW * MH * 4],
+      thumb[MW * MH * 4], got[MW * MH * 4];
+  static const int sizes[][2] = {{200, 16}, {97, 24}, {40, 12}, {16, 8}};
+  int bad = 0, cases = 0;
+  for (int n = 0; ctui_look_names[n]; n++) {
+    CTUI_LOOK l;
+    ctui_look_builtin(ctui_look_names[n], &l);
+    for (size_t z = 0; z < sizeof sizes / sizeof *sizes; z++) {
+      int w = sizes[z][0], h = sizes[z][1], max = 37;
+      CTUI_LOOK_CONTROL c = {.kind = CTUI_LOOK_CTL_SLIDER, .max = max,
+                             .flags = CTUI_LOOK_CTL_PART_TRACK};
+      ctui_look_control_paint(&c, &l, empty, w, h);
+      c.value = max;
+      ctui_look_control_paint(&c, &l, full, w, h);
+      int tw;
+      ctui_look_slider_split(&l, w, h, 0, max, &tw);
+      c.flags = CTUI_LOOK_CTL_PART_THUMB;
+      c.value = 0;
+      ctui_look_control_paint(&c, &l, thumb, tw, h);
+      for (int v = 0; v <= max; v++) {
+        CTUI_LOOK_CONTROL whole = {.kind = CTUI_LOOK_CTL_SLIDER, .value = v, .max = max};
+        ctui_look_control_paint(&whole, &l, want, w, h);
+        int split = ctui_look_slider_split(&l, w, h, v, max, &tw);
+        for (int y = 0; y < h; y++) {
+          for (int x = 0; x < w; x++) {
+            size_t i = ((size_t)y * w + x) * 4;
+            memcpy(got + i, (x < split ? full : empty) + i, 4);
+            int tx = x - (split - tw / 2);
+            if (tx >= 0 && tx < tw && thumb[((size_t)y * tw + tx) * 4 + 3]) {
+              memcpy(got + i, thumb + ((size_t)y * tw + tx) * 4, 4);
+            }
+          }
+        }
+        bad += memcmp(got, want, (size_t)w * h * 4) != 0;
+        cases++;
+      }
+    }
+  }
+  CTUI_TEST_ASSERT(bad == 0,
+                   "a slider's track filled and empty either side of its split, "
+                   "its thumb over it: the slider's own pixels (%d of %d differ)",
+                   bad, cases);
+}
+
 int main(void) {
   ctui_log_init(0);
   test_looks();
@@ -2240,6 +2289,7 @@ int main(void) {
   test_primitives();
   test_paint_rows();
   test_slider();
+  test_slider_parts();
   test_knob();
   test_fader();
   test_level_signal();

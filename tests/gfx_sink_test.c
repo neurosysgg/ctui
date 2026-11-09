@@ -77,6 +77,15 @@ static void s_display_px(void *ctx, int row, int col, int cell_cols,
   rec("display_px(%u %d,%d %dx%d @%d,%d %dx%d %dx%dpx z%d px%d) ", image_id,
       row, col, cell_cols, cell_rows, x, y, w, h, width, height, z, rgba[0]);
 }
+static double g_wipe[3]; /* the last wipe's x, px_per_s, x_end */
+static void s_wipe(void *ctx, unsigned int image_id, unsigned int left_id,
+                   unsigned int marker_id, double x, double px_per_s,
+                   double x_end) {
+  (void)ctx;
+  g_wipe[0] = x, g_wipe[1] = px_per_s, g_wipe[2] = x_end;
+  rec("wipe(%u %u %u %.1f %.1f %.1f) ", image_id, left_id, marker_id, x,
+      px_per_s, x_end);
+}
 static void s_put(void *ctx, unsigned int image_id, unsigned int placement_id,
                   int row, int col, int cols, int rows, int z) {
   (void)ctx;
@@ -95,7 +104,7 @@ static void s_flush(void *ctx) {
 
 static const CTUI_GFX_SINK k_sink = {
     s_display, s_begin, s_commit, s_free,  s_delete,
-    s_place,   s_place_rgba, s_display_px, s_put, s_unput, s_flush};
+    s_place,   s_place_rgba, s_display_px, s_wipe, s_put, s_unput, s_flush};
 
 static int s_frame(void *ctx, const CTUI_SCREEN *s) {
   (void)ctx;
@@ -123,6 +132,7 @@ static void pics_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   ctui_gfx_kitty_place_file(7, "/icons/a.png", 2, 1);
   ctui_gfx_place_rgba(8, rgba, 1, 1, 1, 1);
   ctui_gfx_display_px(1, 1, 2, 1, 1, 2, 14, 12, rgba, 1, 1, 9, 0);
+  ctui_gfx_wipe(8, 7, 0, 3.5, 20.0, 40.0);
   ctui_gfx_kitty_put(7, 1, 1, 1, 2, 1, -2);
   ctui_gfx_kitty_unput(7, 1);
   ctui_gfx_kitty_delete(5);
@@ -199,6 +209,30 @@ static void test_drawn(void) {
     closedir(d);
   }
   CTUI_TEST_ASSERT(files == 0, "and no PNG written: %d files", files);
+
+  /* a slider as a wipe: its parts placed once, the split where the whole
+   * slider has it at every value, the rate in px */
+  CTUI_LOOK_CONTROL sl = {.kind = CTUI_LOOK_CTL_SLIDER, .max = 997};
+  g_rec[0] = '\0';
+  int off = 0, placed = 0, tw = 0;
+  for (sl.value = 0; sl.value <= sl.max; sl.value++) {
+    unsigned id = ctui_drawn_wipe_id(&sl, &look, 30, 0.0);
+    int want = ctui_look_slider_split(&look, 240, 16, sl.value, sl.max, &tw);
+    off += !id || (int)g_wipe[0] != want || g_wipe[1] != 0.0 || g_wipe[2] != g_wipe[0];
+  }
+  for (const char *p = g_rec; (p = strstr(p, "place_rgba(")); p++) {
+    placed++;
+  }
+  CTUI_TEST_ASSERT(off == 0 && placed == 3,
+                   "a slider's wipe: split where the slider has it at all %d "
+                   "values (%d off), its 3 parts placed once (%d)",
+                   sl.max + 1, off, placed);
+  sl.value = 0;
+  ctui_drawn_wipe_id(&sl, &look, 30, 99.7);
+  CTUI_TEST_ASSERT(g_wipe[1] > 23.0 && g_wipe[1] < 23.2 && g_wipe[2] == 240 - tw + tw / 2,
+                   "moving: 99.7 of 997 a second is a tenth of the travel in "
+                   "px (%.3f), to its end (%.1f)",
+                   g_wipe[1], g_wipe[2]);
   ctui_drawn_live_free(&lv);
   ctui_icon_enable(0);
   ctui_icon_reset();
@@ -229,6 +263,7 @@ int main(void) {
                                   "place_rgba(8 1x1px 1x1 px7) "
                                   "display_px(9 1,1 2x1 @1,2 14x12 1x1px "
                                   "z0 px7) "
+                                  "wipe(8 7 0 3.5 20.0 40.0) "
                                   "put(7 p1 1,1 2x1 z-2) "
                                   "unput(7 p1) delete(5) "
                                   "flush "),
@@ -257,7 +292,8 @@ int main(void) {
                                            1, 1, 1) == -1 &&
                        ctui_gfx_display_px(1, 1, 1, 1, 0, 0, 1, 1,
                                            (const unsigned char *)"x", 1, 1,
-                                           9, 0) == -1,
+                                           9, 0) == -1 &&
+                       ctui_gfx_wipe(8, 7, 0, 1, 1, 2) == -1,
                    "none: not sunk, place_rgba and display_px refused (the "
                    "caller writes a file / paints the cells' size)");
   g_rec[0] = '\0';

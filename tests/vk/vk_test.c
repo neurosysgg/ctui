@@ -277,6 +277,11 @@ static unsigned g_npl;
 static unsigned g_ph_id;
 static const uint8_t *g_ph_rgba;
 static int g_ph_w, g_ph_h, g_ph_cols, g_ph_rows;
+/* its wipe (ctui_gfx_wipe()): the split (-1: none), the left image's
+ * texels, the marker's */
+static int g_wipe_split = -1;
+static const uint8_t *g_wipe_left, *g_wipe_mark;
+static int g_wipe_mw, g_wipe_mh;
 
 /* src/vk/vk.c's placeholder_at(): the row and column from the left */
 static void ph_at(uint32_t *w, const uint32_t *left) {
@@ -357,8 +362,20 @@ static uint32_t ph_texel(unsigned id, unsigned gw, unsigned gh, unsigned dx,
     return 0;
   }
   /* texel() of a 1 x 1 cell placement whose cell is dw x dh */
-  PL p = {0, 0, 1, 1, 0, g_ph_rgba, g_ph_w, g_ph_h, 0, 0, 0, 0};
-  return texel(&p, dw, dh, dx - ox, dy - oy);
+  unsigned ex = dx - ox, ey = dy - oy, sx = ex * iw / dw;
+  int wipe = g_wipe_split >= 0;
+  PL p = {0, 0, 1, 1, 0, wipe && (int)sx < g_wipe_split ? g_wipe_left : g_ph_rgba,
+          g_ph_w, g_ph_h, 0, 0, 0, 0};
+  uint32_t t = texel(&p, dw, dh, ex, ey);
+  int mx = (int)sx - (g_wipe_split - g_wipe_mw / 2);
+  if (wipe && g_wipe_mark && mx >= 0 && mx < g_wipe_mw) {
+    const uint8_t *m =
+        g_wipe_mark + ((ey * ih / dh) * (unsigned)g_wipe_mh / ih * (unsigned)g_wipe_mw + (unsigned)mx) * 4;
+    if (m[3]) {
+      t = (uint32_t)m[0] << 24 | (uint32_t)m[1] << 16 | (uint32_t)m[2] << 8 | m[3];
+    }
+  }
+  return t;
 }
 
 /* cells.comp's rule, on the host, from the screen's cells */
@@ -449,6 +466,8 @@ static const char *g_title = "ctui on the card";
 /* a placeholder run past column 255: 4 cells at (5, 20), the first one
  * column 254 of the image, the rest from the left */
 static int g_ph_wide;
+/* a wiped control's cells: 5 x 1 at (5, 18) */
+static int g_ph_row5;
 
 static void render_text(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   ctui_widget_puts(self, comp, 0, 0, g_title, CTUI_COLOR_DEFAULT,
@@ -475,7 +494,10 @@ static void render_text(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                    CTUI_COLOR_GREEN, CTUI_COLOR_DEFAULT);
   ctui_widget_putc_rgb_fg(self, comp, 5, 0, '#', 0x40, 0xc0, 0xff,
                           CTUI_COLOR_MAGENTA);
-  if (g_ph_id && !g_ph_wide) {
+  if (g_ph_id && g_ph_row5) {
+    ctui_widget_put_kitty_placeholder(self, comp, 5, 18, g_ph_id, 5, 1,
+                                      CTUI_COLOR_DEFAULT);
+  } else if (g_ph_id && !g_ph_wide) {
     ctui_widget_put_kitty_placeholder(self, comp, 2, 14, g_ph_id, 3, 2,
                                       CTUI_COLOR_DEFAULT);
   }
@@ -707,6 +729,85 @@ static void test_placed(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
   unlink(path);
 }
 
+static uint64_t now_ns(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+}
+
+/* a slider in parts (ctui_gfx_wipe()): its empty track the cells' image,
+ * the filled one left of the split, the thumb over it there -- still,
+ * then moving with the frame's time, then held at its end */
+static void test_wipe(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
+  enum { TW = 40, TH = 16, MW = 5 };
+  static uint8_t empty[TW * TH * 4], full[TW * TH * 4], thumb[MW * TH * 4];
+  for (int i = 0; i < TW * TH; i++) {
+    empty[i * 4] = 20, empty[i * 4 + 1] = 40, empty[i * 4 + 2] = (uint8_t)(100 + i % TW);
+    full[i * 4] = (uint8_t)(150 + i % TW), full[i * 4 + 1] = 30, full[i * 4 + 2] = 30;
+    empty[i * 4 + 3] = full[i * 4 + 3] = 255;
+  }
+  for (int i = 0; i < MW * TH; i++) {
+    thumb[i * 4] = 10, thumb[i * 4 + 1] = (uint8_t)(200 + i % MW), thumb[i * 4 + 2] = 10;
+    thumb[i * 4 + 3] = i / MW == 0 || i / MW == TH - 1 ? 0 : 255;
+  }
+  ctui_gfx_set_sink(ctui_vk_gfx_sink(), vk);
+  ctui_gfx_place_rgba(12, empty, TW, TH, 5, 1);
+  ctui_gfx_place_rgba(13, full, TW, TH, 5, 1);
+  ctui_gfx_place_rgba(14, thumb, MW, TH, 1, 1);
+  CTUI_TEST_ASSERT(ctui_gfx_wipe(12, 13, 14, 10.4, 0.0, 30.0) == 0, "a wipe goes to the sink");
+  g_ph_id = 12, g_ph_rgba = empty, g_ph_w = TW, g_ph_h = TH, g_ph_cols = 5, g_ph_rows = 1;
+  g_ph_row5 = 1;
+  g_wipe_split = 10, g_wipe_left = full, g_wipe_mark = thumb, g_wipe_mw = MW, g_wipe_mh = TH;
+  ctui_app_render(app, screen);
+  ctui_screen_flush(screen);
+  uint64_t next = 0;
+  CTUI_TEST_ASSERT(ctui_vk_at(vk, now_ns(), &next) == 0 && next == 0,
+                   "a still wipe: nothing moving");
+  paint(vk);
+  unsigned bad = differ(vk, screen);
+  /* row 5's cells from x 144: the split at 154, the thumb 152..156 */
+  unsigned row = (5 * 16 + 4) * W + 144;
+  CTUI_TEST_ASSERT(bad == 0 && g_px[row + 7] == rgba(0x9d1e1e) &&
+                       g_px[row + 8] == rgba(0x0ac80a) && g_px[row + 12] == rgba(0x0acc0a) &&
+                       g_px[row + 13] == rgba(0x142871),
+                   "the track filled left of its split, empty right, the thumb "
+                   "centred on it, as the reference (%u differ)",
+                   bad);
+
+  uint64_t t0 = now_ns();
+  ctui_gfx_wipe(12, 13, 14, 10.0, 100.0, 30.0);
+  /* 55 ms on: x 15.5 less the moment the call took to stamp its start */
+  int moving = ctui_vk_at(vk, t0 + 55000000u, &next);
+  g_wipe_split = 15;
+  paint(vk);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(moving && next > 0 && next <= 5100000u && bad == 0,
+                   "moving at 100 px/s, 55 ms on: the split at 15, the next "
+                   "column due within 5 ms (%llu ns), as the reference (%u differ)",
+                   (unsigned long long)next, bad);
+  unsigned tiles = paint(vk);
+  CTUI_TEST_ASSERT(tiles == 0, "between columns nothing to paint (%u)", tiles);
+  moving = ctui_vk_at(vk, t0 + 2000000000u, &next);
+  g_wipe_split = 30;
+  paint(vk);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(!moving && next == 0 && bad == 0,
+                   "past its end: held at 30, nothing moving (%u differ)", bad);
+  ctui_gfx_wipe(12, 0, 0, 0, 0, 0);
+  g_wipe_split = -1;
+  ctui_vk_at(vk, now_ns(), NULL);
+  paint(vk);
+  CTUI_TEST_ASSERT(differ(vk, screen) == 0, "the wipe ended: the image alone");
+  for (unsigned id = 12; id <= 14; id++) {
+    ctui_gfx_kitty_delete(id);
+  }
+  g_ph_id = 0, g_ph_row5 = 0;
+  ctui_app_render(app, screen);
+  ctui_screen_flush(screen);
+  paint(vk);
+  ctui_gfx_set_sink(NULL, NULL);
+}
+
 static void test_vk(void) {
   CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
   int rows = 0, cols = 0;
@@ -811,6 +912,7 @@ static void test_vk(void) {
 
   test_images(vk, screen);
   test_placed(vk, &app, screen);
+  test_wipe(vk, &app, screen);
 
   ctui_app_free(&app);
   ctui_screen_free(screen);
