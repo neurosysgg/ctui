@@ -1,15 +1,23 @@
 #version 450
-// The text painter (src/vk/vk.h): a workgroup a listed 16 x 16 tile of
-// the surface, each pixel its cell's glyph bit in the foreground, else
-// the background; past the last whole cell, the default background.
-// Integers only: the pixels are a pure function of the cells, so a test
-// pins them against a host reference (tests/vk/vk_test.c)
+// The painter (src/vk/vk.h): a workgroup a listed 16 x 16 tile of the
+// surface, each pixel its cell's glyph bit in the foreground, else the
+// background (past the last whole cell, the default background), with
+// the images placed over it as kitty composites them: z < 0 under the
+// glyph (below UNDER_BG only on a default background), z >= 0 over it,
+// in z order, alpha blended, each scaled to its rect by area average.
+// Integers only: the pixels are a pure function of the cells, the
+// placements and the texels, so a test pins them against a host
+// reference (tests/vk/vk_test.c)
 
 layout(local_size_x = 16, local_size_y = 16) in;
 layout(set = 0, binding = 0) readonly buffer Tiles { uint tile[]; };
 layout(set = 0, binding = 1) readonly buffer Cells { uint cell[]; };
 layout(set = 0, binding = 2) readonly buffer Atlas { uint atlas[]; };
 layout(set = 0, binding = 3) writeonly buffer Surf { uint px[]; };
+// x y w h, the texels' offset, their w h, z (src/vk/vk.c PLACE_WORDS)
+layout(set = 0, binding = 4) readonly buffer Places { uint place[]; };
+// RGBA bytes a word
+layout(set = 0, binding = 5) readonly buffer Arena { uint tex[]; };
 layout(push_constant) uniform Push {
   uint surf_w;
   uint surf_h;
@@ -20,11 +28,58 @@ layout(push_constant) uniform Push {
   uint bgra;
   uint def_fg; // CTUI_COLOR_DEFAULT's, a cell flagged so takes them
   uint def_bg; // and past the last whole cell
+  uint nplace;
 };
 
 // CTUI_ATTR_* (core/cell.h)
 const uint BOLD = 1u, DIM = 2u, UNDERLINE = 8u, STRIKE = 16u;
 const uint FG_DEFAULT = 1u << 8, BG_DEFAULT = 1u << 9, BOX = 0xffffu;
+const int UNDER_BG = -1073741824; // CTUI_GFX_KITTY_Z_UNDER_BG
+// the most texels a side one pixel averages: a bigger shrink skips
+const uint AREA_MAX = 16u;
+
+// placement p's texel at pixel (x, y), as RGBA (rgb << 8 | a), its
+// footprint averaged; alpha 0 outside it
+uint texel(uint p, uint x, uint y) {
+  uint b = p * 8u;
+  uint px0 = place[b], py0 = place[b + 1u], pw = place[b + 2u], ph = place[b + 3u];
+  if (x < px0 || y < py0 || x >= px0 + pw || y >= py0 + ph)
+    return 0u;
+  uint off = place[b + 4u], iw = place[b + 5u], ih = place[b + 6u];
+  uint dx = x - px0, dy = y - py0;
+  uint sx0 = dx * iw / pw, sy0 = dy * ih / ph;
+  uint sx1 = max(sx0 + 1u, (dx + 1u) * iw / pw);
+  uint sy1 = max(sy0 + 1u, (dy + 1u) * ih / ph);
+  uint stx = max(1u, (sx1 - sx0 + AREA_MAX - 1u) / AREA_MAX);
+  uint sty = max(1u, (sy1 - sy0 + AREA_MAX - 1u) / AREA_MAX);
+  uint r = 0u, g = 0u, bl = 0u, a = 0u, n = 0u;
+  for (uint sy = sy0; sy < sy1; sy += sty)
+    for (uint sx = sx0; sx < sx1; sx += stx) {
+      uint t = tex[off + sy * iw + sx];
+      r += t & 0xffu;
+      g += t >> 8 & 0xffu;
+      bl += t >> 16 & 0xffu;
+      a += t >> 24;
+      n++;
+    }
+  return (r / n) << 24 | (g / n) << 16 | (bl / n) << 8 | a / n;
+}
+
+// t (rgb << 8 | a) over dst (0xRRGGBB)
+uint over(uint dst, uint t) {
+  uint a = t & 0xffu;
+  if (a == 0u)
+    return dst;
+  uint src = t >> 8;
+  if (a == 255u)
+    return src;
+  uint o = 0u;
+  for (uint s = 0u; s < 24u; s += 8u) {
+    uint c = ((src >> s & 0xffu) * a + (dst >> s & 0xffu) * (255u - a) + 127u) / 255u;
+    o |= c << s;
+  }
+  return o;
+}
 
 uint word(uint rgb) {
   uint r = rgb >> 16 & 0xffu, g = rgb >> 8 & 0xffu, b = rgb & 0xffu;
@@ -38,13 +93,15 @@ void main() {
   if (x >= surf_w || y >= surf_h)
     return;
   uint cx = x / gw, cy = y / gh, rgb = def_bg;
+  bool on = false, bg_default = true;
+  uint fg = def_fg;
   if (cx < cols && cy < rows) {
     uint i = (cy * cols + cx) * 3u;
     uint g = cell[i] & 0xffffu, a = cell[i] >> 16;
-    uint fg = (a & FG_DEFAULT) != 0u ? def_fg : cell[i + 1u];
+    fg = (a & FG_DEFAULT) != 0u ? def_fg : cell[i + 1u];
     uint bg = (a & BG_DEFAULT) != 0u ? def_bg : cell[i + 2u];
+    bg_default = (a & BG_DEFAULT) != 0u;
     uint gx = x % gw, gy = y % gh;
-    bool on;
     if (g == BOX) {
       on = gx == 0u || gx == gw - 1u || gy == gh / 8u || gy == gh - 1u - gh / 8u;
     } else {
@@ -59,7 +116,15 @@ void main() {
       on = true;
     if ((a & DIM) != 0u)
       fg = ((fg & 0xfefefeu) >> 1) + ((bg & 0xfefefeu) >> 1);
-    rgb = on ? fg : bg;
+    rgb = bg;
   }
+  uint p = 0u;
+  for (; p < nplace && int(place[p * 8u + 7u]) < 0; p++)
+    if (int(place[p * 8u + 7u]) >= UNDER_BG || bg_default)
+      rgb = over(rgb, texel(p, x, y));
+  if (on)
+    rgb = fg;
+  for (; p < nplace; p++)
+    rgb = over(rgb, texel(p, x, y));
   px[y * surf_w + x] = word(rgb);
 }

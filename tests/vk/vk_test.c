@@ -258,6 +258,60 @@ static uint32_t rgba(uint32_t rgb) {
          0xff000000u;
 }
 
+/* the images the reference composites, as placed (cells, 0-based), in
+ * z order */
+typedef struct {
+  int row, col, cols, rows, z;
+  const uint8_t *rgba;
+  int w, h;
+} PL;
+static PL g_pl[4];
+static unsigned g_npl;
+
+/* cells.comp's texel(): rgb << 8 | a, the footprint averaged */
+static uint32_t texel(const PL *p, unsigned gw, unsigned gh, unsigned x,
+                      unsigned y) {
+  unsigned px0 = (unsigned)p->col * gw, py0 = (unsigned)p->row * gh;
+  unsigned pw = (unsigned)p->cols * gw, ph = (unsigned)p->rows * gh;
+  if (x < px0 || y < py0 || x >= px0 + pw || y >= py0 + ph) {
+    return 0;
+  }
+  unsigned iw = (unsigned)p->w, ih = (unsigned)p->h, dx = x - px0, dy = y - py0;
+  unsigned sx0 = dx * iw / pw, sy0 = dy * ih / ph;
+  unsigned sx1 = (dx + 1) * iw / pw, sy1 = (dy + 1) * ih / ph;
+  sx1 = sx1 > sx0 + 1 ? sx1 : sx0 + 1;
+  sy1 = sy1 > sy0 + 1 ? sy1 : sy0 + 1;
+  unsigned stx = (sx1 - sx0 + 15) / 16, sty = (sy1 - sy0 + 15) / 16;
+  stx = stx ? stx : 1;
+  sty = sty ? sty : 1;
+  unsigned c[4] = {0}, n = 0;
+  for (unsigned sy = sy0; sy < sy1; sy += sty) {
+    for (unsigned sx = sx0; sx < sx1; sx += stx) {
+      for (int k = 0; k < 4; k++) {
+        c[k] += p->rgba[(sy * iw + sx) * 4 + (unsigned)k];
+      }
+      n++;
+    }
+  }
+  return (c[0] / n) << 24 | (c[1] / n) << 16 | (c[2] / n) << 8 | c[3] / n;
+}
+
+static uint32_t over(uint32_t dst, uint32_t t) {
+  uint32_t a = t & 0xffu, src = t >> 8, o = 0;
+  if (a == 0) {
+    return dst;
+  }
+  if (a == 255) {
+    return src;
+  }
+  for (unsigned sh = 0; sh < 24; sh += 8) {
+    o |= (((src >> sh & 0xffu) * a + (dst >> sh & 0xffu) * (255 - a) + 127) /
+          255)
+         << sh;
+  }
+  return o;
+}
+
 /* cells.comp's rule, on the host, from the screen's cells */
 static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
   unsigned gw, gh;
@@ -268,14 +322,15 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
   for (unsigned y = 0; y < H; y++) {
     for (unsigned x = 0; x < W; x++) {
       unsigned cx = x / gw, cy = y / gh, gx = x % gw, gy = y % gh;
-      uint32_t rgb = dbg;
+      uint32_t rgb = dbg, fg = dfg;
+      int on = 0, bg_default = 1;
       if (cx < (unsigned)s->cols && cy < (unsigned)s->rows) {
         uint32_t c[CTUI_VK_CELL_WORDS];
         ctui_vk_cell(vk, &s->buffer[cy * (unsigned)s->cols + cx], c);
         uint32_t g = c[0] & 0xffffu, a = c[0] >> 16;
-        uint32_t fg = a & CTUI_VK_FG_DEFAULT ? dfg : c[1];
+        fg = a & CTUI_VK_FG_DEFAULT ? dfg : c[1];
         uint32_t bg = a & CTUI_VK_BG_DEFAULT ? dbg : c[2];
-        int on;
+        bg_default = (a & CTUI_VK_BG_DEFAULT) != 0;
         if (g == CTUI_VK_GLYPH_BOX) {
           on = gx == 0 || gx == gw - 1 || gy == gh / 8 ||
                gy == gh - 1 - gh / 8;
@@ -291,7 +346,19 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
         if (a & CTUI_ATTR_DIM) {
           fg = ((fg & 0xfefefeu) >> 1) + ((bg & 0xfefefeu) >> 1);
         }
-        rgb = on ? fg : bg;
+        rgb = bg;
+      }
+      unsigned p = 0;
+      for (; p < g_npl && g_pl[p].z < 0; p++) {
+        if (g_pl[p].z >= CTUI_GFX_KITTY_Z_UNDER_BG || bg_default) {
+          rgb = over(rgb, texel(&g_pl[p], gw, gh, x, y));
+        }
+      }
+      if (on) {
+        rgb = fg;
+      }
+      for (; p < g_npl; p++) {
+        rgb = over(rgb, texel(&g_pl[p], gw, gh, x, y));
       }
       px[y * W + x] = rgba(rgb);
     }
@@ -343,6 +410,90 @@ static void render_text(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                    CTUI_COLOR_GREEN, CTUI_COLOR_DEFAULT);
   ctui_widget_putc_rgb_fg(self, comp, 5, 0, '#', 0x40, 0xc0, 0xff,
                           CTUI_COLOR_MAGENTA);
+}
+
+/* kitty's pixel images through the graphics sink: a 2 x 2 RGBA one
+ * enlarged over two cells of text, half transparent; a 48 x 48 gradient
+ * shrunk into 3 x 2 cells under the text; one below UNDER_BG, showing
+ * only where the background is the default */
+static void test_images(CTUI_VK *vk, CTUI_SCREEN *screen) {
+  static uint8_t small[2 * 2 * 4] = {255, 0, 0,   128, 0,   255, 0, 128,
+                                     0,   0, 255, 255, 255, 255, 0, 0};
+  static uint8_t grad[48 * 48 * 4];
+  for (int y = 0; y < 48; y++) {
+    for (int x = 0; x < 48; x++) {
+      uint8_t *t = grad + (y * 48 + x) * 4;
+      t[0] = (uint8_t)(x * 5);
+      t[1] = (uint8_t)(y * 5);
+      t[2] = (uint8_t)((x + y) * 2);
+      t[3] = 255;
+    }
+  }
+  static uint8_t under[4 * 4];
+  for (int i = 0; i < 16; i += 4) {
+    under[i] = 9, under[i + 1] = 99, under[i + 2] = 199, under[i + 3] = 255;
+  }
+  ctui_gfx_set_sink(ctui_vk_gfx_sink(), vk);
+  ctui_gfx_set_mode(CTUI_GFX_KITTY);
+  ctui_gfx_kitty_display(1, 2, 3, 2, grad, 48, 48, 2, -1);
+  ctui_gfx_kitty_display(2, 1, 2, 1, small, 2, 2, 1, 0);
+  /* row 2 (0-based 1): "bold" on blue, then the red space: neither
+   * default, so under UNDER_BG nothing shows there; row 6: past the
+   * text, the default background */
+  ctui_gfx_kitty_display(2, 1, 6, 1, under, 2, 2, 3,
+                         CTUI_GFX_KITTY_Z_UNDER_BG - 1);
+  CTUI_GFX_KITTY_IMAGE *img = ctui_gfx_kitty_image_new(4);
+  unsigned char *b = ctui_gfx_kitty_image_begin(img, 2, 2, 0);
+  CTUI_TEST_ASSERT(b != NULL, "image_begin hands out the host copy");
+  if (b) {
+    memcpy(b, under, sizeof under);
+    ctui_gfx_kitty_image_commit(img, 6, 20, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1);
+  }
+  g_pl[0] = (PL){1, 0, 6, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, under, 2, 2};
+  g_pl[1] = (PL){5, 19, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, under, 2, 2};
+  g_pl[2] = (PL){0, 1, 3, 2, -1, grad, 48, 48};
+  g_pl[3] = (PL){1, 0, 2, 1, 0, small, 2, 2};
+  g_npl = 4;
+  CTUI_TEST_ASSERT(ctui_vk_pending(vk), "placed images: something to paint");
+  unsigned tiles = paint(vk);
+  unsigned bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles > 0 && bad == 0,
+                   "four images composited as the reference: %u differ (%u "
+                   "tiles)",
+                   bad, tiles);
+  /* (1, 0) cell's first pixel: small's red, alpha 128, over the bold
+   * cell's blue background (0x0000ee) */
+  CTUI_TEST_ASSERT(g_px[16 * W] == rgba(over(0x0000ee, 0xff000080u)),
+                   "half-transparent red over blue: %08x", g_px[16 * W]);
+  /* row 5, col 20: under UNDER_BG, the default background: it shows */
+  CTUI_TEST_ASSERT(g_px[(5 * 16 + 3) * W + 20 * 8 + 3] == rgba(0x0963c7),
+                   "below UNDER_BG on a default background: shown (%08x)",
+                   g_px[(5 * 16 + 3) * W + 20 * 8 + 3]);
+
+  ctui_gfx_kitty_display(2, 1, 2, 1, small, 2, 2, 1, 0);
+  tiles = paint(vk);
+  CTUI_TEST_ASSERT(tiles == 1, "the same image again: its one tile (%u)",
+                   tiles);
+
+  ctui_gfx_kitty_delete(2);
+  g_pl[2] = g_pl[3];
+  g_npl = 3;
+  tiles = paint(vk);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles == 4 && bad == 0,
+                   "deleted: its tiles painted without it, as the reference "
+                   "(%u tiles, %u differ)",
+                   tiles, bad);
+  CTUI_TEST_ASSERT(hash() == 0x367dbd1d7fdba9d4ull, "the images' hash: %016llx",
+                   (unsigned long long)hash());
+  ctui_gfx_kitty_image_free(img);
+  ctui_gfx_kitty_delete(1);
+  ctui_gfx_kitty_delete(3);
+  ctui_gfx_kitty_delete(4);
+  g_npl = 0;
+  paint(vk);
+  CTUI_TEST_ASSERT(differ(vk, screen) == 0, "all gone: the text alone again");
+  ctui_gfx_set_sink(NULL, NULL);
 }
 
 static void test_vk(void) {
@@ -446,6 +597,8 @@ static void test_vk(void) {
                    "new default colours: every tile repainted with them, "
                    "no cell up again (%u)",
                    tiles);
+
+  test_images(vk, screen);
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

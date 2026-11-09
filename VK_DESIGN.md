@@ -213,9 +213,38 @@ Three layers; only the first touches what every ctui app links.
      (NVIDIA says suboptimal once), then steady. Left for the user's
      hands: typing, the mouse, resizing and closing it interactively.
 4. Images (layer 2) through the sink: every existing kitty widget now
-   draws in the host unchanged; look's controls via `place_rgba`.
+   draws in the host unchanged; look's controls via `place_file`.
    Measured: ctui-mus in the host vs. in kitty, the CPU a tick and
-   frames a second -- the baseline plots have to beat.
+   frames a second -- the baseline plots have to beat. Split in two,
+   by what ctui-mus's widgets actually call:
+   - **4a, pixels a frame -- done 2026-11-09** (`ctui_vk_gfx_sink()`):
+     `display`, `image_begin/commit`, `delete`. Each image keeps its
+     texels on the host (`image_begin()` hands that copy out: no copy
+     there) and goes up into one arena buffer on the card at an offset
+     (bumped; when full, made again at twice the live texels and
+     everything goes up again from the host copies). Placements (cells,
+     z) go up sorted by z then id; the painter composites per pixel as
+     kitty does -- z < 0 under the glyph (below `Z_UNDER_BG` only on a
+     default background), z >= 0 over it, alpha blended -- each image
+     scaled to its rect by area average (at most 16 x 16 texels a side
+     per pixel; nearest when enlarged). An image's old and new rects'
+     tiles are marked, so the tiles/regions machinery repaints and
+     presents only them. `image_free` keeps the image (kitty does).
+     tests/vk/vk_test.c 25: four images pixel-exact against the
+     reference (enlarged, shrunk, half transparent, under `UNDER_BG`),
+     one tile for the same image again, a delete's tiles, the hash
+     pinned. ctui-mus `-w` now negotiates `CTUI_GFX_KITTY`: its
+     visualizers and covers draw on the card.
+     **Measured (the user, playing, visualizers on screen): ctui-mus
+     ~95 % of a core in kitty, ~9 % in its own window** -- the CPU
+     painting and kitty's upload path were nearly all of it. That ~9 %
+     is the baseline step 5's plots have to beat (their RGBA is still
+     painted on the CPU, only no longer sent through kitty).
+   - **4b, the drawn look -- next**: `place_file` (PNGs: ctui-wm's
+     xdg/png.c promoted for the decoding, look's own and icon themes'
+     alike), placeholder cells sampled by the painter, and
+     `put`/`unput` (`CTUI_DRAWN_UNDER`'s bevels) as sink members. Until
+     then ctui-mus `-w` keeps its look's drawn controls as text.
 5. Plots: `bars` and `grid` first (ctui-mus's spectrum and spectrogram
    as the first users, beside their kitty renderers), then `columns`
    and `polyline` (ctui-daw), each measured against step 4's number

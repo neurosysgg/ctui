@@ -237,6 +237,17 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Kitty's pixel images on the card** (2026-11-09, VK_DESIGN.md
+  4a). `ctui_vk_gfx_sink()`: `display`, `image_begin/commit` and
+  `delete` keep each image's texels on the host and upload them into one
+  arena buffer at an offset; placements (cells, z) go up sorted. The
+  painter composites per pixel in kitty's order (z < 0 under the glyph,
+  below `CTUI_GFX_KITTY_Z_UNDER_BG` only on a default background; z >= 0
+  over), alpha blended, each image area-averaged into its rect. Only the
+  tiles an image covered or covers are repainted. tests/vk/vk_test.c
+  16 -> 25. `place_file`, placeholders and `put` are 4b. Measured:
+  ctui-mus playing with its visualizers ~95 % of a core in kitty, ~9 %
+  in its own window (`-w`).
 - [x] **`ctui_shutdown()` without `ctui_init()`** (2026-11-09, found
   building VK_DESIGN.md's window host). Shutdown restored `orig_termios`
   whether or not `ctui_init()` had ever filled it: a host app (a window

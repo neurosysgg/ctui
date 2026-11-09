@@ -66,6 +66,17 @@ void ctui_vk_defaults(const CTUI_VK *vk, uint32_t *fg, uint32_t *bg);
 /* for ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk) */
 const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void);
 
+/* for ctui_gfx_set_sink(ctui_vk_gfx_sink(), vk) (core/gfx.h): kitty's
+ * pixel images as images on the card. display() and image_begin()/
+ * commit() keep a copy of the texels on the host and place them at
+ * cells; the painter composites them per pixel as kitty does -- z < 0
+ * under the glyphs (below CTUI_GFX_KITTY_Z_UNDER_BG only where the cell's
+ * background is the default), z >= 0 over them, by z then id, alpha
+ * blended -- each scaled to its cells by area average (nearest when
+ * enlarged). delete() takes one away. place_file() (look's controls,
+ * icons, through placeholder cells) isn't drawn yet: VK_DESIGN.md 4b */
+const CTUI_GFX_SINK *ctui_vk_gfx_sink(void);
+
 /* something to paint: the next record wouldn't be empty. A host asks
  * before acquiring a swapchain image, so an idle app presents nothing */
 int ctui_vk_pending(const CTUI_VK *vk);

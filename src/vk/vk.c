@@ -16,8 +16,29 @@ typedef struct {
 } BUF;
 
 typedef struct {
-  uint32_t surf_w, surf_h, gw, gh, cols, rows, bgra, def_fg, def_bg;
+  uint32_t surf_w, surf_h, gw, gh, cols, rows, bgra, def_fg, def_bg, nplace;
 } PUSH;
+
+/* the shader's bindings: tiles, cells, atlas, surface, placements, the
+ * images' texels */
+#define BINDINGS 6u
+/* a placement on the card: x y w h (pixels), the image's offset in the
+ * arena (words), its w h (texels), z */
+#define PLACE_WORDS 8u
+
+/* an image (gfx.h's sink: display, image_begin/commit, delete): its
+ * texels kept on the host too (what goes up, and again when the arena is
+ * compacted), its placement in cells */
+typedef struct {
+  unsigned id;
+  int w, h;
+  uint32_t *px; /* RGBA bytes, w * h words */
+  size_t cap;   /* words px holds */
+  int placed;
+  int row, col, cols, rows, z; /* 0-based cells */
+  uint32_t off, room;          /* where in the arena, how many words */
+  int up;                      /* texels to go up */
+} IMG;
 
 /* codepoints a log was given for, so each missing one is logged once */
 #define MISSING_LOGGED 64u
@@ -54,6 +75,17 @@ struct CTUI_VK {
   unsigned nextras;
   uint32_t missing[MISSING_LOGGED];
   unsigned nmissing;
+
+  IMG *imgs;
+  unsigned nimg, img_cap;
+  /* on the card: every image's texels at its offset (a bump allocation,
+   * compacted when full), the placements, sorted by z */
+  BUF arena, places;
+  size_t arena_words, arena_used, places_cap;
+  int places_up;
+  size_t stage_bytes[CTUI_VK_SLOTS];
+  VkBufferCopy *icopies;
+  unsigned icopies_cap;
 };
 
 static int mem_type(const CTUI_VK *vk, uint32_t bits,
@@ -130,8 +162,11 @@ static void free_sized(CTUI_VK *vk) {
   buf_free(vk, &vk->cells);
   buf_free(vk, &vk->tiles);
   buf_free(vk, &vk->atlas);
+  buf_free(vk, &vk->arena);
+  buf_free(vk, &vk->places);
   for (unsigned i = 0; i < CTUI_VK_SLOTS; i++) {
     buf_free(vk, &vk->stage[i]);
+    vk->stage_bytes[i] = 0;
   }
   free(vk->copies);
   free(vk->rec);
@@ -151,6 +186,11 @@ void ctui_vk_free(CTUI_VK *vk) {
   }
   vkDeviceWaitIdle(vk->dev);
   free_sized(vk);
+  for (unsigned i = 0; i < vk->nimg; i++) {
+    free(vk->imgs[i].px);
+  }
+  free(vk->imgs);
+  free(vk->icopies);
   if (vk->pool) {
     vkDestroyDescriptorPool(vk->dev, vk->pool, NULL);
   }
@@ -181,8 +221,8 @@ CTUI_VK *ctui_vk_new(VkPhysicalDevice phys, VkDevice dev) {
   vkGetPhysicalDeviceMemoryProperties(phys, &vk->mem);
   decode_extras(vk);
 
-  VkDescriptorSetLayoutBinding bind[4];
-  for (unsigned i = 0; i < 4; i++) {
+  VkDescriptorSetLayoutBinding bind[BINDINGS];
+  for (unsigned i = 0; i < BINDINGS; i++) {
     bind[i] = (VkDescriptorSetLayoutBinding){
         .binding = i,
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -197,7 +237,7 @@ CTUI_VK *ctui_vk_new(VkPhysicalDevice phys, VkDevice dev) {
   };
   VkDescriptorSetLayoutCreateInfo dli = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      .bindingCount = 4,
+      .bindingCount = BINDINGS,
       .pBindings = bind,
   };
   VkPushConstantRange range = {
@@ -210,7 +250,7 @@ CTUI_VK *ctui_vk_new(VkPhysicalDevice phys, VkDevice dev) {
       .pushConstantRangeCount = 1,
       .pPushConstantRanges = &range,
   };
-  VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4};
+  VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BINDINGS};
   VkDescriptorPoolCreateInfo dpi = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
       .maxSets = 1,
@@ -271,6 +311,64 @@ static void all_tiles(CTUI_VK *vk) {
   memset(vk->tdirty, 1, (size_t)vk->tx * vk->ty);
 }
 
+static void describe(CTUI_VK *vk) {
+  const BUF *b[BINDINGS] = {&vk->tiles, &vk->cells,  &vk->atlas,
+                            &vk->surf,  &vk->places, &vk->arena};
+  VkDescriptorBufferInfo info[BINDINGS];
+  VkWriteDescriptorSet wr[BINDINGS];
+  for (unsigned i = 0; i < BINDINGS; i++) {
+    info[i] = (VkDescriptorBufferInfo){b[i]->buf, 0, VK_WHOLE_SIZE};
+    wr[i] = (VkWriteDescriptorSet){
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = vk->set,
+        .dstBinding = i,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pBufferInfo = &info[i],
+    };
+  }
+  vkUpdateDescriptorSets(vk->dev, BINDINGS, wr, 0, NULL);
+}
+
+static size_t live_words(const CTUI_VK *vk) {
+  size_t n = 0;
+  for (unsigned i = 0; i < vk->nimg; i++) {
+    n += (size_t)vk->imgs[i].w * (size_t)vk->imgs[i].h;
+  }
+  return n;
+}
+
+/* the arena for at least words texels, every image to go up again at a
+ * fresh offset (the device idle: the old one may be in use) */
+static int arena_new(CTUI_VK *vk, size_t words) {
+  size_t want = words * 2 > (1u << 18) ? words * 2 : (1u << 18);
+  buf_free(vk, &vk->arena);
+  if (buf_new(vk, &vk->arena, want * 4u, 0)) {
+    vk->arena_words = 0;
+    return -1;
+  }
+  vk->arena_words = want;
+  vk->arena_used = 0;
+  for (unsigned i = 0; i < vk->nimg; i++) {
+    vk->imgs[i].room = 0;
+    vk->imgs[i].up = 1;
+  }
+  vk->places_up = 1;
+  return 0;
+}
+
+static int places_new(CTUI_VK *vk, size_t n) {
+  size_t want = n * 2 > 16 ? n * 2 : 16;
+  buf_free(vk, &vk->places);
+  if (buf_new(vk, &vk->places, want * PLACE_WORDS * 4u, 0)) {
+    vk->places_cap = 0;
+    return -1;
+  }
+  vk->places_cap = want;
+  vk->places_up = 1;
+  return 0;
+}
+
 int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
                    int bgra, int *rows, int *cols) {
   if (!w || !h || w > 0xffffu * CTUI_VK_TILE || h > 0xffffu * CTUI_VK_TILE) {
@@ -291,7 +389,6 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
   size_t ncells = (size_t)vk->cols * vk->rows, ntiles = (size_t)vk->tx * vk->ty;
   size_t cell_bytes = ncells * CTUI_VK_CELL_WORDS * 4u;
   size_t atlas_bytes = 256u * vk->gh * 4u;
-  size_t stage_bytes = ntiles * 4u + atlas_bytes + cell_bytes;
   vk->rec = malloc(cell_bytes ? cell_bytes : 4);
   vk->dirty = calloc(ncells ? ncells : 1, 1);
   vk->tdirty = calloc(ntiles, 1);
@@ -303,10 +400,8 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
             !vk->copies || buf_new(vk, &vk->surf, (size_t)w * h * 4u, 0) ||
             buf_new(vk, &vk->cells, cell_bytes, 0) ||
             buf_new(vk, &vk->tiles, ntiles * 4u, 0) ||
-            buf_new(vk, &vk->atlas, atlas_bytes, 0);
-  for (unsigned i = 0; i < CTUI_VK_SLOTS && !bad; i++) {
-    bad = buf_new(vk, &vk->stage[i], stage_bytes, 1);
-  }
+            buf_new(vk, &vk->atlas, atlas_bytes, 0) ||
+            arena_new(vk, live_words(vk)) || places_new(vk, vk->nimg);
   if (bad) {
     ctui_logf(E_ERR, "[CTUI:VK] - no memory for a %ux%u surface\n", w, h);
     free_sized(vk);
@@ -325,24 +420,7 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
   }
   vk->atlas_up = 1;
 
-  VkDescriptorBufferInfo info[4] = {
-      {vk->tiles.buf, 0, VK_WHOLE_SIZE},
-      {vk->cells.buf, 0, VK_WHOLE_SIZE},
-      {vk->atlas.buf, 0, VK_WHOLE_SIZE},
-      {vk->surf.buf, 0, VK_WHOLE_SIZE},
-  };
-  VkWriteDescriptorSet wr[4];
-  for (unsigned i = 0; i < 4; i++) {
-    wr[i] = (VkWriteDescriptorSet){
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = vk->set,
-        .dstBinding = i,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo = &info[i],
-    };
-  }
-  vkUpdateDescriptorSets(vk->dev, 4, wr, 0, NULL);
+  describe(vk);
   vk->sized = 1;
   ctui_cell_px_set((int)vk->gw, (int)vk->gh);
   *rows = (int)vk->rows;
@@ -526,11 +604,138 @@ static void barrier(VkCommandBuffer cmd, VkPipelineStageFlags src,
   vkCmdPipelineBarrier(cmd, src, dst, 0, 1, &mb, 0, NULL, 0, NULL);
 }
 
+/* the tiles under a rect of pixels to paint */
+static void mark_rect(CTUI_VK *vk, long x, long y, long w, long h) {
+  if (!vk->sized || w <= 0 || h <= 0) {
+    return;
+  }
+  long x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+  long x1 = x + w > (long)vk->w ? (long)vk->w : x + w;
+  long y1 = y + h > (long)vk->h ? (long)vk->h : y + h;
+  if (x1 <= x0 || y1 <= y0) {
+    return;
+  }
+  unsigned tx0 = (unsigned)x0 / CTUI_VK_TILE, tx1 = (unsigned)(x1 - 1) / CTUI_VK_TILE;
+  unsigned ty0 = (unsigned)y0 / CTUI_VK_TILE, ty1 = (unsigned)(y1 - 1) / CTUI_VK_TILE;
+  for (unsigned ty = ty0; ty <= ty1; ty++) {
+    memset(vk->tdirty + (size_t)ty * vk->tx + tx0, 1, tx1 - tx0 + 1);
+  }
+}
+
+static void mark_img(CTUI_VK *vk, const IMG *im) {
+  if (im->placed) {
+    mark_rect(vk, (long)im->col * vk->gw, (long)im->row * vk->gh,
+              (long)im->cols * vk->gw, (long)im->rows * vk->gh);
+  }
+}
+
+/* the staging buffer of slot i holding at least bytes: made again when
+ * not (the recording that used it last is done, by CTUI_VK_SLOTS) */
+static int stage_room(CTUI_VK *vk, unsigned i, size_t bytes) {
+  if (vk->stage_bytes[i] >= bytes) {
+    return 0;
+  }
+  size_t want = bytes + bytes / 2;
+  buf_free(vk, &vk->stage[i]);
+  if (buf_new(vk, &vk->stage[i], want, 1)) {
+    vk->stage_bytes[i] = 0;
+    return -1;
+  }
+  vk->stage_bytes[i] = want;
+  return 0;
+}
+
+static int by_z(const void *a, const void *b) {
+  const IMG *x = *(const IMG *const *)a, *y = *(const IMG *const *)b;
+  if (x->z != y->z) {
+    return x->z < y->z ? -1 : 1;
+  }
+  return x->id < y->id ? -1 : x->id > y->id;
+}
+
+/* offsets in the arena for the images going up; 0, or -1 when it can't
+ * be made big enough */
+static int arena_place(CTUI_VK *vk) {
+  for (int pass = 0; pass < 2; pass++) {
+    int full = 0;
+    for (unsigned i = 0; i < vk->nimg && !full; i++) {
+      IMG *im = &vk->imgs[i];
+      size_t words = (size_t)im->w * (size_t)im->h;
+      if (!im->up || words <= im->room) {
+        continue;
+      }
+      if (vk->arena_used + words > vk->arena_words) {
+        full = 1;
+        break;
+      }
+      im->off = (uint32_t)vk->arena_used;
+      im->room = (uint32_t)words;
+      vk->arena_used += words;
+      vk->places_up = 1;
+    }
+    if (!full) {
+      return 0;
+    }
+    /* compacted into a new one, the device idle: the old may be in use */
+    vkDeviceWaitIdle(vk->dev);
+    if (arena_new(vk, live_words(vk))) {
+      return -1;
+    }
+    describe(vk);
+    ctui_logf(E_INF, "[CTUI:VK] - image arena now %zu words @ tick %d\n",
+              vk->arena_words, ctui_tick_advance());
+  }
+  return -1;
+}
+
 unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
   if (!vk->sized) {
     return 0;
   }
-  vk->slot = (vk->slot + 1) % CTUI_VK_SLOTS;
+  unsigned nup = 0, nplace = 0;
+  size_t img_words = 0;
+  for (unsigned i = 0; i < vk->nimg; i++) {
+    nplace += vk->imgs[i].placed != 0;
+  }
+  if (nplace > vk->places_cap) {
+    vkDeviceWaitIdle(vk->dev);
+    if (places_new(vk, nplace)) {
+      ctui_logf(E_ERR, "[CTUI:VK] - no memory for %u placements\n", nplace);
+      return 0;
+    }
+    describe(vk);
+  }
+  if (arena_place(vk)) {
+    ctui_logf(E_ERR, "[CTUI:VK] - no memory for the images\n");
+    return 0;
+  }
+  for (unsigned i = 0; i < vk->nimg; i++) {
+    if (vk->imgs[i].up && vk->imgs[i].room) {
+      nup++;
+      img_words += (size_t)vk->imgs[i].w * (size_t)vk->imgs[i].h;
+    }
+  }
+  if (!ctui_vk_pending(vk) && !nup && !vk->places_up) {
+    return 0;
+  }
+  size_t ncells = (size_t)vk->cols * vk->rows;
+  const size_t cw = CTUI_VK_CELL_WORDS;
+  unsigned next = (vk->slot + 1) % CTUI_VK_SLOTS;
+  size_t need = ((size_t)vk->tx * vk->ty + 256u * vk->gh + ncells * cw +
+                 (size_t)nplace * PLACE_WORDS + img_words) * 4u;
+  if (stage_room(vk, next, need)) {
+    ctui_logf(E_ERR, "[CTUI:VK] - no memory to stage %zu bytes\n", need);
+    return 0;
+  }
+  if (nup + 1 > vk->icopies_cap) {
+    VkBufferCopy *c = realloc(vk->icopies, (nup + 1) * 2 * sizeof *c);
+    if (!c) {
+      return 0;
+    }
+    vk->icopies = c;
+    vk->icopies_cap = (nup + 1) * 2;
+  }
+  vk->slot = next;
   uint32_t *st = vk->stage[vk->slot].map;
   unsigned nt = 0;
   for (unsigned y = 0; y < vk->ty; y++) {
@@ -552,9 +757,6 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
       }
     }
   }
-  if (!nt) {
-    return 0;
-  }
   memset(vk->tdirty, 0, (size_t)vk->tx * vk->ty);
   size_t off = (size_t)vk->tx * vk->ty; /* in words */
   VkBufferCopy atlas = {0};
@@ -564,8 +766,6 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
     off += 256u * vk->gh;
   }
   unsigned nc = 0;
-  size_t ncells = (size_t)vk->cols * vk->rows;
-  const size_t cw = CTUI_VK_CELL_WORDS;
   for (size_t i = 0; i < ncells; i++) {
     if (!vk->dirty[i]) {
       continue;
@@ -579,6 +779,48 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
     off += (j - i) * cw;
     i = j;
   }
+  VkBufferCopy places = {0};
+  if (vk->places_up && nplace) {
+    const IMG **order = malloc(nplace * sizeof *order);
+    if (!order) {
+      return 0;
+    }
+    unsigned k = 0;
+    for (unsigned i = 0; i < vk->nimg; i++) {
+      if (vk->imgs[i].placed) {
+        order[k++] = &vk->imgs[i];
+      }
+    }
+    qsort(order, nplace, sizeof order[0], by_z);
+    places = (VkBufferCopy){off * 4u, 0, (size_t)nplace * PLACE_WORDS * 4u};
+    for (k = 0; k < nplace; k++, off += PLACE_WORDS) {
+      const IMG *im = order[k];
+      uint32_t *p = st + off;
+      p[0] = (uint32_t)im->col * vk->gw;
+      p[1] = (uint32_t)im->row * vk->gh;
+      p[2] = (uint32_t)im->cols * vk->gw;
+      p[3] = (uint32_t)im->rows * vk->gh;
+      p[4] = im->off;
+      p[5] = (uint32_t)im->w;
+      p[6] = (uint32_t)im->h;
+      p[7] = (uint32_t)im->z;
+    }
+    free(order);
+  }
+  vk->places_up = 0;
+  unsigned ni = 0;
+  for (unsigned i = 0; i < vk->nimg; i++) {
+    IMG *im = &vk->imgs[i];
+    if (!im->up || !im->room) {
+      continue;
+    }
+    size_t words = (size_t)im->w * (size_t)im->h;
+    memcpy(st + off, im->px, words * 4u);
+    vk->icopies[ni++] = (VkBufferCopy){off * 4u, (size_t)im->off * 4u,
+                                       words * 4u};
+    off += words;
+    im->up = 0;
+  }
 
   VkBuffer stage = vk->stage[vk->slot].buf;
   /* the last record's dispatch and the caller's copies out of the
@@ -588,8 +830,10 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
           VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
           VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
-  VkBufferCopy tiles = {0, 0, nt * 4u};
-  vkCmdCopyBuffer(cmd, stage, vk->tiles.buf, 1, &tiles);
+  if (nt) {
+    VkBufferCopy tiles = {0, 0, nt * 4u};
+    vkCmdCopyBuffer(cmd, stage, vk->tiles.buf, 1, &tiles);
+  }
   if (vk->atlas_up) {
     vkCmdCopyBuffer(cmd, stage, vk->atlas.buf, 1, &atlas);
     vk->atlas_up = 0;
@@ -597,21 +841,166 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
   if (nc) {
     vkCmdCopyBuffer(cmd, stage, vk->cells.buf, nc, vk->copies);
   }
+  if (places.size) {
+    vkCmdCopyBuffer(cmd, stage, vk->places.buf, 1, &places);
+  }
+  if (ni) {
+    vkCmdCopyBuffer(cmd, stage, vk->arena.buf, ni, vk->icopies);
+  }
   barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
-  PUSH p = {vk->w,    vk->h,          vk->gw,     vk->gh,    vk->cols,
-            vk->rows, (uint32_t)vk->bgra, vk->def_fg, vk->def_bg};
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->pipe);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->layout, 0,
-                          1, &vk->set, 0, NULL);
-  vkCmdPushConstants(cmd, vk->layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof p,
-                     &p);
-  vkCmdDispatch(cmd, nt, 1, 1);
+  if (nt) {
+    PUSH p = {vk->w,      vk->h,      vk->gw,
+              vk->gh,     vk->cols,   vk->rows,
+              (uint32_t)vk->bgra, vk->def_fg, vk->def_bg,
+              nplace};
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->pipe);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->layout,
+                            0, 1, &vk->set, 0, NULL);
+    vkCmdPushConstants(cmd, vk->layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof p, &p);
+    vkCmdDispatch(cmd, nt, 1, 1);
+  }
   barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
           VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-  ctui_logf(E_DBG, "[CTUI:VK] - recorded %u tiles, %u cell runs @ tick %d\n",
-            nt, nc, ctui_tick_advance());
+  ctui_logf(E_DBG,
+            "[CTUI:VK] - recorded %u tiles, %u cell runs, %u images up, %u "
+            "placed @ tick %d\n",
+            nt, nc, ni, nplace, ctui_tick_advance());
   return nt;
+}
+
+/* --- the graphics sink: kitty's image calls as images on the card --- */
+
+static IMG *img_find(CTUI_VK *vk, unsigned id) {
+  for (unsigned i = 0; i < vk->nimg; i++) {
+    if (vk->imgs[i].id == id) {
+      return &vk->imgs[i];
+    }
+  }
+  return NULL;
+}
+
+/* id's image at w x h texels, its host copy ready to write; NULL when
+ * out of memory */
+static IMG *img_get(CTUI_VK *vk, unsigned id, int w, int h) {
+  IMG *im = img_find(vk, id);
+  if (!im) {
+    if (vk->nimg == vk->img_cap) {
+      unsigned cap = vk->img_cap ? vk->img_cap * 2 : 8;
+      IMG *n = realloc(vk->imgs, cap * sizeof *n);
+      if (!n) {
+        return NULL;
+      }
+      vk->imgs = n;
+      vk->img_cap = cap;
+    }
+    im = &vk->imgs[vk->nimg++];
+    memset(im, 0, sizeof *im);
+    im->id = id;
+  }
+  size_t words = (size_t)w * (size_t)h;
+  if (words > im->cap) {
+    uint32_t *px = realloc(im->px, words * 4u);
+    if (!px) {
+      return NULL;
+    }
+    im->px = px;
+    im->cap = words;
+  }
+  im->w = w;
+  im->h = h;
+  return im;
+}
+
+/* placed at kitty's 1-based (row, col), cols x rows cells, z: its old
+ * place and the new one painted again */
+static void img_place(CTUI_VK *vk, IMG *im, int row, int col, int cols,
+                      int rows, int z) {
+  mark_img(vk, im);
+  if (!im->placed || im->row != row - 1 || im->col != col - 1 ||
+      im->cols != cols || im->rows != rows || im->z != z) {
+    vk->places_up = 1;
+  }
+  im->placed = 1;
+  im->row = row - 1;
+  im->col = col - 1;
+  im->cols = cols;
+  im->rows = rows;
+  im->z = z;
+  im->up = 1;
+  mark_img(vk, im);
+}
+
+static void s_display(void *ctx, int row, int col, int cell_cols,
+                      int cell_rows, const unsigned char *rgba, int width,
+                      int height, unsigned int image_id, int z) {
+  CTUI_VK *vk = ctx;
+  if (width <= 0 || height <= 0 || !rgba || cell_cols <= 0 || cell_rows <= 0) {
+    ctui_logf(E_WRN, "[CTUI:VK] - display of image %u rejected (%dx%d)\n",
+              image_id, width, height);
+    return;
+  }
+  IMG *im = img_get(vk, image_id, width, height);
+  if (!im) {
+    ctui_logf(E_ERR, "[CTUI:VK] - no memory for image %u\n", image_id);
+    return;
+  }
+  memcpy(im->px, rgba, (size_t)width * (size_t)height * 4u);
+  img_place(vk, im, row, col, cell_cols, cell_rows, z);
+}
+
+static unsigned char *s_begin(void *ctx, unsigned int image_id, int width,
+                              int height, int keep) {
+  /* keep: the host copy holds the last frame already */
+  (void)keep;
+  IMG *im = width > 0 && height > 0
+                ? img_get(ctx, image_id, width, height)
+                : NULL;
+  return im ? (unsigned char *)im->px : NULL;
+}
+
+static void s_commit(void *ctx, unsigned int image_id, int row, int col,
+                     int cell_cols, int cell_rows, int z) {
+  CTUI_VK *vk = ctx;
+  IMG *im = img_find(vk, image_id);
+  if (im) {
+    img_place(vk, im, row, col, cell_cols, cell_rows, z);
+  }
+}
+
+/* kitty keeps an image a freed CTUI_GFX_KITTY_IMAGE showed: so do we */
+static void s_free(void *ctx, unsigned int image_id) {
+  (void)ctx, (void)image_id;
+}
+
+static void s_delete(void *ctx, unsigned int image_id) {
+  CTUI_VK *vk = ctx;
+  IMG *im = img_find(vk, image_id);
+  if (!im) {
+    return;
+  }
+  mark_img(vk, im);
+  if (im->placed) {
+    vk->places_up = 1;
+  }
+  free(im->px);
+  *im = vk->imgs[--vk->nimg];
+}
+
+static void s_place_file(void *ctx, unsigned int image_id, const char *path,
+                         int cols, int rows) {
+  (void)ctx, (void)cols, (void)rows;
+  ctui_logf(E_DBG, "[CTUI:VK] - place_file %u (%s): not drawn yet\n", image_id,
+            path);
+}
+
+static void s_flush(void *ctx) { (void)ctx; }
+
+const CTUI_GFX_SINK *ctui_vk_gfx_sink(void) {
+  static const CTUI_GFX_SINK sink = {s_display, s_begin,      s_commit, s_free,
+                                     s_delete,  s_place_file, s_flush};
+  return &sink;
 }
 
 unsigned ctui_vk_regions(CTUI_VK *vk, unsigned img, int fresh,
