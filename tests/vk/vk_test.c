@@ -372,6 +372,7 @@ static void test_vk(void) {
   ctui_app_render(&app, screen);
   ctui_screen_flush(screen);
 
+  CTUI_TEST_ASSERT(ctui_vk_pending(vk), "a first frame: something to paint");
   memset(g_px, 0, W * H * 4u);
   unsigned tiles = paint(vk);
   CTUI_TEST_ASSERT(tiles == 13 * 7, "the first record paints every tile: %u",
@@ -413,7 +414,8 @@ static void test_vk(void) {
 
   ctui_app_render(&app, screen);
   ctui_screen_flush(screen);
-  CTUI_TEST_ASSERT(paint(vk) == 0, "unchanged: nothing recorded");
+  CTUI_TEST_ASSERT(!ctui_vk_pending(vk) && paint(vk) == 0,
+                   "unchanged: nothing pending, nothing recorded");
 
   g_title = "ctui on the cart";
   ctui_app_render(&app, screen);

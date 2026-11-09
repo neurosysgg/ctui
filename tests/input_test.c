@@ -937,6 +937,14 @@ int main(void) {
   ctui_app_free(&app);
   test_headless_run();
   test_eof_stale_errno();
+  /* the mouse is on (test_mouse_modes) but ctui_init() never ran: a host
+   * on a window of its own, a test. Shutdown has no terminal to give
+   * back: no escapes, no termios */
+  CTUI_TEST_ASSERT(!*mouse_enable_writes_fn(ctui_shutdown),
+                   "shutdown without ctui_init() writes nothing");
+  CTUI_TEST_ASSERT(!strcmp(mouse_enable_writes(CTUI_MOUSE_TRACK_CLICKS),
+                           "\x1b[?1000h\x1b[?1006h"),
+                   "and forgets the mouse's mode all the same");
   ctui_log_shutdown();
   return ctui_test_summary();
 }

@@ -66,6 +66,10 @@ void ctui_vk_defaults(const CTUI_VK *vk, uint32_t *fg, uint32_t *bg);
 /* for ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk) */
 const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void);
 
+/* something to paint: the next record wouldn't be empty. A host asks
+ * before acquiring a swapchain image, so an idle app presents nothing */
+int ctui_vk_pending(const CTUI_VK *vk);
+
 /* into cmd (recording): what changed since the last record uploaded and
  * painted, between barriers, so the caller may copy from the surface
  * after it. The tiles painted (0: nothing recorded at all) */

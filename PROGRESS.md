@@ -237,6 +237,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`ctui_shutdown()` without `ctui_init()`** (2026-11-09, found
+  building VK_DESIGN.md's window host). Shutdown restored `orig_termios`
+  whether or not `ctui_init()` had ever filled it: a host app (a window
+  of its own) or a test calling it put a zeroed termios on the launching
+  terminal, and wrote the mode-off escapes to it. Now it only gives back
+  a terminal it took (`g_termios_saved`); the mouse/focus/keys state is
+  forgotten either way. tests/input_test.c: shutdown without init writes
+  nothing, and the mouse's mode is reset all the same.
+- [x] **`ctui_vk_pending()`** (2026-11-09, VK_DESIGN.md step 3): whether
+  the next record would paint anything, so a host acquires a swapchain
+  image only then (tests/vk/vk_test.c: pending after a first frame, not
+  after an unchanged one).
 - [x] **`src/vk/`: ctui's text painted on the card** (2026-11-09,
   VK_DESIGN.md step 2). `CTUI_VK` on the caller's `VkPhysicalDevice` /
   `VkDevice`, recording into the caller's command buffer, owning no

@@ -511,6 +511,10 @@ const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void) {
   return &sink;
 }
 
+int ctui_vk_pending(const CTUI_VK *vk) {
+  return vk->sized && memchr(vk->tdirty, 1, (size_t)vk->tx * vk->ty) != NULL;
+}
+
 static void barrier(VkCommandBuffer cmd, VkPipelineStageFlags src,
                     VkAccessFlags src_access, VkPipelineStageFlags dst,
                     VkAccessFlags dst_access) {

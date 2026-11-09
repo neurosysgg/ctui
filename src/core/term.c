@@ -22,6 +22,10 @@
 #include <unistd.h>
 
 static struct termios orig_termios, raw_termios;
+/* orig_termios holds the terminal's own settings: ctui_init() got that
+ * far. Without it (a host app on a window of its own, a test) shutdown
+ * has no terminal to give back */
+static int g_termios_saved = 0;
 /* 0 off, else 1 + the tracking level: clicks 1, drag 2, any motion 3 */
 static int g_mouse_enabled = 0;
 int ctui_g_mouse_pixels = 0;
@@ -127,6 +131,7 @@ int ctui_init(int verbosity, CTUI_GFX_MODE *mode) {
     ctui_log(E_ERR, "[CTUI:TERM] - error retrieving termios struct\n");
     return -1;
   }
+  g_termios_saved = 1;
   ctui_tick_advance();
 
   struct termios raw = orig_termios;
@@ -391,13 +396,19 @@ void ctui_shutdown(void) {
    * A no-op on every non-Kitty tier (nothing was ever tracked) -- see
    * ctui_gfx_kitty_shm_reap()'s own doc comment. */
   ctui_gfx_kitty_shm_reap();
+  if (!g_termios_saved) {
+    ctui_log(E_INF, "[CTUI:INIT] - no terminal was taken: none restored\n");
+  }
   ctui_log_shutdown();
-  pointer_reset();
-  modes_off();
+  if (g_termios_saved) {
+    pointer_reset();
+    modes_off();
+    fflush(stdout);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+    g_termios_saved = 0;
+  }
   g_mouse_enabled = g_focus_enabled = g_kitty_keys_enabled = 0;
   ctui_g_mouse_pixels = 0;
-  fflush(stdout);
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
 void ctui_get_termsize(/*ref*/ int *rows, /*ref*/ int *cols) {

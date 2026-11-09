@@ -183,6 +183,35 @@ Three layers; only the first touches what every ctui app links.
    show their text fallback until step 4. Earlier than it was, because
    the host is where every later step gets measured, and it's the only
    way ctui-mus/-daw see any of this.
+   **Done 2026-11-09** (ctui-mus `src/gui/host/`, `ctui-mus -w`; built
+   where Vulkan, glslc, wayland-client and its protocols, xkbcommon are).
+   How it came out:
+   - no new core mechanism: the window is a `CTUI_INPUT_SOURCE` (an
+     epoll fd over the connection, the key repeat's timerfd and a kick
+     eventfd), its configure a `CTUI_RESIZE_EVENT` the run loop already
+     handles, and the present runs from `ctui_input_on_wait()` -- after
+     the frame is drawn, only when `ctui_vk_pending()` says something
+     changed: an idle app acquires no image at all.
+   - keys through xkbcommon (the compositor's keymap, compose and dead
+     keys by locale, repeats at the compositor's rate), mapped to what a
+     legacy terminal's bytes give: ctrl+letter its control byte,
+     Backspace 0x7f, shift+Tab BACKTAB, shift folded into the char. The
+     pointer as mouse events on the cell under it, with pixels; a wheel
+     notch a scroll; cursor-shape-v1 for the arrow.
+   - no `ctui_init()`: the host sets the tier (TRUECOLOR until step 4)
+     and points stdout at /dev/null while open, so mouse modes and OSC
+     titles written for a terminal never reach the launching shell.
+     Core fix found on the way: `ctui_shutdown()` restored a never-saved
+     (zeroed) termios when `ctui_init()` hadn't run; now it only gives
+     back a terminal it took.
+   - Vulkan 1.0 calls, FIFO, a recording a slot (two), the protocols'
+     glue and the shader generated under ctui-mus's build dir, never
+     in `vendor/ctui`.
+   - verified: ctui-mus in its own window on river (2115x1360, 264x85
+     cells, the RTX 3070 Ti), validation clean, its 59 suites and lint
+     unchanged. One swapchain rebuild right after the first present
+     (NVIDIA says suboptimal once), then steady. Left for the user's
+     hands: typing, the mouse, resizing and closing it interactively.
 4. Images (layer 2) through the sink: every existing kitty widget now
    draws in the host unchanged; look's controls via `place_rgba`.
    Measured: ctui-mus in the host vs. in kitty, the CPU a tick and
