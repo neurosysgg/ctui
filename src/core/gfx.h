@@ -37,6 +37,43 @@ unsigned int ctui_gfx_detect_caps(void);
 void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
                          unsigned char *g, unsigned char *b);
 
+/* the session's tier set directly, for a host that never calls
+ * ctui_init() (a window, a test): mode is one CTUI_GFX_MODE bit, as
+ * ctui_init() would have negotiated. A host whose graphics sink (below)
+ * shows images sets CTUI_GFX_KITTY, and widgets' kitty renderers run. */
+void ctui_gfx_set_mode(unsigned int mode);
+
+/* where the ctui_gfx_kitty_* image calls go instead of the terminal (a GPU
+ * backend, a test): each member stands for the call of its name, same
+ * arguments and meaning, minus the wire -- no isatty() check, no
+ * compression, no shm. Every member is required. Images are named by
+ * their id throughout (a CTUI_GFX_KITTY_IMAGE forwards its own id), so
+ * image_begin() returns the buffer to paint (NULL: skip this frame) and
+ * image_commit() places what was painted in it. flush() ends a frame's
+ * graphics (ctui_widget_flush_gfx(), after the text: the screen sink's
+ * frame() comes first, and a frame whose cells didn't change has no
+ * frame() at all, only this). The terminal-only calls (put/unput,
+ * frame_file/animate, reply) have no member: under a sink their escapes
+ * are dropped at the flush, logged. */
+typedef struct {
+  void (*display)(void *ctx, int row, int col, int cell_cols, int cell_rows,
+                  const unsigned char *rgba, int width, int height,
+                  unsigned int image_id, int z);
+  unsigned char *(*image_begin)(void *ctx, unsigned int image_id, int width,
+                                int height, int keep);
+  void (*image_commit)(void *ctx, unsigned int image_id, int row, int col,
+                       int cell_cols, int cell_rows, int z);
+  void (*image_free)(void *ctx, unsigned int image_id);
+  void (*delete)(void *ctx, unsigned int image_id);
+  void (*place_file)(void *ctx, unsigned int image_id, const char *path,
+                     int cols, int rows);
+  void (*flush)(void *ctx);
+} CTUI_GFX_SINK;
+
+/* sends the image calls to sink (NULL: back to the terminal). Set it
+ * before any image is made: an image keeps the path it was made on. */
+void ctui_gfx_set_sink(const CTUI_GFX_SINK *sink, void *ctx);
+
 /* transmits and displays a width x height RGBA image via the Kitty
  * graphics protocol (https://sw.kovidgoyal.net/kitty/graphics-protocol/),
  * writing the APC escape sequence straight to stdout -- unlike every

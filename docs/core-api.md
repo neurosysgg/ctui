@@ -125,6 +125,16 @@ just the type and the `CTUI_COLOR_*` basic-color enum.
   remove a Kitty pixel-graphics image directly to stdout, bypassing
   `CTUI_CELL` entirely. Only called from a widget's `gfx_render`
   (see `widget.h` below) — never call these from an ordinary `render()`.
+- `ctui_gfx_set_mode(mode)` — the session's tier set directly, for a
+  host that never calls `ctui_init()` (a window, a test).
+- `ctui_gfx_set_sink(sink, ctx)` — the image calls (`display`,
+  `image_begin/commit/free`, `delete`, `place_file`, and the frame's
+  `flush`) go to a `CTUI_GFX_SINK` instead of the terminal (a GPU
+  backend, a test): same arguments, no wire. An image made under a sink
+  stays on it. Terminal-only calls (put/unput, frame_file/animate,
+  reply) have no member: under a sink their escapes are dropped at the
+  flush, logged. With `ctui_gfx_set_mode(CTUI_GFX_KITTY)`, a widget's
+  existing kitty renderer draws through the sink unchanged.
 - `ctui_gfx_kitty_image_new(image_id)` / `_begin(img, w, h, keep)` /
   `_commit(img, row, col, cell_cols, cell_rows, z)` / `_free(img)` — a
   Kitty image painted in place: `begin()` hands out an RGBA buffer that
@@ -228,8 +238,8 @@ this directly except at the two ends of its lifecycle and
   and `s->buffer` the last one the sink took (all `'\0'` after a create,
   resize or set: draw everything); `0` = taken, `-1` = hand it over again
   next flush. A sink screen never writes the terminal (resize included);
-  kitty graphics stay terminal-only. `NULL` goes back to the terminal
-  with a full redraw.
+  images go to a graphics sink (`ctui_gfx_set_sink()`) beside it.
+  `NULL` goes back to the terminal with a full redraw.
 
 ## `compositor.h` — `CTUI_COMPOSITOR`
 

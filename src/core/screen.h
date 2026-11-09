@@ -13,8 +13,9 @@ typedef struct CTUI_SCREEN CTUI_SCREEN;
  * changed, with s->cells the new frame and s->buffer the one this sink
  * last took (all '\0' after a create or resize: redraw everything).
  * Return 0 once taken, -1 to get the same change again next flush. A
- * sink screen never writes the terminal; kitty graphics stay terminal-only
- * (a gfx widget draws its text fallback without ctui_init()). */
+ * sink screen never writes the terminal; images go to a graphics sink
+ * (ctui_gfx_set_sink(), gfx.h) beside it, or nowhere: without one and
+ * without ctui_init(), a gfx widget draws its text fallback. */
 typedef struct {
   int (*frame)(void *ctx, const CTUI_SCREEN *s);
 } CTUI_SCREEN_SINK;

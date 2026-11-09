@@ -63,11 +63,16 @@ Three layers; only the first touches what every ctui app links.
        staging memory: no copy before the upload.
      - **placed files + placeholder cells**: `place_file()` +
        `ctui_widget_put_kitty_placeholder()` (look/drawn.c's controls,
-       look/icon.c, ctui-wm's widgets). Today look paints RGBA, writes
-       a PNG (look/png.c, write-only) and the terminal decodes it. The
-       sink takes the RGBA *before* the PNG (a `place_rgba` call, which
-       kitty's implementation turns into png_write + place_file), so the
-       backend never decodes PNG. The placeholders need nothing new:
+       look/icon.c, ctui-wm's widgets). Look paints RGBA, writes a PNG
+       (look/png.c, write-only) and the terminal decodes it -- but
+       icon.c places PNGs it didn't make (icon themes, a file's own
+       picture), so the backend decodes PNG either way: the sink takes
+       `place_file` as is, and the decoder is ctui-wm's xdg/png.c
+       (already on core's `ctui_inflate_zlib`), promoted by the second
+       consumer rule when `src/vk/` needs it. A `place_rgba` skipping
+       look's write-then-read is an optimisation for later, if
+       measuring asks (a control's PNG is written once per state, keyed
+       by its hash). The placeholders need nothing new:
        a cell already carries the image id (fg RGB) and its row/col
        (`kitty_row/col`), so the text painter samples the image in the
        same pass as the glyphs; z under/over text is a per-image flag.
@@ -76,7 +81,8 @@ Three layers; only the first touches what every ctui app links.
        wants it.
    - **the tier, without a tty**: `ctui_g_gfx_mode` is set only by
      `ctui_init()`, which a window host never calls -- a setter
-     (`ctui_gfx_set_mode()`) for a sink host. With the sink above, a
+     (`ctui_gfx_set_mode()`) for a sink host. Done, with the sink
+     (`CTUI_GFX_SINK`, `ctui_gfx_set_sink()`, gfx.h; tests/gfx_sink_test.c). With the sink above, a
      widget's existing kitty renderer runs unchanged on the GPU (the
      tier means "pixel images available", not "a kitty terminal"), so
      the host negotiates `CTUI_GFX_KITTY` and every kitty widget works
@@ -84,7 +90,8 @@ Three layers; only the first touches what every ctui app links.
    - a widget's **gfx renderers per mode** (today one `gfx_render_mode`,
      matched exactly): a short table, tried GPU -> KITTY -> text, the
      first the session has runs. Only the plot widgets register a GPU
-     one.
+     one. This and `CTUI_GFX_GPU` wait for step 5: nothing has a GPU
+     renderer before plots, so nothing could test them.
    - the **cell's pixel size**: already there -- `ctui_cell_px_set()`
      (term.h) overrides `TIOCGWINSZ`, and `input.c`'s pixel mouse reads
      it. The host calls it on every scale change.
@@ -135,11 +142,12 @@ Three layers; only the first touches what every ctui app links.
 
 ## Steps, each measured or pinned before the next
 
-1. Core hooks (layer 1), with tests (screen_test, a new gfx sink test
-   with a recording sink: the calls a kitty widget makes arrive as
-   calls, and the kitty path's bytes are unchanged -- `make
-   flushbench` and `check_flush_kitty.py` on ctui-wm's recording;
-   ctui-wm's suites unchanged).
+1. Core hooks (layer 1): the graphics sink and the tier setter, with
+   tests (gfx_sink_test: a recording sink gets a kitty widget's calls
+   in order after the screen sink's frame, flush last, nothing on
+   stdout; kitty_protocol_test unchanged for the kitty path's bytes).
+   **Done 2026-11-09.** Left for a pty: a put/unput under a sink
+   dropped at the flush (only reaches the batch with a tty).
 2. `src/vk/`: text through the sink, the painter moved from
    syNESthesia; a headless test pinning a frame against a host
    reference. syNESthesia's app/ui.c becomes the glue; its window's
@@ -163,7 +171,13 @@ Three layers; only the first touches what every ctui app links.
 ## Open, the user's call
 
 - Whether ctui-wm's own windows should ever present this way (its
-  compositor), or kitty stays its display.
+  compositor), or kitty stays its display. **Parked as future ctui-wm
+  research**, a rabbit hole worth its own notes: going *fully* (within
+  reason) independent -- no river, no tuigreet -- a GPU Vulkan desktop
+  of ctui-wm's own: its compositor presenting ctui apps through this
+  backend, its own login, a Wayland compositor of its own or straight
+  to KMS/DRM. Nothing in steps 1-5 depends on it; the backend owning
+  no window or swapchain is what keeps that door open.
 
 ## Handoff from syNESthesia (2026-11-09)
 

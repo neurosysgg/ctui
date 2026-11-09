@@ -237,6 +237,20 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A graphics sink beside the screen sink** (2026-11-09,
+  VK_DESIGN.md step 1). `CTUI_GFX_SINK` / `ctui_gfx_set_sink()` (gfx.h):
+  `display`, `image_begin/commit/free`, `delete`, `place_file` and the
+  frame's `flush` go to a backend instead of the terminal, same
+  arguments, no isatty/compression/shm; a `CTUI_GFX_KITTY_IMAGE` made
+  under a sink forwards by its id (and returns NULL from `begin()` if the
+  sink was cleared under it). Terminal-only escapes batched under a sink
+  are dropped at the flush, logged. `ctui_gfx_set_mode()` sets the tier
+  without `ctui_init()`, so a window host sets `CTUI_GFX_KITTY` and every
+  kitty renderer draws through the sink unchanged. The kitty path is
+  untouched but for the `if (g_sink)` in front. tests/gfx_sink_test.c (6):
+  the calls in order after the screen sink's frame, flush last, nothing
+  on stdout; graphics without a frame() when no cell changed; free
+  forwarded; cleared, the kitty path as before.
 - [x] **Dialogs and forms written through ui/** (2026-11-08, ctui-wm
   session 326, notes/ui-nodes.md). A dialog's `entry` and new `press` (a
   button by its label), a form's `fields/NAME` and new `press` take writes

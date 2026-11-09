@@ -84,6 +84,22 @@ void ctui_gfx_ansi16_rgb(unsigned char color, unsigned char *r,
  * guidance. */
 #define CTUI_KITTY_CHUNK 4096
 
+static const CTUI_GFX_SINK *g_sink;
+static void *g_sink_ctx;
+
+void ctui_gfx_set_sink(const CTUI_GFX_SINK *sink, void *ctx) {
+  g_sink = sink;
+  g_sink_ctx = ctx;
+  ctui_logf(E_INF, "[CTUI:GFX] - graphics sink %s @ tick %d\n",
+            sink ? "set" : "cleared (the terminal)", ctui_tick_advance());
+}
+
+void ctui_gfx_set_mode(unsigned int mode) {
+  ctui_g_gfx_mode = mode;
+  ctui_logf(E_INF, "[CTUI:GFX] - tier set to 0x%x @ tick %d\n", mode,
+            ctui_tick_advance());
+}
+
 /* Phase 5a: every escape fragment ctui_gfx_kitty_display()/
  * ctui_gfx_kitty_delete() used to write() individually (the CUP escape,
  * every chunk's key-list prefix, every chunk's base64 body, every chunk's
@@ -107,6 +123,17 @@ static void kitty_batch_append(const void *data, size_t len) {
 }
 
 void ctui_gfx_kitty_flush(void) {
+  if (g_sink) {
+    if (g_kitty_batch_len > 0) {
+      ctui_logf(E_WRN,
+                "[CTUI:GFX] - %zu bytes of terminal-only kitty escapes "
+                "dropped (graphics sink) @ tick %d\n",
+                g_kitty_batch_len, ctui_tick_advance());
+      g_kitty_batch_len = 0;
+    }
+    g_sink->flush(g_sink_ctx);
+    return;
+  }
   CTUI_PROFILE_SPAN sp = ctui_profile_begin();
   if (g_kitty_batch_len > 0) {
     ctui_term_write(g_kitty_batch, g_kitty_batch_len);
@@ -626,6 +653,11 @@ static void kitty_display_shm(int row, int col, int cell_cols, int cell_rows,
 void ctui_gfx_kitty_display(int row, int col, int cell_cols, int cell_rows,
                             const unsigned char *rgba, int width, int height,
                             unsigned int image_id, int z) {
+  if (g_sink) {
+    g_sink->display(g_sink_ctx, row, col, cell_cols, cell_rows, rgba, width,
+                    height, image_id, z);
+    return;
+  }
   if (!isatty(STDOUT_FILENO)) {
     ctui_logf(E_WRN,
               "[CTUI:GFX] - kitty_display rejected @ tick %d, stdout isn't "
@@ -695,6 +727,7 @@ typedef struct {
 
 struct CTUI_GFX_KITTY_IMAGE {
   unsigned int id;
+  int sink; /* made under a graphics sink: every call forwards */
   int shm; /* buffers are shm objects sent by link(2), else heap + copy */
   KITTY_BUF bufs[CTUI_GFX_KITTY_IMAGE_BUFS];
   int open; /* what begin() returned, -1 */
@@ -846,7 +879,8 @@ CTUI_GFX_KITTY_IMAGE *ctui_gfx_kitty_image_new(unsigned int image_id) {
     return NULL;
   }
   img->id = image_id;
-  img->shm = g_kitty_shm_supported == 1;
+  img->sink = g_sink != NULL;
+  img->shm = !img->sink && g_kitty_shm_supported == 1;
   img->open = img->last = -1;
   for (int i = 0; i < CTUI_GFX_KITTY_IMAGE_BUFS; i++) {
     img->bufs[i].fd = -1;
@@ -860,6 +894,15 @@ unsigned char *ctui_gfx_kitty_image_begin(CTUI_GFX_KITTY_IMAGE *img, int width,
                                           int height, int keep) {
   if (img == NULL || width <= 0 || height <= 0) {
     return NULL;
+  }
+  if (img->sink) {
+    if (!g_sink) {
+      return NULL; /* its sink was cleared: the image has nowhere to go */
+    }
+    unsigned char *px =
+        g_sink->image_begin(g_sink_ctx, img->id, width, height, keep);
+    img->open = px ? 0 : -1;
+    return px;
   }
   size_t len = (size_t)width * (size_t)height * 4;
   /* heap buffers are never busy: one does */
@@ -954,6 +997,14 @@ void ctui_gfx_kitty_image_commit(CTUI_GFX_KITTY_IMAGE *img, int row, int col,
   if (img == NULL || img->open < 0) {
     return;
   }
+  if (img->sink) {
+    if (g_sink) {
+      g_sink->image_commit(g_sink_ctx, img->id, row, col, cell_cols,
+                           cell_rows, z);
+    }
+    img->open = -1;
+    return;
+  }
   KITTY_BUF *b = &img->bufs[img->open];
   if (img->shm) {
     if (!isatty(STDOUT_FILENO)) {
@@ -988,6 +1039,9 @@ void ctui_gfx_kitty_image_commit(CTUI_GFX_KITTY_IMAGE *img, int row, int col,
 void ctui_gfx_kitty_image_free(CTUI_GFX_KITTY_IMAGE *img) {
   if (img == NULL) {
     return;
+  }
+  if (img->sink && g_sink) {
+    g_sink->image_free(g_sink_ctx, img->id);
   }
   for (CTUI_GFX_KITTY_IMAGE **p = &g_kitty_images; *p; p = &(*p)->next) {
     if (*p == img) {
@@ -1026,6 +1080,10 @@ void ctui_gfx_kitty_reply(const char *body) {
 }
 
 void ctui_gfx_kitty_delete(unsigned int image_id) {
+  if (g_sink) {
+    g_sink->delete(g_sink_ctx, image_id);
+    return;
+  }
   if (!isatty(STDOUT_FILENO)) {
     ctui_logf(E_WRN,
               "[CTUI:GFX] - kitty_delete rejected @ tick %d, stdout isn't a "
@@ -1117,6 +1175,10 @@ size_t ctui_gfx_kitty_place_file_escape(char *out, size_t cap,
 
 void ctui_gfx_kitty_place_file(unsigned int image_id, const char *path,
                                int cols, int rows) {
+  if (g_sink) {
+    g_sink->place_file(g_sink_ctx, image_id, path, cols, rows);
+    return;
+  }
   if (!isatty(STDOUT_FILENO)) {
     ctui_logf(E_WRN,
               "[CTUI:GFX] - kitty_place_file rejected @ tick %d, stdout "
