@@ -1,7 +1,8 @@
 #version 450
 // The painter (src/vk/vk.h): a workgroup a listed 16 x 16 tile of the
-// surface, each pixel its cell's glyph bit in the foreground, else the
-// background (past the last whole cell, the default background), with
+// surface, each pixel its cell's background with the foreground over it
+// by the glyph's coverage (past the last whole cell, the default
+// background), with
 // the images placed over it as kitty composites them: z < 0 under the
 // glyph (below UNDER_BG only on a default background), z >= 0 over it,
 // in z order, alpha blended, each scaled to its rect by area average.
@@ -12,6 +13,7 @@
 layout(local_size_x = 16, local_size_y = 16) in;
 layout(set = 0, binding = 0) readonly buffer Tiles { uint tile[]; };
 layout(set = 0, binding = 1) readonly buffer Cells { uint cell[]; };
+// the glyph cache: a slot's coverage, a byte a pixel, four to a word
 layout(set = 0, binding = 2) readonly buffer Atlas { uint atlas[]; };
 layout(set = 0, binding = 3) writeonly buffer Surf { uint px[]; };
 // x y w h, the texels' offset, their w h, z (src/vk/vk.c PLACE_WORDS)
@@ -116,6 +118,20 @@ uint placeholder(uint id, uint dx, uint dy) {
   return 0u;
 }
 
+// glyph slot g's coverage at (gx, gy)
+uint coverage(uint g, uint gx, uint gy) {
+  uint i = g * ((gw * gh + 3u) / 4u) * 4u + gy * gw + gx;
+  return atlas[i >> 2] >> (8u * (i & 3u)) & 0xffu;
+}
+
+// fg over bg (0xRRGGBB) by c of 255
+uint blend(uint bg, uint fg, uint c) {
+  uint o = 0u;
+  for (uint s = 0u; s < 24u; s += 8u)
+    o |= (((fg >> s & 0xffu) * c + (bg >> s & 0xffu) * (255u - c) + 127u) / 255u) << s;
+  return o;
+}
+
 // t (rgb << 8 | a) over dst (0xRRGGBB)
 uint over(uint dst, uint t) {
   uint a = t & 0xffu;
@@ -144,7 +160,8 @@ void main() {
   if (x >= surf_w || y >= surf_h)
     return;
   uint cx = x / gw, cy = y / gh, rgb = def_bg;
-  bool on = false, bg_default = true;
+  uint cov = 0u;
+  bool bg_default = true;
   uint ph = 0u; // a placeholder cell's image, where the glyph would be
   uint fg = def_fg;
   if (cx < cols && cy < rows) {
@@ -161,17 +178,17 @@ void main() {
       ph = placeholder(cell[i + 1u], g * gw + gx, (a & 0xffu) * gh + gy);
       a = a & (FG_DEFAULT | BG_DEFAULT | PLACEHOLDER);
     } else if (g == BOX) {
-      on = gx == 0u || gx == gw - 1u || gy == gh / 8u || gy == gh - 1u - gh / 8u;
+      cov = gx == 0u || gx == gw - 1u || gy == gh / 8u || gy == gh - 1u - gh / 8u ? 255u : 0u;
     } else {
-      uint bits = atlas[g * gh + gy];
-      if ((a & BOLD) != 0u)
-        bits |= bits >> 1;
-      on = (bits >> (31u - gx) & 1u) != 0u;
+      cov = coverage(g, gx, gy);
+      // bold: the glyph smeared a pixel right
+      if ((a & BOLD) != 0u && gx > 0u)
+        cov = max(cov, coverage(g, gx - 1u, gy));
     }
     if ((a & UNDERLINE) != 0u && gy == gh - 1u - gh / 16u)
-      on = true;
+      cov = 255u;
     if ((a & STRIKE) != 0u && gy == gh / 2u)
-      on = true;
+      cov = 255u;
     if ((a & DIM) != 0u)
       fg = ((fg & 0xfefefeu) >> 1) + ((bg & 0xfefefeu) >> 1);
     rgb = bg;
@@ -180,8 +197,7 @@ void main() {
   for (; p < nplace && int(place[p * 8u + 7u]) < 0; p++)
     if (int(place[p * 8u + 7u]) >= UNDER_BG || bg_default)
       rgb = over(rgb, texel(p, x, y));
-  if (on)
-    rgb = fg;
+  rgb = blend(rgb, fg, cov);
   rgb = over(rgb, ph);
   for (; p < nplace; p++)
     rgb = over(rgb, texel(p, x, y));

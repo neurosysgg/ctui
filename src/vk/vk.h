@@ -13,6 +13,11 @@
  * caller presents from catches up by copy regions of the tiles it's
  * behind on, so an idle app costs nothing.
  *
+ * Text in JetBrains Mono (fonts/, OFL; CTUI_FONT names another TrueType
+ * file), a glyph drawn into the cache the first time a cell shows it
+ * (ttf.h: grey levels), box drawing stretched to its cell; a codepoint
+ * the font lacks is a box.
+ *
  * Per frame: ctui_screen_flush() (the sink takes the changes), then
  * ctui_vk_record() in a recording, then per image ctui_vk_regions() for
  * a vkCmdCopyBufferToImage from ctui_vk_surface(). At most
@@ -38,7 +43,8 @@
 #define CTUI_VK_FG_DEFAULT (1u << 8)
 #define CTUI_VK_BG_DEFAULT (1u << 9)
 /* a kitty placeholder cell (CTUI_GFX_KITTY_PLACEHOLDER): its slot is the
- * image's row | column << 8, its fg the image's id, painted from the
+ * image's column (16 bits; its row in the attrs' byte, which a
+ * placeholder doesn't draw), its fg the image's id, painted from the
  * image place_file() gave that id, fit into its virtual cells */
 #define CTUI_VK_PLACEHOLDER (1u << 10)
 /* the slot drawn as a box: a codepoint the atlas lacks */
@@ -53,7 +59,8 @@ CTUI_VK *ctui_vk_new(VkPhysicalDevice phys, VkDevice dev);
 void ctui_vk_free(CTUI_VK *vk);
 
 /* the surface w x h pixels, glyphs for scale120 (wp_fractional_scale's
- * 120ths: the largest Spleen size no taller than 16 px a logical pixel),
+ * 120ths: kitty's default size, 11 pt at 96 dpi a logical pixel; the
+ * cell the font's advance x ascender to descender, as kitty's),
  * words in the swapchain's order (bgra != 0: BGRA). *rows / *cols: the
  * grid, for ctui_screen_resize() / ctui_app_resize(); the cell's pixel
  * size goes to ctui_cell_px_set(). Waits for the device to be idle; the
@@ -116,9 +123,10 @@ unsigned ctui_vk_regions(CTUI_VK *vk, unsigned img, int fresh,
  * codepoint without a glyph is logged, once */
 void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out);
 
-/* the glyphs in use: w x h px, rows the atlas (256 glyphs of h words, a
- * row a word, bit 31 the leftmost pixel) */
+/* the glyph cache: w x h px a glyph, slot k's coverage from slots +
+ * k * slot_words (a byte a pixel, rows of w, four to a word from the
+ * low byte); slot 0 blank. A slot is the one ctui_vk_cell() gave */
 void ctui_vk_glyphs(const CTUI_VK *vk, unsigned *w, unsigned *h,
-                    const uint32_t **rows);
+                    const uint32_t **slots, unsigned *slot_words);
 
 #endif

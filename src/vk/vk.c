@@ -3,9 +3,10 @@
 
 #include "vk.h"
 
-#include "fonts/spleen.h"
 #include "look/png.h"
+#include "ttf.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -13,6 +14,8 @@
 static const uint32_t k_cells_spv[] =
 #include "shaders/cells.spv.h"
     ;
+
+#include "fonts/JetBrainsMono-Regular.ttf.h"
 
 typedef struct {
   VkBuffer buf;
@@ -64,8 +67,12 @@ typedef struct {
   int px, py, pw, ph; /* display_px()'s rect in the cells' pixels; pw 0: the cells */
 } PLC;
 
-/* codepoints a log was given for, so each missing one is logged once */
-#define MISSING_LOGGED 64u
+/* the font's size: kitty's default, 11 pt at 96 dpi a logical pixel */
+#define FONT_EM_PX (11.0f * 96.0f / 72.0f)
+/* the glyph cache's first size on the card, in slots (it doubles) */
+#define GLYPHS_FIRST 512u
+/* a slot_of[] entry: not drawn yet */
+#define SLOT_NONE 0u
 
 struct CTUI_VK {
   VkPhysicalDevice phys;
@@ -86,19 +93,27 @@ struct CTUI_VK {
   VkBufferCopy *copies;
   unsigned w, h, gw, gh, cols, rows, tx, ty;
   int bgra, sized;
-  const uint32_t *font;
   uint32_t def_fg, def_bg;
+  /* the font (CTUI_FONT's file, else the one built in) and its size */
+  CTUI_TTF ttf;
+  uint8_t *ttf_file;
+  float em;
+  int base;
+  /* the glyph cache: a BMP codepoint's slot (SLOT_NONE: not drawn yet,
+   * CTUI_VK_GLYPH_BOX: the font has none), each slot's coverage on the
+   * host (slot_words words, 4 bytes a word, rows of gw), slot 0 blank;
+   * slots from up_from go up with the next record, into an atlas on the
+   * card of atlas_cap slots */
+  uint16_t *slot_of;
+  uint32_t *glyphs;
+  unsigned slot_words, nslots, slots_cap, up_from, atlas_cap;
+  uint8_t *cov;
   uint32_t *rec;         /* the cells as on the card, cols * rows * WORDS */
   unsigned char *dirty;  /* a cell changed since the last record */
   unsigned char *tdirty; /* a tile to paint */
-  int atlas_up;          /* the atlas to go up with the next record */
   /* per swapchain image and tile row, the span of tiles it's behind on:
    * [0] first, [1] last; first > last when none */
   int *behind;
-  uint32_t extras[64];
-  unsigned nextras;
-  uint32_t missing[MISSING_LOGGED];
-  unsigned nmissing;
 
   IMG *imgs;
   unsigned nimg, img_cap;
@@ -172,18 +187,50 @@ static int buf_new(CTUI_VK *vk, BUF *b, size_t bytes, int host) {
   return 0;
 }
 
-/* UI_FONT_EXTRAS' codepoints, in their slots' order */
-static void decode_extras(CTUI_VK *vk) {
-  const unsigned char *e = (const unsigned char *)UI_FONT_EXTRAS;
-  while (*e && vk->nextras < sizeof vk->extras / sizeof vk->extras[0]) {
-    int len = *e < 0xe0 ? 2 : *e < 0xf0 ? 3 : 4;
-    uint32_t c = *e & (len == 2 ? 0x1fu : len == 3 ? 0x0fu : 0x07u);
-    for (int k = 1; k < len; k++) {
-      c = c << 6 | (e[k] & 0x3fu);
+/* CTUI_FONT's file when it reads as a font, else the one built in */
+static void load_font(CTUI_VK *vk) {
+  const char *path = getenv("CTUI_FONT");
+  FILE *fp = path && *path ? fopen(path, "rb") : NULL;
+  if (fp) {
+    long n = fseek(fp, 0, SEEK_END) == 0 ? ftell(fp) : -1;
+    uint8_t *bytes = n > 0 ? malloc((size_t)n) : NULL;
+    if (bytes && fseek(fp, 0, SEEK_SET) == 0 && fread(bytes, 1, (size_t)n, fp) == (size_t)n &&
+        ctui_ttf_load(&vk->ttf, bytes, (size_t)n) == 0) {
+      vk->ttf_file = bytes;
+      ctui_logf(E_INF, "[CTUI:VK] - font %s\n", path);
+    } else {
+      free(bytes);
+      ctui_logf(E_WRN, "[CTUI:VK] - CTUI_FONT %s isn't a TrueType font: the built-in one\n",
+                path);
     }
-    vk->extras[vk->nextras++] = c;
-    e += len;
+    fclose(fp);
+  } else if (path && *path) {
+    ctui_logf(E_WRN, "[CTUI:VK] - CTUI_FONT %s can't be read: the built-in one\n", path);
   }
+  if (!vk->ttf_file && ctui_ttf_load(&vk->ttf, ctui_vk_font_ttf, ctui_vk_font_ttf_len) != 0) {
+    ctui_logf(E_ERR, "[CTUI:VK] - the built-in font doesn't load\n");
+  }
+}
+
+/* the cache emptied for glyphs gw x gh: slot 0 the blank */
+static int glyphs_reset(CTUI_VK *vk) {
+  vk->slot_words = (vk->gw * vk->gh + 3) / 4;
+  if (!vk->slot_of) {
+    vk->slot_of = malloc(0x10000u * sizeof *vk->slot_of);
+  }
+  free(vk->glyphs);
+  free(vk->cov);
+  vk->slots_cap = GLYPHS_FIRST;
+  vk->glyphs = calloc((size_t)vk->slots_cap * vk->slot_words, 4);
+  vk->cov = malloc((size_t)vk->gw * vk->gh);
+  if (!vk->slot_of || !vk->glyphs || !vk->cov) {
+    return -1;
+  }
+  memset(vk->slot_of, 0, 0x10000u * sizeof *vk->slot_of);
+  vk->nslots = 1;
+  vk->up_from = 0;
+  vk->atlas_cap = 0;
+  return 0;
 }
 
 static void free_sized(CTUI_VK *vk) {
@@ -222,6 +269,10 @@ void ctui_vk_free(CTUI_VK *vk) {
   free(vk->imgs);
   free(vk->plcs);
   free(vk->icopies);
+  free(vk->slot_of);
+  free(vk->glyphs);
+  free(vk->cov);
+  free(vk->ttf_file);
   if (vk->pool) {
     vkDestroyDescriptorPool(vk->dev, vk->pool, NULL);
   }
@@ -250,7 +301,7 @@ CTUI_VK *ctui_vk_new(VkPhysicalDevice phys, VkDevice dev) {
   vk->def_fg = 0xc0c0c0u;
   vk->def_bg = 0x000000u;
   vkGetPhysicalDeviceMemoryProperties(phys, &vk->mem);
-  decode_extras(vk);
+  load_font(vk);
 
   VkDescriptorSetLayoutBinding bind[BINDINGS];
   for (unsigned i = 0; i < BINDINGS; i++) {
@@ -322,20 +373,6 @@ bad:
   ctui_logf(E_ERR, "[CTUI:VK] - the painter's pipeline couldn't be made\n");
   ctui_vk_free(vk);
   return NULL;
-}
-
-static void glyphs_for(int scale120, unsigned *w, unsigned *h,
-                       const uint32_t **rows) {
-  unsigned n = sizeof k_ui_fonts / sizeof k_ui_fonts[0], best = 0;
-  unsigned s = (unsigned)(scale120 > 0 ? scale120 : 120);
-  for (unsigned i = 0; i < n; i++) {
-    if (k_ui_fonts[i].h * 120u <= 16u * s) {
-      best = i;
-    }
-  }
-  *w = k_ui_fonts[best].w;
-  *h = k_ui_fonts[best].h;
-  *rows = k_ui_fonts[best].rows;
 }
 
 static void all_tiles(CTUI_VK *vk) {
@@ -415,14 +452,22 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
   vk->w = w;
   vk->h = h;
   vk->bgra = bgra;
-  glyphs_for(scale120, &vk->gw, &vk->gh, &vk->font);
+  vk->em = FONT_EM_PX * (float)(scale120 > 0 ? scale120 : 120) / 120.0f;
+  int cw, ch;
+  ctui_ttf_cell(&vk->ttf, vk->em, &cw, &ch, &vk->base);
+  vk->gw = (unsigned)(cw > 0 ? cw : 1);
+  vk->gh = (unsigned)(ch > 0 ? ch : 1);
+  if (glyphs_reset(vk)) {
+    ctui_logf(E_ERR, "[CTUI:VK] - no memory for the glyph cache\n");
+    return -1;
+  }
   vk->cols = w / vk->gw;
   vk->rows = h / vk->gh;
   vk->tx = (w + CTUI_VK_TILE - 1) / CTUI_VK_TILE;
   vk->ty = (h + CTUI_VK_TILE - 1) / CTUI_VK_TILE;
   size_t ncells = (size_t)vk->cols * vk->rows, ntiles = (size_t)vk->tx * vk->ty;
   size_t cell_bytes = ncells * CTUI_VK_CELL_WORDS * 4u;
-  size_t atlas_bytes = 256u * vk->gh * 4u;
+  size_t atlas_bytes = (size_t)vk->slots_cap * vk->slot_words * 4u;
   vk->rec = malloc(cell_bytes ? cell_bytes : 4);
   vk->dirty = calloc(ncells ? ncells : 1, 1);
   vk->tdirty = calloc(ntiles, 1);
@@ -453,7 +498,7 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
     vk->behind[2 * i] = 1;
     vk->behind[2 * i + 1] = 0;
   }
-  vk->atlas_up = 1;
+  vk->atlas_cap = vk->slots_cap;
 
   describe(vk);
   vk->sized = 1;
@@ -480,10 +525,11 @@ void ctui_vk_defaults(const CTUI_VK *vk, uint32_t *fg, uint32_t *bg) {
 }
 
 void ctui_vk_glyphs(const CTUI_VK *vk, unsigned *w, unsigned *h,
-                    const uint32_t **rows) {
+                    const uint32_t **slots, unsigned *slot_words) {
   *w = vk->gw;
   *h = vk->gh;
-  *rows = vk->font;
+  *slots = vk->glyphs;
+  *slot_words = vk->slot_words;
 }
 
 VkBuffer ctui_vk_surface(const CTUI_VK *vk) { return vk->surf.buf; }
@@ -512,31 +558,48 @@ static uint32_t rgb_basic(unsigned char c) {
   return (uint32_t)r << 16 | (uint32_t)g << 8 | b;
 }
 
+/* box drawing and blocks: stretched to the cell, so lines meet */
+static int stretched(uint32_t ch) { return ch >= 0x2500 && ch <= 0x259f; }
+
+/* ch's slot in the cache, drawn into it the first time; a codepoint the
+ * font lacks (or a cluster: one font, no shaping) is the box, logged once */
 static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch) {
-  if (ch == 0 || ch == CTUI_CELL_CONT) {
-    return ' ';
+  if (ch == 0 || ch == ' ' || ch == CTUI_CELL_CONT) {
+    return 0;
   }
-  if (!(ch & CTUI_CELL_CLUSTER)) {
-    if ((ch >= 0x20 && ch <= 0x7e) || (ch >= 0xa0 && ch <= 0xff)) {
-      return ch;
-    }
-    for (unsigned i = 0; i < vk->nextras; i++) {
-      if (vk->extras[i] == ch) {
-        return k_ui_font_extra_slot[i];
-      }
-    }
+  if ((ch & CTUI_CELL_CLUSTER) || ch > 0xffffu) {
+    return CTUI_VK_GLYPH_BOX;
   }
-  for (unsigned i = 0; i < vk->nmissing; i++) {
-    if (vk->missing[i] == ch) {
+  if (vk->slot_of[ch] != SLOT_NONE) {
+    return vk->slot_of[ch];
+  }
+  uint16_t g = ctui_ttf_glyph(&vk->ttf, ch);
+  if (!g || vk->nslots >= CTUI_VK_GLYPH_BOX) {
+    vk->slot_of[ch] = CTUI_VK_GLYPH_BOX;
+    ctui_logf(E_WRN, "[CTUI:VK] - no glyph for 0x%x, drawn as a box\n", (unsigned)ch);
+    return CTUI_VK_GLYPH_BOX;
+  }
+  if (vk->nslots == vk->slots_cap) {
+    uint32_t *more = realloc(vk->glyphs, (size_t)vk->slots_cap * 2 * vk->slot_words * 4);
+    if (!more) {
+      ctui_logf(E_ERR, "[CTUI:VK] - no memory for glyph 0x%x\n", (unsigned)ch);
       return CTUI_VK_GLYPH_BOX;
     }
+    vk->glyphs = more;
+    vk->slots_cap *= 2;
   }
-  if (vk->nmissing < MISSING_LOGGED) {
-    vk->missing[vk->nmissing++] = ch;
-    ctui_logf(E_WRN, "[CTUI:VK] - no glyph for 0x%x, drawn as a box\n",
-              (unsigned)ch);
+  unsigned slot = vk->nslots++;
+  if (ctui_ttf_draw(&vk->ttf, g, vk->em, (int)vk->gw, (int)vk->gh, vk->base, stretched(ch),
+                    vk->cov)) {
+    ctui_logf(E_WRN, "[CTUI:VK] - glyph 0x%x's outline unreadable: blank\n", (unsigned)ch);
   }
-  return CTUI_VK_GLYPH_BOX;
+  uint32_t *w = vk->glyphs + (size_t)slot * vk->slot_words;
+  memset(w, 0, vk->slot_words * 4u);
+  for (unsigned i = 0; i < vk->gw * vk->gh; i++) {
+    w[i / 4] |= (uint32_t)vk->cov[i] << (8 * (i % 4));
+  }
+  vk->slot_of[ch] = (uint16_t)slot;
+  return slot;
 }
 
 void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
@@ -836,19 +899,35 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
     ctui_logf(E_ERR, "[CTUI:VK] - no memory for the images\n");
     return 0;
   }
+  if (vk->slots_cap > vk->atlas_cap) {
+    /* made again bigger, the device idle (the old may be in use), every
+     * slot up again */
+    vkDeviceWaitIdle(vk->dev);
+    buf_free(vk, &vk->atlas);
+    if (buf_new(vk, &vk->atlas, (size_t)vk->slots_cap * vk->slot_words * 4u, 0)) {
+      ctui_logf(E_ERR, "[CTUI:VK] - no memory for %u glyphs\n", vk->slots_cap);
+      return 0;
+    }
+    vk->atlas_cap = vk->slots_cap;
+    vk->up_from = 0;
+    describe(vk);
+    ctui_logf(E_INF, "[CTUI:VK] - glyph atlas now %u slots @ tick %d\n", vk->atlas_cap,
+              ctui_tick_advance());
+  }
+  size_t glyph_words = (size_t)(vk->nslots - vk->up_from) * vk->slot_words;
   for (unsigned i = 0; i < vk->nimg; i++) {
     if (vk->imgs[i].up && vk->imgs[i].room) {
       nup++;
       img_words += (size_t)vk->imgs[i].w * (size_t)vk->imgs[i].h;
     }
   }
-  if (!ctui_vk_pending(vk) && !nup && !vk->places_up) {
+  if (!ctui_vk_pending(vk) && !nup && !vk->places_up && !glyph_words) {
     return 0;
   }
   size_t ncells = (size_t)vk->cols * vk->rows;
   const size_t cw = CTUI_VK_CELL_WORDS;
   unsigned next = (vk->slot + 1) % CTUI_VK_SLOTS;
-  size_t need = ((size_t)vk->tx * vk->ty + 256u * vk->gh + ncells * cw +
+  size_t need = ((size_t)vk->tx * vk->ty + glyph_words + ncells * cw +
                  (size_t)nplace * PLACE_WORDS + (size_t)ntab * TAB_WORDS +
                  img_words) * 4u;
   if (stage_room(vk, next, need)) {
@@ -888,10 +967,11 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
   memset(vk->tdirty, 0, (size_t)vk->tx * vk->ty);
   size_t off = (size_t)vk->tx * vk->ty; /* in words */
   VkBufferCopy atlas = {0};
-  if (vk->atlas_up) {
-    atlas = (VkBufferCopy){off * 4u, 0, 256u * vk->gh * 4u};
-    memcpy(st + off, vk->font, atlas.size);
-    off += 256u * vk->gh;
+  if (glyph_words) {
+    atlas = (VkBufferCopy){off * 4u, (size_t)vk->up_from * vk->slot_words * 4u,
+                           glyph_words * 4u};
+    memcpy(st + off, vk->glyphs + (size_t)vk->up_from * vk->slot_words, atlas.size);
+    off += glyph_words;
   }
   unsigned nc = 0;
   for (size_t i = 0; i < ncells; i++) {
@@ -983,9 +1063,9 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
     VkBufferCopy tiles = {0, 0, nt * 4u};
     vkCmdCopyBuffer(cmd, stage, vk->tiles.buf, 1, &tiles);
   }
-  if (vk->atlas_up) {
+  if (glyph_words) {
     vkCmdCopyBuffer(cmd, stage, vk->atlas.buf, 1, &atlas);
-    vk->atlas_up = 0;
+    vk->up_from = vk->nslots;
   }
   if (nc) {
     vkCmdCopyBuffer(cmd, stage, vk->cells.buf, nc, vk->copies);

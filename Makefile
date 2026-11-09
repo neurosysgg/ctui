@@ -68,7 +68,11 @@ VK_SRC = $(wildcard src/vk/*.c)
 VK_SPV = $(patsubst %.comp,%.spv.h,$(wildcard src/vk/shaders/*.comp))
 src/vk/shaders/%.spv.h: src/vk/shaders/%.comp
 	glslc --target-env=vulkan1.0 -O -mfmt=c -o $@ $<
-test-vk_test: $(CORE_SRC) $(CORE_HDR) $(VK_SRC) $(wildcard src/vk/*.h) $(VK_SPV) tests/vk/vk_test.c tools/ctui_test.h
+# the built-in font as a C array (xxd, made const: read-only data)
+VK_FONT = src/vk/fonts/JetBrainsMono-Regular.ttf.h
+$(VK_FONT): src/vk/fonts/JetBrainsMono-Regular.ttf
+	xxd -i -n ctui_vk_font_ttf $< | sed 's/^unsigned/static const unsigned/' > $@
+test-vk_test: $(CORE_SRC) $(CORE_HDR) $(VK_SRC) $(wildcard src/vk/*.h) $(VK_SPV) $(VK_FONT) tests/vk/vk_test.c tools/ctui_test.h
 	$(CC) $(CFLAGS) -Itools -o $@ $(CORE_SRC) $(VK_SRC) tests/vk/vk_test.c $(LDLIBS) $(VK_LIBS)
 
 # replays recorded apps' output through flush: bytes, time, the same cells
@@ -89,7 +93,7 @@ coverage: $(CORE_SRC) $(CORE_HDR) $(TEST_SRC) tools/ctui_test.h tools/coverage.s
 	@bash tools/coverage.sh
 
 clean:
-	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN) test-vk_test $(VK_SPV)
+	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN) test-vk_test $(VK_SPV) $(VK_FONT)
 	rm -rf coverage
 
 .PHONY: query-alone clean examples all test coverage

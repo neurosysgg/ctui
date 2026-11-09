@@ -9,3 +9,4 @@ coverage/
 *.gcov
 flushbench
 *.spv.h
+*.ttf.h

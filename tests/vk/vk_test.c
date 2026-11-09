@@ -10,6 +10,7 @@
 #include "ctui.h"
 #include "ctui_test.h"
 #include "look/png.h"
+#include "vk/ttf.h"
 #include "vk/vk.h"
 
 #include <stdio.h>
@@ -17,8 +18,10 @@
 #include <string.h>
 #include <unistd.h>
 
-#define W 200u
-#define H 100u
+#define W 232u
+#define H 128u
+/* the cell, as the font gives it at scale 1 (9 x 20: 25 x 6 cells) */
+static unsigned GW, GH;
 #define VALIDATION "VK_LAYER_KHRONOS_validation"
 
 static VkInstance g_inst;
@@ -378,18 +381,57 @@ static uint32_t ph_texel(unsigned id, unsigned gw, unsigned gh, unsigned dx,
   return t;
 }
 
+/* cells.comp's coverage() and blend() */
+static unsigned coverage(const uint32_t *slots, unsigned sw, unsigned gw, unsigned g,
+                         unsigned gx, unsigned gy) {
+  unsigned i = gy * gw + gx;
+  return slots[g * sw + i / 4] >> (8 * (i % 4)) & 0xffu;
+}
+
+static uint32_t blend(uint32_t bg, uint32_t fg, unsigned c) {
+  uint32_t o = 0;
+  for (unsigned s = 0; s < 24; s += 8) {
+    o |= (((fg >> s & 0xffu) * c + (bg >> s & 0xffu) * (255u - c) + 127u) / 255u) << s;
+  }
+  return o;
+}
+
+/* the 16 x 16 tiles under a rect of pixels */
+/* VK_TEST_PPM=FILE: the surface as it is, to look at */
+static void dump_ppm(const char *what) {
+  const char *path = getenv("VK_TEST_PPM");
+  FILE *f = path ? fopen(path, "wb") : NULL;
+  if (!f) {
+    return;
+  }
+  fprintf(f, "P6\n%u %u\n255\n", W, H);
+  for (unsigned i = 0; i < W * H; i++) {
+    unsigned char rgb[3] = {(unsigned char)g_px[i], (unsigned char)(g_px[i] >> 8),
+                            (unsigned char)(g_px[i] >> 16)};
+    fwrite(rgb, 1, 3, f);
+  }
+  fclose(f);
+  printf("  (%s written to %s)\n", what, path);
+}
+
+static unsigned tiles_under(unsigned x, unsigned y, unsigned w, unsigned h) {
+  unsigned x1 = x + w > W ? W : x + w, y1 = y + h > H ? H : y + h;
+  return ((x1 - 1) / 16 - x / 16 + 1) * ((y1 - 1) / 16 - y / 16 + 1);
+}
+
 /* cells.comp's rule, on the host, from the screen's cells */
 static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
-  unsigned gw, gh;
-  const uint32_t *font;
-  ctui_vk_glyphs(vk, &gw, &gh, &font);
+  unsigned gw, gh, sw;
+  const uint32_t *slots;
+  ctui_vk_glyphs(vk, &gw, &gh, &slots, &sw);
   uint32_t dfg, dbg;
   ctui_vk_defaults(vk, &dfg, &dbg);
   for (unsigned y = 0; y < H; y++) {
     for (unsigned x = 0; x < W; x++) {
       unsigned cx = x / gw, cy = y / gh, gx = x % gw, gy = y % gh;
       uint32_t rgb = dbg, fg = dfg;
-      int on = 0, bg_default = 1;
+      unsigned cov = 0;
+      int bg_default = 1;
       uint32_t ph = 0;
       if (cx < (unsigned)s->cols && cy < (unsigned)s->rows) {
         uint32_t c[CTUI_VK_CELL_WORDS] = {0}, l[CTUI_VK_CELL_WORDS];
@@ -408,19 +450,19 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
         if (a & CTUI_VK_PLACEHOLDER) {
           ph = ph_texel(c[1], gw, gh, g * gw + gx, (a & 0xffu) * gh + gy);
           a &= CTUI_VK_FG_DEFAULT | CTUI_VK_BG_DEFAULT | CTUI_VK_PLACEHOLDER;
-          on = 0;
         } else if (g == CTUI_VK_GLYPH_BOX) {
-          on = gx == 0 || gx == gw - 1 || gy == gh / 8 ||
-               gy == gh - 1 - gh / 8;
+          cov = gx == 0 || gx == gw - 1 || gy == gh / 8 || gy == gh - 1 - gh / 8 ? 255 : 0;
         } else {
-          uint32_t bits = font[g * gh + gy];
-          if (a & CTUI_ATTR_BOLD) {
-            bits |= bits >> 1;
+          cov = coverage(slots, sw, gw, g, gx, gy);
+          if ((a & CTUI_ATTR_BOLD) && gx > 0) {
+            unsigned l = coverage(slots, sw, gw, g, gx - 1, gy);
+            cov = l > cov ? l : cov;
           }
-          on = bits >> (31u - gx) & 1u;
         }
-        on |= (a & CTUI_ATTR_UNDERLINE) && gy == gh - 1 - gh / 16;
-        on |= (a & CTUI_ATTR_STRIKE) && gy == gh / 2;
+        if (((a & CTUI_ATTR_UNDERLINE) && gy == gh - 1 - gh / 16) ||
+            ((a & CTUI_ATTR_STRIKE) && gy == gh / 2)) {
+          cov = 255;
+        }
         if (a & CTUI_ATTR_DIM) {
           fg = ((fg & 0xfefefeu) >> 1) + ((bg & 0xfefefeu) >> 1);
         }
@@ -432,9 +474,7 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
           rgb = over(rgb, texel(&g_pl[p], gw, gh, x, y));
         }
       }
-      if (on) {
-        rgb = fg;
-      }
+      rgb = blend(rgb, fg, cov);
       rgb = over(rgb, ph);
       for (; p < g_npl; p++) {
         rgb = over(rgb, texel(&g_pl[p], gw, gh, x, y));
@@ -559,28 +599,28 @@ static void test_images(CTUI_VK *vk, CTUI_SCREEN *screen) {
                    bad, tiles);
   /* (1, 0) cell's first pixel: small's red, alpha 128, over the bold
    * cell's blue background (0x0000ee) */
-  CTUI_TEST_ASSERT(g_px[16 * W] == rgba(over(0x0000ee, 0xff000080u)),
-                   "half-transparent red over blue: %08x", g_px[16 * W]);
+  CTUI_TEST_ASSERT(g_px[GH * W] == rgba(over(0x0000ee, 0xff000080u)),
+                   "half-transparent red over blue: %08x", g_px[GH * W]);
   /* row 5, col 20: under UNDER_BG, the default background: it shows */
-  CTUI_TEST_ASSERT(g_px[(5 * 16 + 3) * W + 20 * 8 + 3] == rgba(0x0963c7),
+  CTUI_TEST_ASSERT(g_px[(5 * GH + 3) * W + 20 * GW + 3] == rgba(0x0963c7),
                    "below UNDER_BG on a default background: shown (%08x)",
-                   g_px[(5 * 16 + 3) * W + 20 * 8 + 3]);
+                   g_px[(5 * GH + 3) * W + 20 * GW + 3]);
 
   ctui_gfx_kitty_display(2, 1, 2, 1, small, 2, 2, 1, 0);
   tiles = paint(vk);
-  CTUI_TEST_ASSERT(tiles == 1, "the same image again: its one tile (%u)",
-                   tiles);
+  CTUI_TEST_ASSERT(tiles == tiles_under(0, GH, 2 * GW, GH),
+                   "the same image again: its tiles alone (%u)", tiles);
 
   ctui_gfx_kitty_delete(2);
   g_pl[2] = g_pl[3];
   g_npl = 3;
   tiles = paint(vk);
   bad = differ(vk, screen);
-  CTUI_TEST_ASSERT(tiles == 4 && bad == 0,
+  CTUI_TEST_ASSERT(tiles == tiles_under(GW, 0, 3 * GW, 2 * GH) && bad == 0,
                    "deleted: its tiles painted without it, as the reference "
                    "(%u tiles, %u differ)",
                    tiles, bad);
-  CTUI_TEST_ASSERT(hash() == 0x367dbd1d7fdba9d4ull, "the images' hash: %016llx",
+  CTUI_TEST_ASSERT(hash() == 0x5030fa8b1bb4f372ull, "the images' hash: %016llx",
                    (unsigned long long)hash());
 
   /* a 2 x 3 picture into a rect 3 px in from its 4 x 2 cells' corner,
@@ -598,7 +638,7 @@ static void test_images(CTUI_VK *vk, CTUI_SCREEN *screen) {
                    "display_px: scaled into its pixel rect as the reference "
                    "(%u tiles, %u differ)",
                    tiles, bad);
-  unsigned in = (3 * 16 + 3) * W + 2 * 8 + 3, out = (3 * 16 + 2) * W + 2 * 8 + 2;
+  unsigned in = (3 * GH + 3) * W + 2 * GW + 3, out = (3 * GH + 2) * W + 2 * GW + 2;
   CTUI_TEST_ASSERT(g_px[in] == rgba(0xc80a0a) && g_px[out] != rgba(0xc80a0a),
                    "its first texel starts 3 px in, not at the cell (%08x, %08x)",
                    g_px[in], g_px[out]);
@@ -659,11 +699,12 @@ static void test_placed(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
                    "placeholder cells show the placed file, fit and centred, "
                    "as the reference: %u differ",
                    bad);
-  /* (2, 14): the image's first texel 4 px down (24 x 24 centred in 24 x
-   * 32): rgb (0, 200, 40) */
-  CTUI_TEST_ASSERT(g_px[(2 * 16 + 4) * W + 14 * 8 + 1] == rgba(0x00c828),
-                   "its first texel where the fit puts it: %08x",
-                   g_px[(2 * 16 + 4) * W + 14 * 8 + 1]);
+  /* (2, 14): the image's first texel where the fit puts it (a square
+   * centred in 3 x 2 cells): rgb (0, 200, 40) */
+  unsigned side = 3 * GW < 2 * GH ? 3 * GW : 2 * GH;
+  unsigned first = (2 * GH + (2 * GH - side) / 2) * W + 14 * GW + (3 * GW - side) / 2;
+  CTUI_TEST_ASSERT(g_px[first] == rgba(0x00c828) && g_px[first - W] != rgba(0x00c828),
+                   "its first texel where the fit puts it: %08x", g_px[first]);
 
   ctui_gfx_kitty_put(9, 2, 6, 1, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1);
   g_pl[0] = (PL){5, 0, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, px, 4, 4, 0, 0, 0, 0};
@@ -676,18 +717,18 @@ static void test_placed(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
   ctui_gfx_kitty_unput(9, 2);
   g_npl = 0;
   unsigned tiles = paint(vk);
-  CTUI_TEST_ASSERT(tiles == 2 && differ(vk, screen) == 0,
+  CTUI_TEST_ASSERT(tiles == tiles_under(0, 5 * GH, 4 * GW, GH) && differ(vk, screen) == 0,
                    "unput: its tiles painted without it (%u)", tiles);
 
   ctui_gfx_place_rgba(9, px2, 4, 4, 3, 2);
   g_ph_rgba = px2;
   tiles = paint(vk);
   bad = differ(vk, screen);
-  CTUI_TEST_ASSERT(tiles == 4 && bad == 0,
+  CTUI_TEST_ASSERT(tiles == tiles_under(14 * GW, 2 * GH, 3 * GW, 2 * GH) && bad == 0,
                    "placed again from its pixels (place_rgba, no file): its "
                    "cells' tiles alone, the new texels (%u tiles, %u differ)",
                    tiles, bad);
-  CTUI_TEST_ASSERT(hash() == 0x2233904e6e0bb59full, "the placed file's hash: %016llx",
+  CTUI_TEST_ASSERT(hash() == 0x3687e6278e4e8b33ull, "the placed file's hash: %016llx",
                    (unsigned long long)hash());
 
   ctui_gfx_kitty_delete(9);
@@ -713,9 +754,9 @@ static void test_placed(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
   ctui_screen_flush(screen);
   paint(vk);
   bad = differ(vk, screen);
-  /* the fit: 300 x 1 texels into 2400 x 16 px, 8 px tall from y 4; column
-   * 256 is cell 22 */
-  uint32_t at = g_px[(5 * 16 + 6) * W + 22 * 8 + 3];
+  /* the fit: 300 x 1 texels into 300 cells, GW px tall and centred;
+   * column 256 is cell 22 */
+  uint32_t at = g_px[(5 * GH + GH / 2) * W + 22 * GW + 3];
   CTUI_TEST_ASSERT(bad == 0 && at == rgba(0x00c84d),
                    "a placeholder run past column 255 goes on (256: %08x), as "
                    "the reference (%u differ)",
@@ -739,8 +780,10 @@ static uint64_t now_ns(void) {
  * the filled one left of the split, the thumb over it there -- still,
  * then moving with the frame's time, then held at its end */
 static void test_wipe(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
-  enum { TW = 40, TH = 16, MW = 5 };
-  static uint8_t empty[TW * TH * 4], full[TW * TH * 4], thumb[MW * TH * 4];
+  /* the track exactly its 5 x 1 cells' pixels */
+  enum { MW = 5, TWMAX = 64, THMAX = 32 };
+  const int TW = 5 * (int)GW, TH = (int)GH;
+  static uint8_t empty[TWMAX * THMAX * 4], full[TWMAX * THMAX * 4], thumb[MW * THMAX * 4];
   for (int i = 0; i < TW * TH; i++) {
     empty[i * 4] = 20, empty[i * 4 + 1] = 40, empty[i * 4 + 2] = (uint8_t)(100 + i % TW);
     full[i * 4] = (uint8_t)(150 + i % TW), full[i * 4 + 1] = 30, full[i * 4 + 2] = 30;
@@ -765,8 +808,8 @@ static void test_wipe(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
                    "a still wipe: nothing moving");
   paint(vk);
   unsigned bad = differ(vk, screen);
-  /* row 5's cells from x 144: the split at 154, the thumb 152..156 */
-  unsigned row = (5 * 16 + 4) * W + 144;
+  /* row 5's cells from x 18 * GW: the split 10 px in, the thumb 8..12 */
+  unsigned row = (5 * GH + 4) * W + 18 * GW;
   CTUI_TEST_ASSERT(bad == 0 && g_px[row + 7] == rgba(0x9d1e1e) &&
                        g_px[row + 8] == rgba(0x0ac80a) && g_px[row + 12] == rgba(0x0acc0a) &&
                        g_px[row + 13] == rgba(0x142871),
@@ -808,16 +851,76 @@ static void test_wipe(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
   ctui_gfx_set_sink(NULL, NULL);
 }
 
+/* the font on its own (ttf.h): kitty's cell from its metrics, box
+ * drawing meeting its neighbours at every edge */
+static void test_ttf(void) {
+  FILE *f = fopen("src/vk/fonts/JetBrainsMono-Regular.ttf", "rb");
+  static uint8_t bytes[300000], cov[64 * 64];
+  size_t n = f ? fread(bytes, 1, sizeof bytes, f) : 0;
+  if (f) {
+    fclose(f);
+  }
+  CTUI_TTF t;
+  CTUI_TEST_ASSERT(n > 0 && ctui_ttf_load(&t, bytes, n) == 0 && !ctui_ttf_load(&t, bytes, n),
+                   "JetBrains Mono loads (%zu bytes)", n);
+  CTUI_TEST_ASSERT(ctui_ttf_load(&t, bytes, 40) == -1, "a truncated file doesn't");
+  ctui_ttf_load(&t, bytes, n);
+  int cw, ch, base;
+  float em = 11.0f * 96.0f / 72.0f;
+  ctui_ttf_cell(&t, em, &cw, &ch, &base);
+  CTUI_TEST_ASSERT(cw == 9 && ch == 20 && base == 15,
+                   "11 pt at 96 dpi: a 9x20 cell, the baseline at 15 (%dx%d, %d)", cw, ch,
+                   base);
+  CTUI_TEST_ASSERT(ctui_ttf_glyph(&t, 'A') && ctui_ttf_glyph(&t, 0x2500) &&
+                       !ctui_ttf_glyph(&t, 0x2603) && !ctui_ttf_glyph(&t, 0x1f602),
+                   "A and box drawing in its cmap; no snowman, nothing past the BMP");
+  ctui_ttf_draw(&t, ctui_ttf_glyph(&t, 0x2500), em, cw, ch, base, 1, cov);
+  int across = 0;
+  for (int y = 0; y < ch; y++) {
+    across |= cov[y * cw] > 200 && cov[y * cw + cw - 1] > 200;
+  }
+  ctui_ttf_draw(&t, ctui_ttf_glyph(&t, 0x2502), em, cw, ch, base, 1, cov);
+  int down = 0;
+  for (int x = 0; x < cw; x++) {
+    down |= cov[x] > 200 && cov[(ch - 1) * cw + x] > 200;
+  }
+  CTUI_TEST_ASSERT(across && down,
+                   "stretched to the cell: \u2500 reaches both sides, \u2502 top and bottom");
+  ctui_ttf_draw(&t, ctui_ttf_glyph(&t, 'H'), em, cw, ch, base, 0, cov);
+  int ink = 0, top = ch;
+  for (int i = 0; i < cw * ch; i++) {
+    ink += cov[i] > 128;
+    top = cov[i] > 128 && i / cw < top ? i / cw : top;
+  }
+  CTUI_TEST_ASSERT(ink > 20 && top >= 3 && top <= 5 && cov[base * cw] == 0,
+                   "H: inked, its cap height's top at row %d, nothing below the "
+                   "baseline",
+                   top);
+  setenv("CTUI_FONT", "/dev/null", 1);
+  CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
+  int rows, cols;
+  CTUI_TEST_ASSERT(vk && ctui_vk_resize(vk, W, H, 120, 0, &rows, &cols) == 0 && cols == 25,
+                   "CTUI_FONT not a font: the built-in one (%d cols)", cols);
+  ctui_vk_free(vk);
+  unsetenv("CTUI_FONT");
+}
+
 static void test_vk(void) {
   CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
   int rows = 0, cols = 0;
   int ok = vk && ctui_vk_resize(vk, W, H, 120, 0, &rows, &cols) == 0;
-  CTUI_TEST_ASSERT(ok && rows == 6 && cols == 25,
-                   "a %ux%u surface at scale 1: 8x16 glyphs, %dx%d cells", W,
-                   H, cols, rows);
+  const uint32_t *slots;
+  unsigned sw;
+  if (ok) {
+    ctui_vk_glyphs(vk, &GW, &GH, &slots, &sw);
+  }
+  CTUI_TEST_ASSERT(ok && GW == 9 && GH == 20 && rows == 6 && cols == 25,
+                   "a %ux%u surface at scale 1: JetBrains Mono's 11 pt cell "
+                   "9x20 (%ux%u), %dx%d cells",
+                   W, H, GW, GH, cols, rows);
   int cw = 0, ch = 0;
   ctui_cell_px(&cw, &ch);
-  CTUI_TEST_ASSERT(cw == 8 && ch == 16, "the cell's pixels told to core: %dx%d",
+  CTUI_TEST_ASSERT(cw == (int)GW && ch == (int)GH, "the cell's pixels told to core: %dx%d",
                    cw, ch);
   if (!ok || back_new() != 0) {
     CTUI_TEST_ASSERT(0, "a readback buffer");
@@ -838,33 +941,34 @@ static void test_vk(void) {
   CTUI_TEST_ASSERT(ctui_vk_pending(vk), "a first frame: something to paint");
   memset(g_px, 0, W * H * 4u);
   unsigned tiles = paint(vk);
-  CTUI_TEST_ASSERT(tiles == 13 * 7, "the first record paints every tile: %u",
+  CTUI_TEST_ASSERT(tiles == tiles_under(0, 0, W, H), "the first record paints every tile: %u",
                    tiles);
   unsigned bad = differ(vk, screen);
   CTUI_TEST_ASSERT(bad == 0, "the card's pixels are the reference's: %u differ",
                    bad);
   /* the space at (1, 5): red, top-left pixel; row 0 col 0's top row: the
    * default background; past the last whole row: the default background */
-  CTUI_TEST_ASSERT(g_px[16 * W + 5 * 8] == rgba(0xcd0000) &&
+  CTUI_TEST_ASSERT(g_px[GH * W + 5 * GW] == rgba(0xcd0000) &&
                        g_px[0] == rgba(0x000000) &&
-                       g_px[99 * W + 3] == rgba(0x000000),
+                       g_px[(H - 2) * W + 3] == rgba(0x000000),
                    "basic red, the default background, the strip past the "
                    "cells (%08x %08x %08x)",
-                   g_px[16 * W + 40], g_px[0], g_px[99 * W + 3]);
+                   g_px[GH * W + 5 * GW], g_px[0], g_px[(H - 2) * W + 3]);
   uint32_t c[CTUI_VK_CELL_WORDS];
   ctui_vk_cell(vk, &screen->buffer[4 * cols + 3], c);
   uint32_t snow = c[0] & 0xffff;
   ctui_vk_cell(vk, &screen->buffer[4 * cols + 5], c);
   uint32_t cont = c[0] & 0xffff;
   ctui_vk_cell(vk, &screen->buffer[2 * cols], c);
-  CTUI_TEST_ASSERT(snow == CTUI_VK_GLYPH_BOX && cont == ' ' &&
+  CTUI_TEST_ASSERT(snow == CTUI_VK_GLYPH_BOX && cont == 0 &&
                        c[1] == 0xff8700 && c[2] == 0x303030 &&
                        (c[0] >> 16 & CTUI_ATTR_UNDERLINE),
                    "a missing glyph a box, a width-2 glyph's CONT blank, 256 "
                    "colours resolved (%06x on %06x)",
                    c[1], c[2]);
+  dump_ppm("the first frame");
   uint64_t h = hash();
-  CTUI_TEST_ASSERT(h == 0x661844024fc2294full, "the surface's hash: %016llx",
+  CTUI_TEST_ASSERT(h == 0xde3d70220e4ef88full, "the surface's hash: %016llx",
                    (unsigned long long)h);
 
   VkBufferImageCopy reg[H / 16 + 1];
@@ -884,15 +988,16 @@ static void test_vk(void) {
   ctui_app_render(&app, screen);
   ctui_screen_flush(screen);
   tiles = paint(vk);
-  CTUI_TEST_ASSERT(tiles == 1 && differ(vk, screen) == 0,
-                   "one cell changed: its one tile, the reference's (%u)",
+  CTUI_TEST_ASSERT(tiles == tiles_under(15 * GW, 0, GW, GH) && differ(vk, screen) == 0,
+                   "one cell changed: its tiles alone, the reference's (%u)",
                    tiles);
   n = ctui_vk_regions(vk, 0, 0, reg);
-  CTUI_TEST_ASSERT(n == 1 && reg[0].imageOffset.x == 15 * 8 / 16 * 16 &&
+  unsigned tx0 = 15 * GW / 16 * 16, tx1 = (16 * GW - 1) / 16 * 16 + 16;
+  CTUI_TEST_ASSERT(n == 1 && reg[0].imageOffset.x == (int)tx0 &&
                        reg[0].imageOffset.y == 0 &&
-                       reg[0].imageExtent.width == 16 &&
-                       reg[0].imageExtent.height == 16 &&
-                       reg[0].bufferOffset == 112u * 4u &&
+                       reg[0].imageExtent.width == tx1 - tx0 &&
+                       reg[0].imageExtent.height == (GH - 1) / 16 * 16 + 16 &&
+                       reg[0].bufferOffset == tx0 * 4u &&
                        reg[0].bufferRowLength == W,
                    "an image behind on it: that tile's region alone (%u)", n);
   n = ctui_vk_regions(vk, 1, 0, reg);
@@ -904,7 +1009,7 @@ static void test_vk(void) {
 
   ctui_vk_set_default(vk, 0x202020, 0xe0e0e0);
   tiles = paint(vk);
-  CTUI_TEST_ASSERT(tiles == 13 * 7 && differ(vk, screen) == 0 &&
+  CTUI_TEST_ASSERT(tiles == tiles_under(0, 0, W, H) && differ(vk, screen) == 0 &&
                        g_px[0] == rgba(0xe0e0e0),
                    "new default colours: every tile repainted with them, "
                    "no cell up again (%u)",
@@ -928,6 +1033,7 @@ int main(void) {
     close_device();
     return ctui_test_summary();
   }
+  test_ttf();
   test_vk();
   if (g_validation) {
     CTUI_TEST_ASSERT(g_warnings == 0, "the validation layer: %u warnings",

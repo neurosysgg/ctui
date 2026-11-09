@@ -19,21 +19,23 @@ on it, look's paint primitives by rows (-> ~10-12 %), the spectrogram's
 grid scaled on the card via `ctui_gfx_display_px()` (main thread ~5 %),
 and placeholder columns past 255 (the seek bar). Next, in this order:
 
-1. **Toward the display's rate** (below): the playbar and the plots
-   evaluated per presented frame rather than per 50 Hz tick, the
-   present paced by the display (wp_presentation / frame callbacks)
-   while something animates. The user's original complaint at 240 Hz;
-   the CPU is no longer what's in the way. `display_px`'s rect is what
-   a sub-column spectrogram glide would move.
-2. What's left of the ~5 %, only if measuring asks: spread thin now
+1. ~~Toward the display's rate~~, the playbar: done (2026-11-09) --
+   `ctui_gfx_wipe()` (a slider's track filled / empty / thumb, look's
+   `CTUI_LOOK_CTL_PART_*`, composed on the card at a split that moves
+   px_per_s from when it was set), `ctui_drawn_wipe_id()`, the host
+   handing each frame's time to `ctui_vk_at()` and waking (a timerfd)
+   exactly when the next column is due. The user: smooth. Left, if
+   wanted: the plots' motion (bars' falloff, a spectrogram glide by
+   `display_px`'s rect) on the same frame time.
+2. ~~Fonts~~: done (2026-11-09), "Fonts, how it came out" below.
+3. What's left of the ~5 %: kept for ctui-daw, post v0.1 (the user:
+   every % counts there), only if measuring asks: spread thin now
    (perf, flat: `mus_tile_render` ~11 %, `box_px` ~9 %, memcpy ~25 %
    in all, `mark_id`, `ctui_icon_slot`, look hashing ~3-5 % each). perf
    records no call stacks here (perf_event_paranoid 2: `-e
    cpu-clock:u`, no `--call-graph dwarf`), so a target needs a
    `ctui_profile` span first. `bars` / `columns` / `polyline` on the
    card wait for the same.
-3. Fonts (a rasterised glyph cache, grey levels): the one visible
-   difference left.
 4. syNESthesia onto `src/vk/` (its app/ui.c the glue): the user's
    call, once the ctui work is done.
 
@@ -389,6 +391,34 @@ everything moves smoothly, the playbar most of all).
   rasteriser (FreeType, or our own for TTF outlines) into the atlas,
   coverage instead of bits, blended in the shader -- the "atlas
   becomes a glyph cache" item above, with grey levels.
+
+## Fonts, how it came out (2026-11-09)
+
+- **JetBrains Mono** (the user's kitty font; 2.304 Regular, OFL, the
+  file µOS vendors) in `src/vk/fonts/`, a C array made by xxd at build
+  time (ctui-mus: under its build dir); `CTUI_FONT` names another
+  TrueType file. Spleen and tools/bdf2h.py are gone.
+- `src/vk/ttf.{c,h}`: µOS's parser and rasterizer (user/uui/font/),
+  without its caches and AVX: format 4 cmap, glyf, translation-only
+  composites, no hinting; exact coverage across a row, 16 samples down
+  it (µOS: 4), drawn straight into a cell.
+- **The cell is kitty's**: 11 pt at 96 dpi a logical pixel, times the
+  window's scale; the advance x ascender to descender (+ line gap),
+  rounded up; 9 x 20 at scale 1 (Spleen's 8 x 16 before).
+- **A glyph cache, not a fixed atlas**: a slot drawn the first time a
+  cell shows its codepoint, only new slots go up, the atlas on the card
+  doubling when full. Coverage bytes, the shader blending fg over bg
+  by them; bold a 1 px smear still (kitty uses the Bold face: a second
+  file, if the difference shows).
+- **Box drawing and blocks** (U+2500-259F): the font's box mapped onto
+  the cell exactly, so lines meet the next cell's (kitty draws these
+  itself; this is the font's own shapes, stretched).
+- **What it lacks, counted**: of ctui's and ctui-mus's literals, 5 of
+  45 non-ASCII (⏮⏭⏸⏹ in the toolbar's text tier, drawn chips under the
+  look; ♪ in Spleen's table only); of the user's library (65,600
+  title/artist/album strings), 7 with any: one Korean title, fullwidth
+  quotes, an LRM, an emoji. No fallback font for that: a box, logged
+  once. Recount with the same script if a library changes much.
 
 ## Open, the user's call
 
