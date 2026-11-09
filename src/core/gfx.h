@@ -67,6 +67,10 @@ typedef struct {
   void (*delete)(void *ctx, unsigned int image_id);
   void (*place_file)(void *ctx, unsigned int image_id, const char *path,
                      int cols, int rows);
+  /* place_file() of the pixels themselves (ctui_gfx_place_rgba()) */
+  void (*place_rgba)(void *ctx, unsigned int image_id,
+                     const unsigned char *rgba, int width, int height,
+                     int cols, int rows);
   void (*put)(void *ctx, unsigned int image_id, unsigned int placement_id,
               int row, int col, int cols, int rows, int z);
   void (*unput)(void *ctx, unsigned int image_id, unsigned int placement_id);
@@ -76,6 +80,17 @@ typedef struct {
 /* sends the image calls to sink (NULL: back to the terminal). Set it
  * before any image is made: an image keeps the path it was made on. */
 void ctui_gfx_set_sink(const CTUI_GFX_SINK *sink, void *ctx);
+
+/* 1 while a graphics sink takes the image calls */
+int ctui_gfx_sunk(void);
+
+/* width x height RGBA as image_id for its placeholder cells, fit into
+ * cols x rows of them: what ctui_gfx_kitty_place_file() has a terminal
+ * read from a PNG, without the file -- so only through a sink (a terminal
+ * reads files). 0 once the sink took it, -1 when there's none (the caller
+ * writes the PNG and places that: look/drawn.c) */
+int ctui_gfx_place_rgba(unsigned int image_id, const unsigned char *rgba,
+                        int width, int height, int cols, int rows);
 
 /* transmits and displays a width x height RGBA image via the Kitty
  * graphics protocol (https://sw.kovidgoyal.net/kitty/graphics-protocol/),

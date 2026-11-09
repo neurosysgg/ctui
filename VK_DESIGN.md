@@ -236,10 +236,8 @@ Three layers; only the first touches what every ctui app links.
      pinned. ctui-mus `-w` now negotiates `CTUI_GFX_KITTY`: its
      visualizers and covers draw on the card.
      **Measured (the user, playing, visualizers on screen): ctui-mus
-     ~95 % of a core in kitty, ~9 % in its own window** -- the CPU
-     painting and kitty's upload path were nearly all of it. That ~9 %
-     is the baseline step 5's plots have to beat (their RGBA is still
-     painted on the CPU, only no longer sent through kitty).
+     ~95 % of a core in kitty, ~9 % in its own window** -- but with the
+     drawn look still off there (4a). Not the baseline: see 4b's.
    - **4b, the drawn look -- done 2026-11-09**:
      - ctui-wm's PNG decoder promoted to `look/png_read.c`
        (`ctui_look_png_decode/load/size`) with its test and Python-made
@@ -263,10 +261,65 @@ Three layers; only the first touches what every ctui app links.
      - vk_test 25 -> 33, pixel-exact; ctui-mus `-w` draws its look
        (faces, bevels, pictograms, sliders) on the card, validation
        clean.
+     - **Then the CPU went up** (the user: higher than 4a's ~9 %): a
+       drawn control that changes (the seek slider, every tick) was
+       painted, written as a PNG and read back -- 0.04 ms painting,
+       0.9 ms of PNG for a 1300 x 16 slider, ~4.7 % of a core at 50 Hz
+       for that one. So `place_rgba` after all: `ctui_gfx_place_rgba()`
+       (core: -1 without a sink) and the sink member; look/drawn.c,
+       under a sink (`ctui_gfx_sunk()`), hands the pixels over and
+       writes no file -- a static control once per slot
+       (`ctui_icon_slot()`), a live one only when it changed.
+       tests/gfx_sink_test.c checks both, and that no file appears.
+       Idle in its window: ~1 % of a core. **The baseline step 5 is
+       measured against: ctui-mus playing, look on, after this** -- the
+       user's number, still to be taken.
 5. Plots: `bars` and `grid` first (ctui-mus's spectrum and spectrogram
    as the first users, beside their kitty renderers), then `columns`
    and `polyline` (ctui-daw), each measured against step 4's number
    for the same widget.
+
+## Toward the display's rate, and what the card buys beyond it
+
+Noted 2026-11-09, for step 5 (the user: at a native 240 Hz not
+everything moves smoothly, the playbar most of all).
+
+- **Why it isn't smooth yet: the app's clock, not the backend.**
+  ctui-mus redraws on its `TICK_MS` (20 ms: 50 Hz); the host presents
+  only frames the app drew, so a 240 Hz display shows each one ~5
+  times. The playbar also moves by whole steps of its control (value of
+  max, painted at a tick), and a text-mode bar by whole cells. Nothing
+  in `src/vk/` caps the rate: a frame that changes is painted and
+  presented within the loop's next wait.
+- **Raising the tick on the CPU path costs in proportion**: every
+  visualizer repaints its whole RGBA each tick. At 240 Hz that's ~5x
+  today's work, which is what step 5 removes.
+- **Plots on the card (step 5) are what make the display's rate cheap**:
+  a widget hands data, not pixels -- a few KB a tick -- and the shader
+  draws at every pixel. Beyond the CPU win:
+  - *resolution*: bars as many as the panel has pixel columns, the
+    FFT's bins interpolated (log frequency, cubic) instead of a few
+    dozen bars; the spectrogram a ring in VRAM, a column up a tick,
+    scrolled by a sub-column offset per frame so it glides; the
+    oscilloscope's polyline antialiased.
+  - *motion between ticks*: the record carries the state and its rate
+    (a playbar's position, the time it was taken, playing or not), and
+    the shader evaluates it per presented frame -- the playbar moves
+    at 240 Hz while the app still ticks at 50. Bars' falloff and peak
+    hold likewise, as functions of time rather than per-tick steps.
+    This wants the present paced by the display (wp_presentation /
+    frame callbacks, syNESthesia's present.c has them) rather than
+    by the app's frames: a "something animates" flag in the record
+    keeps presenting while it's set.
+  - *looks*: gradients, glow, the look's ramps per pixel, at no cost
+    worth measuring.
+- **What isn't worth moving**: the FFT itself (8192 points every 20 ms
+  is cheap on a CPU core; c-µdsp stays the DSP).
+- **Fonts** (the user's other remark: 1:1 bar the fonts): Spleen is a
+  bitmap at a few sizes. A real font means a glyph cache filled by a
+  rasteriser (FreeType, or our own for TTF outlines) into the atlas,
+  coverage instead of bits, blended in the shader -- the "atlas
+  becomes a glyph cache" item above, with grey levels.
 
 ## Open, the user's call
 

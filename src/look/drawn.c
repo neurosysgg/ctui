@@ -6,6 +6,7 @@
 #include "icon.h"
 #include "png.h"
 
+#include "../core/gfx.h"
 #include "../core/term.h"
 
 #include <inttypes.h>
@@ -78,6 +79,22 @@ unsigned int ctui_drawn_id(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
   int w = cols * cw, h = rows * ch;
   char path[4096];
   ctui_drawn_path(c, l, w, h, path, sizeof path);
+  if (ctui_gfx_sunk()) {
+    /* images go to a graphics sink: the pixels, no file (painted once a
+     * slot: the key names them) */
+    int fresh;
+    unsigned int id = ctui_icon_slot(path, &fresh);
+    if (id && fresh) {
+      unsigned char *rgba = malloc((size_t)w * (size_t)h * 4);
+      if (!rgba) {
+        return 0;
+      }
+      ctui_look_control_paint(c, l, rgba, w, h);
+      ctui_gfx_place_rgba(id, rgba, w, h, cols, rows);
+      free(rgba);
+    }
+    return id;
+  }
   struct stat st;
   if (stat(path, &st) != 0) {
     mkdir(ctui_drawn_dir(), 0700);
@@ -114,6 +131,27 @@ unsigned int ctui_drawn_live_id(CTUI_DRAWN_LIVE *lv, const CTUI_LOOK_CONTROL *c,
   int w = cols * cw, h = rows * ch;
   uint64_t key = ctui_look_control_key(c, l, w, h);
   char path[4096];
+  if (ctui_gfx_sunk()) {
+    /* to a graphics sink: one slot, the pixels sent when they change (or
+     * the slot went to another image), no files to flip between */
+    live_path(lv, 0, path, sizeof path);
+    int fresh;
+    unsigned int id = ctui_icon_slot(path, &fresh);
+    if (id && (fresh || key != lv->key || cols != lv->cols ||
+               rows != lv->rows)) {
+      unsigned char *rgba = malloc((size_t)w * (size_t)h * 4);
+      if (!rgba) {
+        return 0;
+      }
+      ctui_look_control_paint(c, l, rgba, w, h);
+      ctui_gfx_place_rgba(id, rgba, w, h, cols, rows);
+      free(rgba);
+      lv->key = key;
+      lv->cols = cols;
+      lv->rows = rows;
+    }
+    return id;
+  }
   if (key == lv->key && cols == lv->cols && rows == lv->rows) {
     live_path(lv, lv->flip, path, sizeof path);
     return ctui_icon_id_box(path, cols, rows);

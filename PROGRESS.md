@@ -237,6 +237,14 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Drawn controls without files under a sink** (2026-11-09,
+  VK_DESIGN.md 4b). A changing drawn control (ctui-mus's seek slider,
+  every tick) went paint -> PNG write -> PNG read in-process: 0.9 ms a
+  frame for a 1300 x 16 slider, of which painting is 0.04. Now
+  `ctui_gfx_sunk()` / `ctui_gfx_place_rgba()` (core, a new sink member)
+  and `ctui_icon_slot()` (an id for a key, nothing placed) let
+  look/drawn.c hand a sink the pixels: a static control once per slot, a
+  live one when it changed, no file. tests/gfx_sink_test.c 8 -> 11.
 - [x] **The drawn look on the card; a PNG decoder in ctui** (2026-11-09,
   VK_DESIGN.md 4b). ctui-wm's xdg/png.c promoted to `look/png_read.c`
   (`ctui_look_png_decode/load/size`: every colour type and depth, tRNS,

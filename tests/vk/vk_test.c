@@ -606,14 +606,13 @@ static void test_placed(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
   CTUI_TEST_ASSERT(tiles == 2 && differ(vk, screen) == 0,
                    "unput: its tiles painted without it (%u)", tiles);
 
-  ctui_look_png_write(path, px2, 4, 4);
-  ctui_gfx_kitty_place_file(9, path, 3, 2);
+  ctui_gfx_place_rgba(9, px2, 4, 4, 3, 2);
   g_ph_rgba = px2;
   tiles = paint(vk);
   bad = differ(vk, screen);
   CTUI_TEST_ASSERT(tiles == 4 && bad == 0,
-                   "the file placed again: its cells' tiles alone, the new "
-                   "texels (%u tiles, %u differ)",
+                   "placed again from its pixels (place_rgba, no file): its "
+                   "cells' tiles alone, the new texels (%u tiles, %u differ)",
                    tiles, bad);
   CTUI_TEST_ASSERT(hash() == 0x2233904e6e0bb59full, "the placed file's hash: %016llx",
                    (unsigned long long)hash());

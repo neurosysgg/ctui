@@ -1097,29 +1097,39 @@ static void s_delete(void *ctx, unsigned int image_id) {
   }
 }
 
-/* the PNG at path as image_id, shown by its placeholder cells, fit into
- * cols x rows of them (kitty's virtual placement): replacing the image
- * keeps its placements */
+/* w x h RGBA as image_id, shown by its placeholder cells, fit into cols
+ * x rows of them (kitty's virtual placement): replacing the image keeps
+ * its placements */
+static void s_place_rgba(void *ctx, unsigned int image_id,
+                         const unsigned char *rgba, int w, int h, int cols,
+                         int rows) {
+  CTUI_VK *vk = ctx;
+  IMG *im = w > 0 && h > 0 && cols > 0 && rows > 0 && rgba
+                ? img_get(vk, image_id, w, h)
+                : NULL;
+  if (!im) {
+    ctui_logf(E_WRN, "[CTUI:VK] - image %u not placed (%dx%d)\n", image_id, w,
+              h);
+    return;
+  }
+  memcpy(im->px, rgba, (size_t)w * (size_t)h * 4u);
+  im->vcols = cols;
+  im->vrows = rows;
+  vk->places_up = 1;
+  mark_id(vk, image_id);
+}
+
+/* the same from the PNG at path */
 static void s_place_file(void *ctx, unsigned int image_id, const char *path,
                          int cols, int rows) {
-  CTUI_VK *vk = ctx;
   unsigned char *rgba = NULL;
   int w = 0, h = 0;
-  if (cols <= 0 || rows <= 0 || ctui_look_png_load(path, &rgba, &w, &h)) {
+  if (ctui_look_png_load(path, &rgba, &w, &h)) {
     ctui_logf(E_WRN, "[CTUI:VK] - place_file %u: %s not placed\n", image_id,
               path);
     return;
   }
-  IMG *im = img_get(vk, image_id, w, h);
-  if (im) {
-    memcpy(im->px, rgba, (size_t)w * (size_t)h * 4u);
-    im->vcols = cols;
-    im->vrows = rows;
-    vk->places_up = 1;
-    mark_id(vk, image_id);
-  } else {
-    ctui_logf(E_ERR, "[CTUI:VK] - no memory for image %u\n", image_id);
-  }
+  s_place_rgba(ctx, image_id, rgba, w, h, cols, rows);
   free(rgba);
 }
 
@@ -1149,9 +1159,9 @@ static void s_unput(void *ctx, unsigned int image_id,
 static void s_flush(void *ctx) { (void)ctx; }
 
 const CTUI_GFX_SINK *ctui_vk_gfx_sink(void) {
-  static const CTUI_GFX_SINK sink = {s_display, s_begin,      s_commit,
-                                     s_free,    s_delete,     s_place_file,
-                                     s_put,     s_unput,      s_flush};
+  static const CTUI_GFX_SINK sink = {
+      s_display,    s_begin,      s_commit, s_free,  s_delete,
+      s_place_file, s_place_rgba, s_put,    s_unput, s_flush};
   return &sink;
 }
 

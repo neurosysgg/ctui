@@ -127,6 +127,9 @@ just the type and the `CTUI_COLOR_*` basic-color enum.
   (see `widget.h` below) — never call these from an ordinary `render()`.
 - `ctui_gfx_set_mode(mode)` — the session's tier set directly, for a
   host that never calls `ctui_init()` (a window, a test).
+- `ctui_gfx_sunk()` — a sink is set. `ctui_gfx_place_rgba(id, rgba, w,
+  h, cols, rows)` — `place_file()` of the pixels themselves, only through
+  a sink (`-1` without one: the caller writes the PNG instead).
 - `ctui_gfx_set_sink(sink, ctx)` — the image calls (`display`,
   `image_begin/commit/free`, `delete`, `place_file`, `put`/`unput`, and
   the frame's `flush`) go to a `CTUI_GFX_SINK` instead of the terminal (a GPU

@@ -94,6 +94,17 @@ void ctui_gfx_set_sink(const CTUI_GFX_SINK *sink, void *ctx) {
             sink ? "set" : "cleared (the terminal)", ctui_tick_advance());
 }
 
+int ctui_gfx_sunk(void) { return g_sink != NULL; }
+
+int ctui_gfx_place_rgba(unsigned int image_id, const unsigned char *rgba,
+                        int width, int height, int cols, int rows) {
+  if (!g_sink) {
+    return -1;
+  }
+  g_sink->place_rgba(g_sink_ctx, image_id, rgba, width, height, cols, rows);
+  return 0;
+}
+
 void ctui_gfx_set_mode(unsigned int mode) {
   ctui_g_gfx_mode = mode;
   ctui_logf(E_INF, "[CTUI:GFX] - tier set to 0x%x @ tick %d\n", mode,

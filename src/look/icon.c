@@ -80,16 +80,15 @@ unsigned int ctui_icon_id_again(const char *path, int cols, int rows) {
   return (unsigned int)i + 1;
 }
 
-unsigned int ctui_icon_id_placed(const char *path, int cols, int rows,
-                                 int *placed) {
-  *placed = 0;
-  if (!g_enabled || !path || !path[0]) {
+unsigned int ctui_icon_slot(const char *key, int *fresh) {
+  *fresh = 0;
+  if (!g_enabled || !key || !key[0]) {
     return 0;
   }
-  unsigned long h = hash_path(path);
+  unsigned long h = hash_path(key);
   int lru = 0;
   for (int i = 0; i < g_count; i++) {
-    if (g_slots[i].hash == h && strcmp(g_slots[i].path, path) == 0) {
+    if (g_slots[i].hash == h && strcmp(g_slots[i].path, key) == 0) {
       g_slots[i].used = ++g_clock;
       return (unsigned int)i + 1;
     }
@@ -106,10 +105,17 @@ unsigned int ctui_icon_id_placed(const char *path, int cols, int rows,
   } else {
     free(g_slots[i].path);
   }
-  g_slots[i] = (SLOT){.path = strdup(path), .hash = h, .used = ++g_clock};
-  unsigned int id = (unsigned int)i + 1;
-  place(id, path, cols, rows);
-  *placed = 1;
+  g_slots[i] = (SLOT){.path = strdup(key), .hash = h, .used = ++g_clock};
+  *fresh = 1;
+  return (unsigned int)i + 1;
+}
+
+unsigned int ctui_icon_id_placed(const char *path, int cols, int rows,
+                                 int *placed) {
+  unsigned int id = ctui_icon_slot(path, placed);
+  if (*placed) {
+    place(id, path, cols, rows);
+  }
   return id;
 }
 

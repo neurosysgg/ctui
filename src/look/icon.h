@@ -36,6 +36,12 @@ unsigned int ctui_icon_id_box(const char *path, int cols, int rows);
 unsigned int ctui_icon_id_placed(const char *path, int cols, int rows,
                                  int *placed);
 
+/* key's image id as ctui_icon_id_placed() gives it, nothing placed:
+ * *fresh 1 when the slot is new (or went to another key since), so the
+ * caller places its image (ctui_gfx_place_rgba(): drawn.h under a graphics
+ * sink, no file). 0 if icons are off or key is empty */
+unsigned int ctui_icon_slot(const char *key, int *fresh);
+
 /* the same, the file at path placed again under its id even when it was
  * placed before (its pixels changed: drawn.h's live images) */
 unsigned int ctui_icon_id_again(const char *path, int cols, int rows);

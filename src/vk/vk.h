@@ -79,7 +79,8 @@ const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void);
  * blended -- each scaled to its cells by area average (nearest when
  * enlarged). delete() takes one away with its placements; put()/unput()
  * place an image held already (placement 0 is display()'s). place_file()
- * decodes the PNG (look/png.h) for the placeholder cells naming its id:
+ * decodes the PNG (look/png.h) for the placeholder cells naming its id,
+ * place_rgba() takes the pixels (look's drawn controls: no file at all):
  * fit into its cols x rows as kitty does (the aspect kept, centred) */
 const CTUI_GFX_SINK *ctui_vk_gfx_sink(void);
 
