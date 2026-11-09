@@ -280,12 +280,12 @@ static int g_ph_w, g_ph_h, g_ph_cols, g_ph_rows;
 
 /* src/vk/vk.c's placeholder_at(): the row and column from the left */
 static void ph_at(uint32_t *w, const uint32_t *left) {
-  unsigned row = w[0] & 0xffu, col = w[0] >> 8 & 0xffu;
+  unsigned row = w[0] >> 16 & 0xffu, col = w[0] & 0xffffu;
   int same = left && (left[0] >> 16 & CTUI_VK_PLACEHOLDER) && left[1] == w[1];
-  unsigned lrow = left ? left[0] & 0xffu : 0, lcol = left ? left[0] >> 8 & 0xffu : 0;
+  unsigned lrow = left ? left[0] >> 16 & 0xffu : 0, lcol = left ? left[0] & 0xffffu : 0;
   row = row ? row - 1 : same ? lrow : 0;
   col = col ? col - 1 : same && lrow == row ? lcol + 1 : 0;
-  w[0] = (w[0] & 0xffff0000u) | row | col << 8;
+  w[0] = (w[0] & 0xff000000u) | col | row << 16;
 }
 
 /* cells.comp's texel(): rgb << 8 | a, the footprint averaged */
@@ -389,8 +389,7 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
         uint32_t bg = a & CTUI_VK_BG_DEFAULT ? dbg : c[2];
         bg_default = (a & CTUI_VK_BG_DEFAULT) != 0;
         if (a & CTUI_VK_PLACEHOLDER) {
-          ph = ph_texel(c[1], gw, gh, (g >> 8 & 0xffu) * gw + gx,
-                        (g & 0xffu) * gh + gy);
+          ph = ph_texel(c[1], gw, gh, g * gw + gx, (a & 0xffu) * gh + gy);
           a &= CTUI_VK_FG_DEFAULT | CTUI_VK_BG_DEFAULT | CTUI_VK_PLACEHOLDER;
           on = 0;
         } else if (g == CTUI_VK_GLYPH_BOX) {
@@ -447,6 +446,9 @@ static uint64_t hash(void) {
 }
 
 static const char *g_title = "ctui on the card";
+/* a placeholder run past column 255: 4 cells at (5, 20), the first one
+ * column 254 of the image, the rest from the left */
+static int g_ph_wide;
 
 static void render_text(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   ctui_widget_puts(self, comp, 0, 0, g_title, CTUI_COLOR_DEFAULT,
@@ -473,9 +475,14 @@ static void render_text(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                    CTUI_COLOR_GREEN, CTUI_COLOR_DEFAULT);
   ctui_widget_putc_rgb_fg(self, comp, 5, 0, '#', 0x40, 0xc0, 0xff,
                           CTUI_COLOR_MAGENTA);
-  if (g_ph_id) {
+  if (g_ph_id && !g_ph_wide) {
     ctui_widget_put_kitty_placeholder(self, comp, 2, 14, g_ph_id, 3, 2,
                                       CTUI_COLOR_DEFAULT);
+  }
+  if (g_ph_id && g_ph_wide) {
+    ctui_widget_put_kitty_placeholder(self, comp, 5, 20, g_ph_id, 4, 1,
+                                      CTUI_COLOR_DEFAULT);
+    self->buf[5 * comp->cols + 20].kitty_col = 255;
   }
 }
 
@@ -668,6 +675,34 @@ static void test_placed(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
   paint(vk);
   CTUI_TEST_ASSERT(differ(vk, screen) == 0,
                    "deleted, the cells gone: the text alone");
+
+  /* a control wider than 255 cells (a seek bar on a wide screen): its
+   * columns go on past 255 instead of wrapping to its left end */
+  enum { WIDE = 300 };
+  static uint8_t wide[WIDE * 4];
+  for (int i = 0; i < WIDE; i++) {
+    wide[i * 4] = (uint8_t)(i & 0xff), wide[i * 4 + 1] = (uint8_t)(i >> 8 ? 200 : 0);
+    wide[i * 4 + 2] = 77, wide[i * 4 + 3] = 255;
+  }
+  ctui_gfx_place_rgba(11, wide, WIDE, 1, WIDE, 1);
+  g_ph_id = 11, g_ph_rgba = wide, g_ph_w = WIDE, g_ph_h = 1, g_ph_cols = WIDE,
+  g_ph_rows = 1, g_ph_wide = 1;
+  ctui_app_render(app, screen);
+  ctui_screen_flush(screen);
+  paint(vk);
+  bad = differ(vk, screen);
+  /* the fit: 300 x 1 texels into 2400 x 16 px, 8 px tall from y 4; column
+   * 256 is cell 22 */
+  uint32_t at = g_px[(5 * 16 + 6) * W + 22 * 8 + 3];
+  CTUI_TEST_ASSERT(bad == 0 && at == rgba(0x00c84d),
+                   "a placeholder run past column 255 goes on (256: %08x), as "
+                   "the reference (%u differ)",
+                   at, bad);
+  ctui_gfx_kitty_delete(11);
+  g_ph_id = 0, g_ph_wide = 0;
+  ctui_app_render(app, screen);
+  ctui_screen_flush(screen);
+  paint(vk);
   ctui_gfx_set_sink(NULL, NULL);
   unlink(path);
 }

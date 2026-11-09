@@ -139,8 +139,8 @@ void main() {
     if ((a & PLACEHOLDER) != 0u) {
       // the image is the cell's content: a z 0 placement, over the
       // ones under text, under the ones over it
-      ph = placeholder(cell[i + 1u], (g >> 8 & 0xffu) * gw + gx,
-                       (g & 0xffu) * gh + gy);
+      // g its column, the attrs' byte its row
+      ph = placeholder(cell[i + 1u], g * gw + gx, (a & 0xffu) * gh + gy);
       a = a & (FG_DEFAULT | BG_DEFAULT | PLACEHOLDER);
     } else if (g == BOX) {
       on = gx == 0u || gx == gw - 1u || gy == gh / 8u || gy == gh - 1u - gh / 8u;

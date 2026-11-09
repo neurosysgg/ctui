@@ -559,9 +559,11 @@ void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
     }
   }
   if (c->ch == CTUI_GFX_KITTY_PLACEHOLDER) {
-    /* the image's id is the fg; its row and column (kitty_row/col + 1,
-     * 0 for "from the left") are resolved by the frame, left to right */
-    out[0] = (uint32_t)c->kitty_row | (uint32_t)c->kitty_col << 8 |
+    /* the image's id is the fg; its column (16 bits: a control wider
+     * than 255 cells goes on from the left) and row (in the attrs' byte,
+     * which a placeholder doesn't draw), kitty_col/row + 1 or 0 for "from
+     * the left", are resolved by the frame, left to right */
+    out[0] = (uint32_t)c->kitty_col | (uint32_t)c->kitty_row << 16 |
              (flags | CTUI_VK_PLACEHOLDER) << 16;
     out[1] = fg;
     out[2] = bg;
@@ -576,12 +578,12 @@ void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
  * on from the placeholder to its left (left: NULL, or its record) of the
  * same image -- the same row, the next column */
 static void placeholder_at(uint32_t *w, const uint32_t *left) {
-  unsigned row = w[0] & 0xffu, col = w[0] >> 8 & 0xffu;
+  unsigned row = w[0] >> 16 & 0xffu, col = w[0] & 0xffffu;
   int same = left && (left[0] >> 16 & CTUI_VK_PLACEHOLDER) && left[1] == w[1];
-  unsigned lrow = left ? left[0] & 0xffu : 0, lcol = left ? left[0] >> 8 & 0xffu : 0;
+  unsigned lrow = left ? left[0] >> 16 & 0xffu : 0, lcol = left ? left[0] & 0xffffu : 0;
   row = row ? row - 1 : same ? lrow : 0;
   col = col ? col - 1 : same && lrow == row ? lcol + 1 : 0;
-  w[0] = (w[0] & 0xffff0000u) | (row & 0xffu) | (col & 0xffu) << 8;
+  w[0] = (w[0] & 0xff000000u) | (col & 0xffffu) | (row & 0xffu) << 16;
 }
 
 static int vk_frame(void *ctx, const CTUI_SCREEN *s) {

@@ -284,6 +284,10 @@ Three layers; only the first touches what every ctui app links.
        as a z 0 layer: over the under-text placements, under the over-
        text ones. Re-placing a file repaints the tiles of exactly the
        cells and placements showing it.
+     - a placeholder's resolved column was 8 bits: a control wider than
+       255 cells (the seek bar on a 3832 px screen) showed its left end
+       again past them. Now 16 bits, the row in the attrs' byte (a
+       placeholder draws none); vk_test runs one past 255.
      - vk_test 25 -> 33, pixel-exact; ctui-mus `-w` draws its look
        (faces, bevels, pictograms, sliders) on the card, validation
        clean.
