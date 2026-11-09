@@ -8,20 +8,30 @@ up by copy regions. That reimplements ctui's core on the card; this plan
 makes it a ctui backend instead, so every ctui app and widget gets it,
 and moves the pixel work kitty has been slow at onto the GPU.
 
-## Where it stands (2026-11-09, end of the first session)
+## Where it stands (2026-11-09, end of the second session)
 
 Steps 1-4 done (each below has its "how it came out"): core hooks, text
 on the card, the host (ctui-mus `-w`), every kitty image path on the card
 (pixels a frame, placed files, placeholders, put, the drawn look with no
-PNG round trip). The user's verdict: 1:1 with kitty bar the fonts, CPU
-~95 % -> a fraction. Next, in this order:
+PNG round trip). The user's verdict: 1:1 with kitty bar the fonts.
+Second session: the baseline (~26 % playing with the visualizers), perf
+on it, look's paint primitives by rows (-> ~10-12 %), the spectrogram's
+grid scaled on the card via `ctui_gfx_display_px()` (main thread ~5 %),
+and placeholder columns past 255 (the seek bar). Next, in this order:
 
-1. ~~The baseline~~: taken, ~26 % with the visualizers, 2-4 % without;
-   ~10-12 % after look's paint primitives went by rows (step 4b below).
-2. **Step 5, plots** -- with "Toward the display's rate" below: data
-   records, not pixels; evaluated per presented frame (the playbar at
-   240 Hz on a 50 Hz tick), presenting paced by the display
-   (wp_presentation / frame callbacks) while something animates.
+1. **Toward the display's rate** (below): the playbar and the plots
+   evaluated per presented frame rather than per 50 Hz tick, the
+   present paced by the display (wp_presentation / frame callbacks)
+   while something animates. The user's original complaint at 240 Hz;
+   the CPU is no longer what's in the way. `display_px`'s rect is what
+   a sub-column spectrogram glide would move.
+2. What's left of the ~5 %, only if measuring asks: spread thin now
+   (perf, flat: `mus_tile_render` ~11 %, `box_px` ~9 %, memcpy ~25 %
+   in all, `mark_id`, `ctui_icon_slot`, look hashing ~3-5 % each). perf
+   records no call stacks here (perf_event_paranoid 2: `-e
+   cpu-clock:u`, no `--call-graph dwarf`), so a target needs a
+   `ctui_profile` span first. `bars` / `columns` / `polyline` on the
+   card wait for the same.
 3. Fonts (a rasterised glyph cache, grey levels): the one visible
    difference left.
 4. syNESthesia onto `src/vk/` (its app/ui.c the glue): the user's
@@ -31,8 +41,9 @@ Loose ends: ctui-wm still has its own xdg/png.c (drop it for ctui's
 `look/png_read.c` at its next bump); the vk test's hash is pinned on
 the RTX 3070 Ti only (lavapipe, `vulkan-swrast`, to check it on the
 CPU too); the host moves from ctui-mus to `src/vk/` when ctui-daw
-wants a window; nothing here is pushed yet (ctui, ctui-mus: the user
-pushes).
+wants a window; tests/look_test.c has old -Wmissing-field-initializers
+warnings (`mod_lo`); nothing here is pushed yet (ctui, ctui-mus: the
+user pushes).
 
 ## Problem
 
