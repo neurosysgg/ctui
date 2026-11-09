@@ -71,6 +71,11 @@ typedef struct {
   void (*place_rgba)(void *ctx, unsigned int image_id,
                      const unsigned char *rgba, int width, int height,
                      int cols, int rows);
+  /* display() into a pixel rect of its cells (ctui_gfx_display_px()) */
+  void (*display_px)(void *ctx, int row, int col, int cell_cols,
+                     int cell_rows, int x, int y, int w, int h,
+                     const unsigned char *rgba, int width, int height,
+                     unsigned int image_id, int z);
   void (*put)(void *ctx, unsigned int image_id, unsigned int placement_id,
               int row, int col, int cols, int rows, int z);
   void (*unput)(void *ctx, unsigned int image_id, unsigned int placement_id);
@@ -91,6 +96,16 @@ int ctui_gfx_sunk(void);
  * writes the PNG and places that: look/drawn.c) */
 int ctui_gfx_place_rgba(unsigned int image_id, const unsigned char *rgba,
                         int width, int height, int cols, int rows);
+
+/* ctui_gfx_kitty_display()'s picture scaled into the w x h px rect x, y px
+ * from the top left of its cell_cols x cell_rows cells (in ctui_cell_px()'s
+ * pixels), e.g. inside a frame shown as an image of its own: a small
+ * picture goes as it is and the sink scales it. Only through a sink (kitty
+ * scales to whole cells): 0 once the sink took it, -1 when there's none
+ * (the caller paints the picture at its cells' size) */
+int ctui_gfx_display_px(int row, int col, int cell_cols, int cell_rows, int x,
+                        int y, int w, int h, const unsigned char *rgba,
+                        int width, int height, unsigned int image_id, int z);
 
 /* transmits and displays a width x height RGBA image via the Kitty
  * graphics protocol (https://sw.kovidgoyal.net/kitty/graphics-protocol/),

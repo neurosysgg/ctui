@@ -69,6 +69,14 @@ static void s_place_rgba(void *ctx, unsigned int image_id,
   rec("place_rgba(%u %dx%dpx %dx%d px%d) ", image_id, width, height, cols,
       rows, rgba[0]);
 }
+static void s_display_px(void *ctx, int row, int col, int cell_cols,
+                         int cell_rows, int x, int y, int w, int h,
+                         const unsigned char *rgba, int width, int height,
+                         unsigned int image_id, int z) {
+  (void)ctx;
+  rec("display_px(%u %d,%d %dx%d @%d,%d %dx%d %dx%dpx z%d px%d) ", image_id,
+      row, col, cell_cols, cell_rows, x, y, w, h, width, height, z, rgba[0]);
+}
 static void s_put(void *ctx, unsigned int image_id, unsigned int placement_id,
                   int row, int col, int cols, int rows, int z) {
   (void)ctx;
@@ -87,7 +95,7 @@ static void s_flush(void *ctx) {
 
 static const CTUI_GFX_SINK k_sink = {
     s_display, s_begin, s_commit, s_free,  s_delete,
-    s_place,   s_place_rgba, s_put, s_unput, s_flush};
+    s_place,   s_place_rgba, s_display_px, s_put, s_unput, s_flush};
 
 static int s_frame(void *ctx, const CTUI_SCREEN *s) {
   (void)ctx;
@@ -114,6 +122,7 @@ static void pics_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   }
   ctui_gfx_kitty_place_file(7, "/icons/a.png", 2, 1);
   ctui_gfx_place_rgba(8, rgba, 1, 1, 1, 1);
+  ctui_gfx_display_px(1, 1, 2, 1, 1, 2, 14, 12, rgba, 1, 1, 9, 0);
   ctui_gfx_kitty_put(7, 1, 1, 1, 2, 1, -2);
   ctui_gfx_kitty_unput(7, 1);
   ctui_gfx_kitty_delete(5);
@@ -218,6 +227,8 @@ int main(void) {
                                   "begin(6 2x2 keep1) commit(6 2,1 2x1 z0 "
                                   "px9) place(7 /icons/a.png 2x1) "
                                   "place_rgba(8 1x1px 1x1 px7) "
+                                  "display_px(9 1,1 2x1 @1,2 14x12 1x1px "
+                                  "z0 px7) "
                                   "put(7 p1 1,1 2x1 z-2) "
                                   "unput(7 p1) delete(5) "
                                   "flush "),
@@ -243,9 +254,12 @@ int main(void) {
   ctui_gfx_set_sink(NULL, NULL);
   CTUI_TEST_ASSERT(!ctui_gfx_sunk() &&
                        ctui_gfx_place_rgba(8, (const unsigned char *)"x", 1,
-                                           1, 1, 1) == -1,
-                   "none: not sunk, and place_rgba refused (the caller "
-                   "writes a file)");
+                                           1, 1, 1) == -1 &&
+                       ctui_gfx_display_px(1, 1, 1, 1, 0, 0, 1, 1,
+                                           (const unsigned char *)"x", 1, 1,
+                                           9, 0) == -1,
+                   "none: not sunk, place_rgba and display_px refused (the "
+                   "caller writes a file / paints the cells' size)");
   g_rec[0] = '\0';
   out = frame(&app, screen);
   CTUI_TEST_ASSERT(g_rec[0] == '\0' || !strncmp(g_rec, "frame(", 6),

@@ -319,6 +319,19 @@ Three layers; only the first touches what every ctui app links.
    as the first users, beside their kitty renderers), then `columns`
    and `polyline` (ctui-daw), each measured against step 4's number
    for the same widget.
+   **The grid, leaner than planned (2026-11-09, the user's call)**: the
+   spectrogram's picture is its 96 x 192 colour grid scaled nearest to
+   the panel, which the image path already does on the card. So no plot
+   vocabulary in the core: `ctui_gfx_display_px()` (and the sink's
+   `display_px`) shows an image in a pixel rect of its cells (in
+   `ctui_cell_px()`'s pixels, kitty's X/Y offsets' cousin), -1 without a
+   sink. ctui-mus's spectrogram, under a sink, sends the grid as a
+   COLS x BINS image into the well's inset and the well as an image of
+   its own, painted again only when it moves or the look changes. A
+   panel shorter than 192 px now averages bins (the card's area
+   average) where the CPU picks one. vk_test pins it against the
+   reference; the same rect is what a sub-column glide would move.
+   `bars`, `columns`, `polyline`: decided when measuring asks.
 
 ## Toward the display's rate, and what the card buys beyond it
 

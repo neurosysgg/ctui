@@ -267,6 +267,7 @@ typedef struct {
   int row, col, cols, rows, z;
   const uint8_t *rgba;
   int w, h;
+  int px, py, pw, ph; /* display_px()'s rect; pw 0: the cells */
 } PL;
 static PL g_pl[4];
 static unsigned g_npl;
@@ -292,6 +293,12 @@ static uint32_t texel(const PL *p, unsigned gw, unsigned gh, unsigned x,
                       unsigned y) {
   unsigned px0 = (unsigned)p->col * gw, py0 = (unsigned)p->row * gh;
   unsigned pw = (unsigned)p->cols * gw, ph = (unsigned)p->rows * gh;
+  if (p->pw > 0) {
+    px0 += (unsigned)p->px;
+    py0 += (unsigned)p->py;
+    pw = (unsigned)p->pw;
+    ph = (unsigned)p->ph;
+  }
   if (x < px0 || y < py0 || x >= px0 + pw || y >= py0 + ph) {
     return 0;
   }
@@ -350,7 +357,7 @@ static uint32_t ph_texel(unsigned id, unsigned gw, unsigned gh, unsigned dx,
     return 0;
   }
   /* texel() of a 1 x 1 cell placement whose cell is dw x dh */
-  PL p = {0, 0, 1, 1, 0, g_ph_rgba, g_ph_w, g_ph_h};
+  PL p = {0, 0, 1, 1, 0, g_ph_rgba, g_ph_w, g_ph_h, 0, 0, 0, 0};
   return texel(&p, dw, dh, dx - ox, dy - oy);
 }
 
@@ -509,10 +516,10 @@ static void test_images(CTUI_VK *vk, CTUI_SCREEN *screen) {
     memcpy(b, under, sizeof under);
     ctui_gfx_kitty_image_commit(img, 6, 20, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1);
   }
-  g_pl[0] = (PL){1, 0, 6, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, under, 2, 2};
-  g_pl[1] = (PL){5, 19, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, under, 2, 2};
-  g_pl[2] = (PL){0, 1, 3, 2, -1, grad, 48, 48};
-  g_pl[3] = (PL){1, 0, 2, 1, 0, small, 2, 2};
+  g_pl[0] = (PL){1, 0, 6, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, under, 2, 2, 0, 0, 0, 0};
+  g_pl[1] = (PL){5, 19, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, under, 2, 2, 0, 0, 0, 0};
+  g_pl[2] = (PL){0, 1, 3, 2, -1, grad, 48, 48, 0, 0, 0, 0};
+  g_pl[3] = (PL){1, 0, 2, 1, 0, small, 2, 2, 0, 0, 0, 0};
   g_npl = 4;
   CTUI_TEST_ASSERT(ctui_vk_pending(vk), "placed images: something to paint");
   unsigned tiles = paint(vk);
@@ -546,6 +553,43 @@ static void test_images(CTUI_VK *vk, CTUI_SCREEN *screen) {
                    tiles, bad);
   CTUI_TEST_ASSERT(hash() == 0x367dbd1d7fdba9d4ull, "the images' hash: %016llx",
                    (unsigned long long)hash());
+
+  /* a 2 x 3 picture into a rect 3 px in from its 4 x 2 cells' corner,
+   * 20 x 25 px: enlarged by the card, a frame's worth inside the cells */
+  static const uint8_t grid[2 * 3 * 4] = {200, 10, 10, 255, 10, 200, 10, 255,
+                                          10, 10, 200, 255, 90, 90, 9, 255,
+                                          9, 90, 90, 255, 250, 250, 250, 255};
+  CTUI_TEST_ASSERT(ctui_gfx_display_px(4, 3, 4, 2, 3, 3, 20, 25, grid, 2, 3, 6,
+                                       0) == 0,
+                   "display_px goes to the sink");
+  g_pl[g_npl++] = (PL){3, 2, 4, 2, 0, grid, 2, 3, 3, 3, 20, 25};
+  tiles = paint(vk);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles > 0 && bad == 0,
+                   "display_px: scaled into its pixel rect as the reference "
+                   "(%u tiles, %u differ)",
+                   tiles, bad);
+  unsigned in = (3 * 16 + 3) * W + 2 * 8 + 3, out = (3 * 16 + 2) * W + 2 * 8 + 2;
+  CTUI_TEST_ASSERT(g_px[in] == rgba(0xc80a0a) && g_px[out] != rgba(0xc80a0a),
+                   "its first texel starts 3 px in, not at the cell (%08x, %08x)",
+                   g_px[in], g_px[out]);
+  ctui_gfx_kitty_display(4, 3, 4, 2, grid, 2, 3, 6, 0);
+  g_pl[g_npl - 1].pw = 0;
+  tiles = paint(vk);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(bad == 0,
+                   "a plain display() after it: the whole cells again (%u differ)",
+                   bad);
+  ctui_gfx_kitty_delete(6);
+  g_npl--;
+  CTUI_TEST_ASSERT(ctui_gfx_display_px(1, 1, 1, 1, 0, 0, 8, 16, grid, 2, 3, 7,
+                                       0) == 0 &&
+                       (ctui_gfx_set_sink(NULL, NULL),
+                        ctui_gfx_display_px(1, 1, 1, 1, 0, 0, 8, 16, grid, 2,
+                                            3, 7, 0) == -1),
+                   "display_px without a sink: -1, nothing to do");
+  ctui_gfx_set_sink(ctui_vk_gfx_sink(), vk);
+  ctui_gfx_kitty_delete(7);
   ctui_gfx_kitty_image_free(img);
   ctui_gfx_kitty_delete(1);
   ctui_gfx_kitty_delete(3);
@@ -593,7 +637,7 @@ static void test_placed(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
                    g_px[(2 * 16 + 4) * W + 14 * 8 + 1]);
 
   ctui_gfx_kitty_put(9, 2, 6, 1, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1);
-  g_pl[0] = (PL){5, 0, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, px, 4, 4};
+  g_pl[0] = (PL){5, 0, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, px, 4, 4, 0, 0, 0, 0};
   g_npl = 1;
   paint(vk);
   bad = differ(vk, screen);

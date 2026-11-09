@@ -105,6 +105,17 @@ int ctui_gfx_place_rgba(unsigned int image_id, const unsigned char *rgba,
   return 0;
 }
 
+int ctui_gfx_display_px(int row, int col, int cell_cols, int cell_rows, int x,
+                        int y, int w, int h, const unsigned char *rgba,
+                        int width, int height, unsigned int image_id, int z) {
+  if (!g_sink) {
+    return -1;
+  }
+  g_sink->display_px(g_sink_ctx, row, col, cell_cols, cell_rows, x, y, w, h,
+                     rgba, width, height, image_id, z);
+  return 0;
+}
+
 void ctui_gfx_set_mode(unsigned int mode) {
   ctui_g_gfx_mode = mode;
   ctui_logf(E_INF, "[CTUI:GFX] - tier set to 0x%x @ tick %d\n", mode,

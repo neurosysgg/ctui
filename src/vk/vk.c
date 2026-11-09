@@ -49,6 +49,7 @@ typedef struct {
 typedef struct {
   unsigned id, pid;
   int row, col, cols, rows, z; /* 0-based cells */
+  int px, py, pw, ph; /* display_px()'s rect in the cells' pixels; pw 0: the cells */
 } PLC;
 
 /* codepoints a log was given for, so each missing one is logged once */
@@ -684,9 +685,24 @@ static void mark_rect(CTUI_VK *vk, long x, long y, long w, long h) {
   }
 }
 
+/* where a placement shows, in the surface's pixels */
+static void plc_rect(const CTUI_VK *vk, const PLC *p, long r[4]) {
+  r[0] = (long)p->col * vk->gw;
+  r[1] = (long)p->row * vk->gh;
+  r[2] = (long)p->cols * vk->gw;
+  r[3] = (long)p->rows * vk->gh;
+  if (p->pw > 0) {
+    r[0] += p->px;
+    r[1] += p->py;
+    r[2] = p->pw;
+    r[3] = p->ph;
+  }
+}
+
 static void mark_plc(CTUI_VK *vk, const PLC *p) {
-  mark_rect(vk, (long)p->col * vk->gw, (long)p->row * vk->gh,
-            (long)p->cols * vk->gw, (long)p->rows * vk->gh);
+  long r[4];
+  plc_rect(vk, p, r);
+  mark_rect(vk, r[0], r[1], r[2], r[3]);
 }
 
 /* everywhere image id shows: its placements, the placeholder cells */
@@ -873,10 +889,11 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
         continue;
       }
       uint32_t *p = st + off;
-      p[0] = (uint32_t)pl->col * vk->gw;
-      p[1] = (uint32_t)pl->row * vk->gh;
-      p[2] = (uint32_t)pl->cols * vk->gw;
-      p[3] = (uint32_t)pl->rows * vk->gh;
+      long r[4];
+      plc_rect(vk, pl, r);
+      for (int q = 0; q < 4; q++) {
+        p[q] = (uint32_t)r[q];
+      }
       p[4] = im->off;
       p[5] = (uint32_t)im->w;
       p[6] = (uint32_t)im->h;
@@ -1008,7 +1025,7 @@ static IMG *img_get(CTUI_VK *vk, unsigned id, int w, int h) {
 /* placement (id, pid) at kitty's 1-based (row, col), cols x rows cells,
  * z: its old place and the new one painted again */
 static void plc_set(CTUI_VK *vk, unsigned id, unsigned pid, int row, int col,
-                    int cols, int rows, int z) {
+                    int cols, int rows, int z, const int px[4]) {
   PLC *p = NULL;
   for (unsigned i = 0; i < vk->nplc && !p; i++) {
     if (vk->plcs[i].id == id && vk->plcs[i].pid == pid) {
@@ -1030,15 +1047,21 @@ static void plc_set(CTUI_VK *vk, unsigned id, unsigned pid, int row, int col,
   } else {
     mark_plc(vk, p);
   }
-  *p = (PLC){id, pid, row - 1, col - 1, cols, rows, z};
+  *p = (PLC){id, pid, row - 1, col - 1, cols, rows, z, 0, 0, 0, 0};
+  if (px) {
+    p->px = px[0];
+    p->py = px[1];
+    p->pw = px[2];
+    p->ph = px[3];
+  }
   mark_plc(vk, p);
   vk->places_up = 1;
 }
 
-static void s_display(void *ctx, int row, int col, int cell_cols,
-                      int cell_rows, const unsigned char *rgba, int width,
-                      int height, unsigned int image_id, int z) {
-  CTUI_VK *vk = ctx;
+static void display_at(CTUI_VK *vk, int row, int col, int cell_cols,
+                       int cell_rows, const int px[4],
+                       const unsigned char *rgba, int width, int height,
+                       unsigned int image_id, int z) {
   if (width <= 0 || height <= 0 || !rgba || cell_cols <= 0 || cell_rows <= 0) {
     ctui_logf(E_WRN, "[CTUI:VK] - display of image %u rejected (%dx%d)\n",
               image_id, width, height);
@@ -1051,7 +1074,28 @@ static void s_display(void *ctx, int row, int col, int cell_cols,
   }
   memcpy(im->px, rgba, (size_t)width * (size_t)height * 4u);
   mark_id(vk, image_id);
-  plc_set(vk, image_id, 0, row, col, cell_cols, cell_rows, z);
+  plc_set(vk, image_id, 0, row, col, cell_cols, cell_rows, z, px);
+}
+
+static void s_display(void *ctx, int row, int col, int cell_cols,
+                      int cell_rows, const unsigned char *rgba, int width,
+                      int height, unsigned int image_id, int z) {
+  display_at(ctx, row, col, cell_cols, cell_rows, NULL, rgba, width, height,
+             image_id, z);
+}
+
+static void s_display_px(void *ctx, int row, int col, int cell_cols,
+                         int cell_rows, int x, int y, int w, int h,
+                         const unsigned char *rgba, int width, int height,
+                         unsigned int image_id, int z) {
+  if (w <= 0 || h <= 0) {
+    ctui_logf(E_WRN, "[CTUI:VK] - display_px of image %u rejected (%dx%d px)\n",
+              image_id, w, h);
+    return;
+  }
+  const int px[4] = {x, y, w, h};
+  display_at(ctx, row, col, cell_cols, cell_rows, px, rgba, width, height,
+             image_id, z);
 }
 
 static unsigned char *s_begin(void *ctx, unsigned int image_id, int width,
@@ -1069,7 +1113,7 @@ static void s_commit(void *ctx, unsigned int image_id, int row, int col,
   CTUI_VK *vk = ctx;
   if (img_find(vk, image_id)) {
     mark_id(vk, image_id);
-    plc_set(vk, image_id, 0, row, col, cell_cols, cell_rows, z);
+    plc_set(vk, image_id, 0, row, col, cell_cols, cell_rows, z, NULL);
   }
 }
 
@@ -1140,7 +1184,7 @@ static void s_put(void *ctx, unsigned int image_id, unsigned int placement_id,
               image_id, cols, rows);
     return;
   }
-  plc_set(ctx, image_id, placement_id, row, col, cols, rows, z);
+  plc_set(ctx, image_id, placement_id, row, col, cols, rows, z, NULL);
 }
 
 static void s_unput(void *ctx, unsigned int image_id,
@@ -1160,8 +1204,9 @@ static void s_flush(void *ctx) { (void)ctx; }
 
 const CTUI_GFX_SINK *ctui_vk_gfx_sink(void) {
   static const CTUI_GFX_SINK sink = {
-      s_display,    s_begin,      s_commit, s_free,  s_delete,
-      s_place_file, s_place_rgba, s_put,    s_unput, s_flush};
+      s_display,    s_begin,      s_commit,     s_free,
+      s_delete,     s_place_file, s_place_rgba, s_display_px,
+      s_put,        s_unput,      s_flush};
   return &sink;
 }
 
