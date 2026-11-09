@@ -16,18 +16,28 @@ void ctui_look_paint_rect(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
                           const unsigned char rgb[3]) {
   int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
   int x1 = x + w > c->w ? c->w : x + w, y1 = y + h > c->h ? c->h : y + h;
-  for (int yy = y0; yy < y1; yy++) {
-    for (int xx = x0; xx < x1; xx++) {
-      ctui_look_paint_px(c, xx, yy, rgb);
-    }
+  if (x1 <= x0 || y1 <= y0) {
+    return;
+  }
+  size_t stride = (size_t)c->w * 4, n = (size_t)(x1 - x0) * 4;
+  unsigned char *row = c->px + (size_t)y0 * stride + (size_t)x0 * 4;
+  memcpy(row, rgb, 3);
+  row[3] = 255;
+  for (size_t done = 4; done < n;) {
+    size_t k = done < n - done ? done : n - done;
+    memcpy(row + done, row, k);
+    done += k;
+  }
+  for (int yy = y0 + 1; yy < y1; yy++) {
+    memcpy(row + (size_t)(yy - y0) * stride, row, n);
   }
 }
 
 static int min2(int a, int b) { return a < b ? a : b; }
 
-void ctui_look_paint_box(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
-                         const CTUI_LOOK *l, CTUI_LOOK_PAINT_EDGE edge,
-                         int depth, int outline, const unsigned char *fill) {
+static void box_px(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
+                   const CTUI_LOOK *l, CTUI_LOOK_PAINT_EDGE edge, int depth,
+                   int outline, const unsigned char *fill, int i, int j) {
   static const int RAISED[2][2][2] = {
       /* depth 1: [ring][tl, br] */
       {{CTUI_LOOK_HIGHLIGHT, CTUI_LOOK_SHADOW}, {0, 0}},
@@ -40,26 +50,46 @@ void ctui_look_paint_box(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
       {{CTUI_LOOK_SHADOW, CTUI_LOOK_HIGHLIGHT},
        {CTUI_LOOK_DARK, CTUI_LOOK_LIGHT}},
   };
+  int t = j, lt = i, b = h - 1 - j, r = w - 1 - i;
+  if (l->corner && min2(t, b) + min2(lt, r) < l->corner) {
+    return;
+  }
+  int k = min2(min2(t, b), min2(lt, r));
+  const unsigned char *rgb = fill;
+  if (outline && k == 0) {
+    rgb = l->color[CTUI_LOOK_DARK];
+  } else if ((k -= !!outline) < depth) {
+    int br = b - !!outline == k || r - !!outline == k;
+    const int (*tab)[2][2] = edge == CTUI_LOOK_PAINT_RAISED ? RAISED : SUNKEN;
+    rgb = l->color[tab[depth - 1][k][br]];
+  }
+  if (rgb) {
+    ctui_look_paint_px(c, x + i, y + j, rgb);
+  }
+}
+
+/* only the ring (and the corner cut's reach) goes pixel by pixel: a row's
+ * middle, `m` px in from either side, is all fill and never cut */
+void ctui_look_paint_box(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
+                         const CTUI_LOOK *l, CTUI_LOOK_PAINT_EDGE edge,
+                         int depth, int outline, const unsigned char *fill) {
   depth = edge == CTUI_LOOK_PAINT_FLAT ? 0 : depth < 0 ? 0 : min2(depth, 2);
+  int ring = depth + !!outline;
   for (int j = 0; j < h; j++) {
-    for (int i = 0; i < w; i++) {
-      int t = j, lt = i, b = h - 1 - j, r = w - 1 - i;
-      if (l->corner && min2(t, b) + min2(lt, r) < l->corner) {
-        continue;
+    int tb = min2(j, h - 1 - j);
+    int m = l->corner - tb > ring ? l->corner - tb : ring;
+    if (tb < ring || 2 * m >= w) {
+      for (int i = 0; i < w; i++) {
+        box_px(c, x, y, w, h, l, edge, depth, outline, fill, i, j);
       }
-      int k = min2(min2(t, b), min2(lt, r));
-      const unsigned char *rgb = fill;
-      if (outline && k == 0) {
-        rgb = l->color[CTUI_LOOK_DARK];
-      } else if ((k -= !!outline) < depth) {
-        int br = b - !!outline == k || r - !!outline == k;
-        const int (*tab)[2][2] =
-            edge == CTUI_LOOK_PAINT_RAISED ? RAISED : SUNKEN;
-        rgb = l->color[tab[depth - 1][k][br]];
-      }
-      if (rgb) {
-        ctui_look_paint_px(c, x + i, y + j, rgb);
-      }
+      continue;
+    }
+    for (int i = 0; i < m; i++) {
+      box_px(c, x, y, w, h, l, edge, depth, outline, fill, i, j);
+      box_px(c, x, y, w, h, l, edge, depth, outline, fill, w - 1 - i, j);
+    }
+    if (fill) {
+      ctui_look_paint_rect(c, x + m, y + j, w - 2 * m, 1, fill);
     }
   }
 }

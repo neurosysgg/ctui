@@ -2143,11 +2143,102 @@ static void test_box_rows(void) {
                    "a one-row box is top and bottom; a dialog's frame is thick, not flush");
 }
 
+/* paint_box/paint_rect fill whole rows and skip a box's middle: the old
+ * per-pixel rule, kept here, has to give the same pixels everywhere */
+static void ref_box(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h, const CTUI_LOOK *l,
+                    CTUI_LOOK_PAINT_EDGE edge, int depth, int outline, const unsigned char *fill) {
+  static const int RAISED[2][2][2] = {{{CTUI_LOOK_HIGHLIGHT, CTUI_LOOK_SHADOW}, {0, 0}},
+                                      {{CTUI_LOOK_HIGHLIGHT, CTUI_LOOK_DARK},
+                                       {CTUI_LOOK_LIGHT, CTUI_LOOK_SHADOW}}};
+  static const int SUNKEN[2][2][2] = {{{CTUI_LOOK_SHADOW, CTUI_LOOK_HIGHLIGHT}, {0, 0}},
+                                      {{CTUI_LOOK_SHADOW, CTUI_LOOK_HIGHLIGHT},
+                                       {CTUI_LOOK_DARK, CTUI_LOOK_LIGHT}}};
+  depth = edge == CTUI_LOOK_PAINT_FLAT ? 0 : depth < 0 ? 0 : depth > 2 ? 2 : depth;
+#define MIN2(a, b) ((a) < (b) ? (a) : (b))
+  for (int j = 0; j < h; j++) {
+    for (int i = 0; i < w; i++) {
+      int t = j, lt = i, b = h - 1 - j, r = w - 1 - i;
+      if (l->corner && MIN2(t, b) + MIN2(lt, r) < l->corner) {
+        continue;
+      }
+      int k = MIN2(MIN2(t, b), MIN2(lt, r));
+      const unsigned char *rgb = fill;
+      if (outline && k == 0) {
+        rgb = l->color[CTUI_LOOK_DARK];
+      } else if ((k -= !!outline) < depth) {
+        int br = b - !!outline == k || r - !!outline == k;
+        rgb = l->color[(edge == CTUI_LOOK_PAINT_RAISED ? RAISED : SUNKEN)[depth - 1][k][br]];
+      }
+      if (rgb && x + i >= 0 && y + j >= 0 && x + i < c->w && y + j < c->h) {
+        unsigned char *p = c->px + ((size_t)(y + j) * (size_t)c->w + (size_t)(x + i)) * 4;
+        memcpy(p, rgb, 3);
+        p[3] = 255;
+      }
+    }
+  }
+#undef MIN2
+}
+
+static void test_paint_rows(void) {
+  enum { CW = 23, CH = 19 };
+  static unsigned char a[CW * CH * 4], b[CW * CH * 4];
+  CTUI_LOOK l = test_look();
+  const unsigned char fill[3] = {1, 2, 3};
+  int bad = 0, cases = 0;
+  for (int corner = 0; corner <= 4; corner++) {
+    l.corner = corner;
+    for (int edge = CTUI_LOOK_PAINT_FLAT; edge <= CTUI_LOOK_PAINT_SUNKEN; edge++) {
+      for (int depth = -1; depth <= 3; depth++) {
+        for (int outline = 0; outline <= 1; outline++) {
+          for (int f = 0; f <= 1; f++) {
+            for (int w = 0; w <= 13; w++) {
+              for (int h = 0; h <= 11; h += 1 + (h > 5)) {
+                for (int at = -3; at <= 14; at += 17) {
+                  memset(a, 0x5a, sizeof(a));
+                  memset(b, 0x5a, sizeof(b));
+                  CTUI_LOOK_CANVAS ca = {a, CW, CH}, cb = {b, CW, CH};
+                  ctui_look_paint_box(&ca, at, at / 2, w, h, &l, (CTUI_LOOK_PAINT_EDGE)edge,
+                                      depth, outline, f ? fill : NULL);
+                  ref_box(&cb, at, at / 2, w, h, &l, (CTUI_LOOK_PAINT_EDGE)edge, depth, outline,
+                          f ? fill : NULL);
+                  bad += memcmp(a, b, sizeof(a)) != 0;
+                  cases++;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  CTUI_TEST_ASSERT(bad == 0, "paint_box by rows gives the per-pixel rule's pixels (%d of %d differ)",
+                   bad, cases);
+
+  bad = 0;
+  for (int x = -4; x <= CW; x += 3) {
+    for (int w = -1; w <= CW + 6; w += 5) {
+      memset(a, 0x5a, sizeof(a));
+      memset(b, 0x5a, sizeof(b));
+      CTUI_LOOK_CANVAS ca = {a, CW, CH}, cb = {b, CW, CH};
+      ctui_look_paint_rect(&ca, x, x - 2, w, w / 2 + 1, fill);
+      for (int yy = x - 2; yy < x - 2 + w / 2 + 1; yy++) {
+        for (int xx = x; xx < x + w; xx++) {
+          ctui_look_paint_px(&cb, xx, yy, fill);
+        }
+      }
+      bad += memcmp(a, b, sizeof(a)) != 0;
+    }
+  }
+  CTUI_TEST_ASSERT(bad == 0, "paint_rect by rows gives its pixels one by one, clipped (%d differ)",
+                   bad);
+}
+
 int main(void) {
   ctui_log_init(0);
   test_looks();
   test_config();
   test_primitives();
+  test_paint_rows();
   test_slider();
   test_knob();
   test_fader();

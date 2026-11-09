@@ -16,10 +16,8 @@ on the card, the host (ctui-mus `-w`), every kitty image path on the card
 PNG round trip). The user's verdict: 1:1 with kitty bar the fonts, CPU
 ~95 % -> a fraction. Next, in this order:
 
-1. **The baseline**: ctui-mus `-w` playing, look on, visualizers on
-   screen -- the user measures (the /proc/PID/stat one-liner: utime +
-   stime over 10 s); ctui-mus has no scripted input to start playback
-   from here (no node/ui, no wtype). Write it into step 4 below.
+1. ~~The baseline~~: taken, ~26 % with the visualizers, 2-4 % without;
+   ~10-12 % after look's paint primitives went by rows (step 4b below).
 2. **Step 5, plots** -- with "Toward the display's rate" below: data
    records, not pixels; evaluated per presented frame (the playbar at
    240 Hz on a 50 Hz tick), presenting paced by the display
@@ -301,7 +299,22 @@ Three layers; only the first touches what every ctui app links.
        tests/gfx_sink_test.c checks both, and that no file appears.
        Idle in its window: ~1 % of a core. **The baseline step 5 is
        measured against: ctui-mus playing, look on, after this** -- the
-       user's number, still to be taken.
+       user's number: **ctui-mus `-w` playing, look on: ~26 % of a core
+       with the visualizers on screen, 2-4 % without** (2026-11-09) --
+       ~22 % is the visualizers' alone. Its log at that run: `app.frame`
+       ~2.4 ms at ~60 frames/s (~14 % of a core), of which the
+       spectrogram's `pixel_fill` ~0.6 ms, the bars' stamp + display
+       ~0.06 ms; the oscilloscope and meters have no spans.
+       **perf on that run** (main thread ~18 %, every other thread ~0):
+       66 % of samples in `ctui_look_paint_box` + `_rect` -- each
+       visualizer's well (`mus_viz_well`) repainted its whole picture a
+       tick, a bounds-checked call a pixel, and `paint_box` visited every
+       interior pixel even with no fill. Rows now (`paint_rect` one row
+       then `memcpy`, `paint_box` only its ring and the corner cut's
+       reach), pinned against the per-pixel rule in look_test: a
+       1280 x 400 well 1.01 -> 0.064 ms. **ctui-mus `-w` playing,
+       visualizers on: ~26 % -> ~10-12 % of a core** (the user). Next: the spectrogram's own
+       render (~11 % of samples), which is what step 5's `grid` takes.
 5. Plots: `bars` and `grid` first (ctui-mus's spectrum and spectrogram
    as the first users, beside their kitty renderers), then `columns`
    and `polyline` (ctui-daw), each measured against step 4's number
