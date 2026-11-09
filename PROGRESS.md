@@ -237,6 +237,24 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/vk/`: ctui's text painted on the card** (2026-11-09,
+  VK_DESIGN.md step 2). `CTUI_VK` on the caller's `VkPhysicalDevice` /
+  `VkDevice`, recording into the caller's command buffer, owning no
+  window, queue or swapchain: `ctui_vk_screen_sink()` diffs each frame
+  into a host copy of the cells, `ctui_vk_record()` uploads only the
+  changed cells' runs (a copy region each) and dispatches
+  `shaders/cells.comp` over the touched 16 x 16 tiles of one surface
+  buffer, `ctui_vk_regions()` gives a swapchain image the copy regions
+  it's behind on. Spleen 8x16..32x64 by scale (`ctui_cell_px_set()` told),
+  colours resolved on the host (basic, 256, RGB, RGB_FG; DEFAULT a flag
+  the shader fills from `ctui_vk_set_default()`), bold/dim/underline/
+  strike, a box for a missing glyph (logged once). Optional in the
+  Makefile (`VK_OK`: Vulkan's headers and glslc; `*.spv.h` generated,
+  gitignored); `tests/vk/vk_test.c` sits outside `tests/*.c` and skips
+  itself without a device. 15 checks: pixel-exact against a host
+  reference of the shader's rule, the hash pinned, nothing recorded when
+  unchanged, one tile for one cell, the regions, new defaults without a
+  cell upload, the validation layer clean.
 - [x] **A graphics sink beside the screen sink** (2026-11-09,
   VK_DESIGN.md step 1). `CTUI_GFX_SINK` / `ctui_gfx_set_sink()` (gfx.h):
   `display`, `image_begin/commit/free`, `delete`, `place_file` and the

@@ -1,25 +1,30 @@
-#version 460
-// The GUI's painter (app/ui.h, notes/gui.md): a workgroup a listed tile
-// of a changed widget, each pixel its cell's glyph bit in the
-// foreground's role, else the background's; past the widget's last whole
-// cell, its own background. Integers only: a widget's pixels are a pure
-// function of its records and the look. RGBA8 words, BGRA where the
-// swapchain wants it
+#version 450
+// The text painter (src/vk/vk.h): a workgroup a listed 16 x 16 tile of
+// the surface, each pixel its cell's glyph bit in the foreground, else
+// the background; past the last whole cell, the default background.
+// Integers only: the pixels are a pure function of the cells, so a test
+// pins them against a host reference (tests/vk/vk_test.c)
 
 layout(local_size_x = 16, local_size_y = 16) in;
-layout(set = 0, binding = 0) readonly buffer Rec { uint rec[]; };
-layout(set = 0, binding = 1) readonly buffer Atlas { uint atlas[]; };
-layout(set = 0, binding = 2) writeonly buffer Surf { uint px[]; };
+layout(set = 0, binding = 0) readonly buffer Tiles { uint tile[]; };
+layout(set = 0, binding = 1) readonly buffer Cells { uint cell[]; };
+layout(set = 0, binding = 2) readonly buffer Atlas { uint atlas[]; };
+layout(set = 0, binding = 3) writeonly buffer Surf { uint px[]; };
 layout(push_constant) uniform Push {
   uint surf_w;
+  uint surf_h;
   uint gw;
   uint gh;
+  uint cols;
+  uint rows;
   uint bgra;
-  uint tiles;
-  uint cells;
+  uint def_fg; // CTUI_COLOR_DEFAULT's, a cell flagged so takes them
+  uint def_bg; // and past the last whole cell
 };
 
-const uint SLICES = 16u, SLICE_WORDS = 8u;
+// CTUI_ATTR_* (core/cell.h)
+const uint BOLD = 1u, DIM = 2u, UNDERLINE = 8u, STRIKE = 16u;
+const uint FG_DEFAULT = 1u << 8, BG_DEFAULT = 1u << 9, BOX = 0xffffu;
 
 uint word(uint rgb) {
   uint r = rgb >> 16 & 0xffu, g = rgb >> 8 & 0xffu, b = rgb & 0xffu;
@@ -27,20 +32,34 @@ uint word(uint rgb) {
 }
 
 void main() {
-  uint t = gl_WorkGroupID.x;
-  uint s = rec[tiles + 2u * t], txy = rec[tiles + 2u * t + 1u];
-  uint b = SLICES + s * SLICE_WORDS;
-  uint sx = rec[b], sy = rec[b + 1u], sw = rec[b + 2u], sh = rec[b + 3u];
-  uint off = rec[b + 4u], cols = rec[b + 5u], rows = rec[b + 6u];
-  uint lx = (txy & 0xffffu) * 16u + gl_LocalInvocationID.x;
-  uint ly = (txy >> 16) * 16u + gl_LocalInvocationID.y;
-  if (lx >= sw || ly >= sh)
+  uint t = tile[gl_WorkGroupID.x];
+  uint x = (t & 0xffffu) * 16u + gl_LocalInvocationID.x;
+  uint y = (t >> 16) * 16u + gl_LocalInvocationID.y;
+  if (x >= surf_w || y >= surf_h)
     return;
-  uint cx = lx / gw, cy = ly / gh, role = rec[b + 7u];
+  uint cx = x / gw, cy = y / gh, rgb = def_bg;
   if (cx < cols && cy < rows) {
-    uint c = rec[cells + off + cy * cols + cx];
-    uint bits = atlas[(c & 0xffu) * gh + ly % gh];
-    role = (bits >> (31u - lx % gw) & 1u) != 0u ? c >> 8 & 0xfu : c >> 12 & 0xfu;
+    uint i = (cy * cols + cx) * 3u;
+    uint g = cell[i] & 0xffffu, a = cell[i] >> 16;
+    uint fg = (a & FG_DEFAULT) != 0u ? def_fg : cell[i + 1u];
+    uint bg = (a & BG_DEFAULT) != 0u ? def_bg : cell[i + 2u];
+    uint gx = x % gw, gy = y % gh;
+    bool on;
+    if (g == BOX) {
+      on = gx == 0u || gx == gw - 1u || gy == gh / 8u || gy == gh - 1u - gh / 8u;
+    } else {
+      uint bits = atlas[g * gh + gy];
+      if ((a & BOLD) != 0u)
+        bits |= bits >> 1;
+      on = (bits >> (31u - gx) & 1u) != 0u;
+    }
+    if ((a & UNDERLINE) != 0u && gy == gh - 1u - gh / 16u)
+      on = true;
+    if ((a & STRIKE) != 0u && gy == gh / 2u)
+      on = true;
+    if ((a & DIM) != 0u)
+      fg = ((fg & 0xfefefeu) >> 1) + ((bg & 0xfefefeu) >> 1);
+    rgb = on ? fg : bg;
   }
-  px[(sy + ly) * surf_w + sx + lx] = word(rec[role]);
+  px[y * surf_w + x] = word(rgb);
 }

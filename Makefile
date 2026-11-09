@@ -55,6 +55,22 @@ HARNESS_SRC = $(wildcard tools/harness/*.c)
 test-harness_test: $(CORE_SRC) $(CORE_HDR) $(HARNESS_SRC) $(wildcard tools/harness/*.h) tests/harness_test.c tools/ctui_test.h
 	$(CC) $(CFLAGS) -Itools -Itools/harness -o $@ $(CORE_SRC) $(HARNESS_SRC) tests/harness_test.c $(LDLIBS)
 
+# src/vk/: the Vulkan backend (VK_DESIGN.md), optional like ctui-player's
+# ALSA: built where Vulkan's headers and glslc are, its shaders by glslc
+# into C arrays it includes. Its test, tests/vk/, is outside tests/*.c
+# so a machine without Vulkan builds every other one; without a device
+# it skips itself
+HASH := \#
+VK_OK := $(shell command -v glslc >/dev/null && echo '$(HASH)include <vulkan/vulkan.h>' | \
+  $(CC) -E -x c - >/dev/null 2>&1 && echo y)
+VK_LIBS := $(shell pkg-config --libs vulkan 2>/dev/null || echo -lvulkan)
+VK_SRC = $(wildcard src/vk/*.c)
+VK_SPV = $(patsubst %.comp,%.spv.h,$(wildcard src/vk/shaders/*.comp))
+src/vk/shaders/%.spv.h: src/vk/shaders/%.comp
+	glslc --target-env=vulkan1.0 -O -mfmt=c -o $@ $<
+test-vk_test: $(CORE_SRC) $(CORE_HDR) $(VK_SRC) $(wildcard src/vk/*.h) $(VK_SPV) tests/vk/vk_test.c tools/ctui_test.h
+	$(CC) $(CFLAGS) -Itools -o $@ $(CORE_SRC) $(VK_SRC) tests/vk/vk_test.c $(LDLIBS) $(VK_LIBS)
+
 # replays recorded apps' output through flush: bytes, time, the same cells
 flushbench: $(CORE_SRC) $(CORE_HDR) tools/harness/vt.c tools/harness/vt.h tools/flushbench.c
 	$(CC) $(CFLAGS) -O2 -Itools -o $@ $(CORE_SRC) tools/harness/vt.c tools/flushbench.c $(LDLIBS)
@@ -65,14 +81,15 @@ query-alone:
 	@$(CC) -Wall -Wextra -std=c11 -fsyntax-only $(wildcard src/query/*.c) || \
 		{ echo "src/query/ reaches outside itself: it must stay libc only"; exit 1; }
 
-test: $(TEST_BIN) query-alone
-	@for t in $(TEST_BIN); do echo "-- $$t --"; ./$$t || exit 1; done
+test: $(TEST_BIN) query-alone $(if $(VK_OK),test-vk_test)
+	@for t in $(TEST_BIN) $(if $(VK_OK),test-vk_test); do echo "-- $$t --"; ./$$t || exit 1; done
+	@$(if $(VK_OK),,echo "test-vk_test: no Vulkan headers or glslc: skipped")
 
 coverage: $(CORE_SRC) $(CORE_HDR) $(TEST_SRC) tools/ctui_test.h tools/coverage.sh
 	@bash tools/coverage.sh
 
 clean:
-	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN)
+	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN) test-vk_test $(VK_SPV)
 	rm -rf coverage
 
 .PHONY: query-alone clean examples all test coverage

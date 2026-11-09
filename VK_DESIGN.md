@@ -155,6 +155,30 @@ Three layers; only the first touches what every ctui app links.
    is, lavapipe (mesa's CPU Vulkan) where there's no card, and is
    skipped -- not failed -- with no Vulkan at all, so `make test` stays
    green on a machine without it; the pinned hash has to hold on both.
+   **ctui's side done 2026-11-09** (`src/vk/vk.{c,h}`,
+   `tests/vk/vk_test.c`, 15 checks, the validation layer clean on the
+   RTX 3070 Ti). How it came out:
+   - the whole screen is one grid, so no slices: the cells live in a
+     buffer on the card between frames, the sink diffs each frame into a
+     host copy of them, and a record uploads only the changed cells'
+     *runs* (one VkBufferCopy each, from a mapped staging buffer a slot)
+     plus the tile list, then one dispatch over the touched 16 x 16
+     tiles. Barriers before, between and after, so the caller copies
+     out of the surface right after `ctui_vk_record()`.
+   - a cell on the card is 3 words: the glyph's slot (16 bits, a box at
+     0xffff) | attrs, fg, bg. `CTUI_COLOR_DEFAULT` is a flag the shader
+     resolves from push constants, so `ctui_vk_set_default()` repaints
+     every tile without a cell going up again.
+   - per swapchain image and tile row, the span it's behind on; regions
+     merge rows with the same span (a fresh image: one region).
+   - attrs: bold a 1 px smear, dim fg halfway to bg, underline and
+     strike rows; italic not drawn. A missing glyph is a box, logged
+     once; a width-2 glyph's CONT blank; placeholders blank until step 4.
+   - Vulkan 1.0 calls only, the shader built for vulkan1.0: nothing
+     asked of the caller's device but a compute queue.
+   - not done: lavapipe isn't installed here, so the hash is pinned on
+     the card only; syNESthesia's side (its app/ui.c onto this) is its
+     own repo's step.
 3. The host (layer 3), text only, with ctui-mus in it: its kitty widgets
    show their text fallback until step 4. Earlier than it was, because
    the host is where every later step gets measured, and it's the only
@@ -194,8 +218,8 @@ Copied here, ready for step 2:
   workgroup a listed 16 x 16 tile; records = roles[16],
   slices (8 words: x y w h cell_off cols rows bg), tiles (slice, x | y <<
   16), cells (glyph | fg << 8 | bg << 12, roles not RGB yet: step 2
-  widens a cell to RGB + attrs). Nothing builds `src/vk/` yet; the
-  Makefile's globs don't reach it.
+  widens a cell to RGB + attrs). Since rewritten for ctui's grid (step
+  2 above); the Makefile builds `src/vk/` where `VK_OK`.
 
 Read in place (syNESthesia, commit 7237758), to port rather than copy:
 

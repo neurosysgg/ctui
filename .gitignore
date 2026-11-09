@@ -8,3 +8,4 @@ coverage/
 *.gcda
 *.gcov
 flushbench
+*.spv.h
