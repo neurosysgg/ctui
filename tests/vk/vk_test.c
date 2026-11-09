@@ -9,10 +9,13 @@
 
 #include "ctui.h"
 #include "ctui_test.h"
+#include "look/png.h"
 #include "vk/vk.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define W 200u
 #define H 100u
@@ -268,6 +271,22 @@ typedef struct {
 static PL g_pl[4];
 static unsigned g_npl;
 
+/* the placed file placeholder cells show (place_file()): its id, texels,
+ * virtual cells */
+static unsigned g_ph_id;
+static const uint8_t *g_ph_rgba;
+static int g_ph_w, g_ph_h, g_ph_cols, g_ph_rows;
+
+/* src/vk/vk.c's placeholder_at(): the row and column from the left */
+static void ph_at(uint32_t *w, const uint32_t *left) {
+  unsigned row = w[0] & 0xffu, col = w[0] >> 8 & 0xffu;
+  int same = left && (left[0] >> 16 & CTUI_VK_PLACEHOLDER) && left[1] == w[1];
+  unsigned lrow = left ? left[0] & 0xffu : 0, lcol = left ? left[0] >> 8 & 0xffu : 0;
+  row = row ? row - 1 : same ? lrow : 0;
+  col = col ? col - 1 : same && lrow == row ? lcol + 1 : 0;
+  w[0] = (w[0] & 0xffff0000u) | row | col << 8;
+}
+
 /* cells.comp's texel(): rgb << 8 | a, the footprint averaged */
 static uint32_t texel(const PL *p, unsigned gw, unsigned gh, unsigned x,
                       unsigned y) {
@@ -312,6 +331,29 @@ static uint32_t over(uint32_t dst, uint32_t t) {
   return o;
 }
 
+/* cells.comp's placeholder(): the image fit into its virtual cells */
+static uint32_t ph_texel(unsigned id, unsigned gw, unsigned gh, unsigned dx,
+                         unsigned dy) {
+  if (id != g_ph_id || !g_ph_rgba) {
+    return 0;
+  }
+  unsigned iw = (unsigned)g_ph_w, ih = (unsigned)g_ph_h;
+  unsigned pw = (unsigned)g_ph_cols * gw, ph = (unsigned)g_ph_rows * gh;
+  unsigned dw = pw, dh = ph;
+  if (iw * ph > ih * pw) {
+    dh = ih * pw / iw ? ih * pw / iw : 1;
+  } else {
+    dw = iw * ph / ih ? iw * ph / ih : 1;
+  }
+  unsigned ox = (pw - dw) / 2, oy = (ph - dh) / 2;
+  if (dx < ox || dy < oy || dx >= ox + dw || dy >= oy + dh) {
+    return 0;
+  }
+  /* texel() of a 1 x 1 cell placement whose cell is dw x dh */
+  PL p = {0, 0, 1, 1, 0, g_ph_rgba, g_ph_w, g_ph_h};
+  return texel(&p, dw, dh, dx - ox, dy - oy);
+}
+
 /* cells.comp's rule, on the host, from the screen's cells */
 static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
   unsigned gw, gh;
@@ -324,14 +366,27 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
       unsigned cx = x / gw, cy = y / gh, gx = x % gw, gy = y % gh;
       uint32_t rgb = dbg, fg = dfg;
       int on = 0, bg_default = 1;
+      uint32_t ph = 0;
       if (cx < (unsigned)s->cols && cy < (unsigned)s->rows) {
-        uint32_t c[CTUI_VK_CELL_WORDS];
-        ctui_vk_cell(vk, &s->buffer[cy * (unsigned)s->cols + cx], c);
+        uint32_t c[CTUI_VK_CELL_WORDS] = {0}, l[CTUI_VK_CELL_WORDS];
+        /* the row's placeholders resolved left to right, as the frame */
+        for (unsigned k = 0; k <= cx; k++) {
+          memcpy(l, c, sizeof l);
+          ctui_vk_cell(vk, &s->buffer[cy * (unsigned)s->cols + k], c);
+          if (c[0] >> 16 & CTUI_VK_PLACEHOLDER) {
+            ph_at(c, k ? l : NULL);
+          }
+        }
         uint32_t g = c[0] & 0xffffu, a = c[0] >> 16;
         fg = a & CTUI_VK_FG_DEFAULT ? dfg : c[1];
         uint32_t bg = a & CTUI_VK_BG_DEFAULT ? dbg : c[2];
         bg_default = (a & CTUI_VK_BG_DEFAULT) != 0;
-        if (g == CTUI_VK_GLYPH_BOX) {
+        if (a & CTUI_VK_PLACEHOLDER) {
+          ph = ph_texel(c[1], gw, gh, (g >> 8 & 0xffu) * gw + gx,
+                        (g & 0xffu) * gh + gy);
+          a &= CTUI_VK_FG_DEFAULT | CTUI_VK_BG_DEFAULT | CTUI_VK_PLACEHOLDER;
+          on = 0;
+        } else if (g == CTUI_VK_GLYPH_BOX) {
           on = gx == 0 || gx == gw - 1 || gy == gh / 8 ||
                gy == gh - 1 - gh / 8;
         } else {
@@ -357,6 +412,7 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
       if (on) {
         rgb = fg;
       }
+      rgb = over(rgb, ph);
       for (; p < g_npl; p++) {
         rgb = over(rgb, texel(&g_pl[p], gw, gh, x, y));
       }
@@ -410,6 +466,10 @@ static void render_text(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                    CTUI_COLOR_GREEN, CTUI_COLOR_DEFAULT);
   ctui_widget_putc_rgb_fg(self, comp, 5, 0, '#', 0x40, 0xc0, 0xff,
                           CTUI_COLOR_MAGENTA);
+  if (g_ph_id) {
+    ctui_widget_put_kitty_placeholder(self, comp, 2, 14, g_ph_id, 3, 2,
+                                      CTUI_COLOR_DEFAULT);
+  }
 }
 
 /* kitty's pixel images through the graphics sink: a 2 x 2 RGBA one
@@ -494,6 +554,79 @@ static void test_images(CTUI_VK *vk, CTUI_SCREEN *screen) {
   paint(vk);
   CTUI_TEST_ASSERT(differ(vk, screen) == 0, "all gone: the text alone again");
   ctui_gfx_set_sink(NULL, NULL);
+}
+
+/* look's controls and icons: a PNG placed with place_file() and shown by
+ * placeholder cells, fit into them (4 x 4 texels into 3 x 2 cells: 24 x
+ * 32 px, so 24 x 24 centred); the same image put() under text, then
+ * unput(); the file placed again: only its cells repainted */
+static void test_placed(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
+  static uint8_t px[4 * 4 * 4], px2[4 * 4 * 4];
+  for (int i = 0; i < 16; i++) {
+    px[i * 4] = (uint8_t)(i * 16), px[i * 4 + 1] = 200, px[i * 4 + 2] = 40;
+    px[i * 4 + 3] = (uint8_t)(i % 4 == 3 ? 0 : 255);
+    px2[i * 4] = 10, px2[i * 4 + 1] = (uint8_t)(i * 15), px2[i * 4 + 2] = 90;
+    px2[i * 4 + 3] = 255;
+  }
+  char path[] = "/tmp/vk_test.XXXXXX";
+  int fd = mkstemp(path);
+  if (fd >= 0) {
+    close(fd);
+  }
+  CTUI_TEST_ASSERT(ctui_look_png_write(path, px, 4, 4) == 0, "a PNG written");
+  ctui_gfx_set_sink(ctui_vk_gfx_sink(), vk);
+  ctui_gfx_kitty_place_file(9, path, 3, 2);
+  g_ph_id = 9, g_ph_rgba = px, g_ph_w = 4, g_ph_h = 4, g_ph_cols = 3,
+  g_ph_rows = 2;
+  ctui_app_render(app, screen);
+  ctui_screen_flush(screen);
+  paint(vk);
+  unsigned bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(bad == 0,
+                   "placeholder cells show the placed file, fit and centred, "
+                   "as the reference: %u differ",
+                   bad);
+  /* (2, 14): the image's first texel 4 px down (24 x 24 centred in 24 x
+   * 32): rgb (0, 200, 40) */
+  CTUI_TEST_ASSERT(g_px[(2 * 16 + 4) * W + 14 * 8 + 1] == rgba(0x00c828),
+                   "its first texel where the fit puts it: %08x",
+                   g_px[(2 * 16 + 4) * W + 14 * 8 + 1]);
+
+  ctui_gfx_kitty_put(9, 2, 6, 1, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1);
+  g_pl[0] = (PL){5, 0, 4, 1, CTUI_GFX_KITTY_Z_UNDER_BG - 1, px, 4, 4};
+  g_npl = 1;
+  paint(vk);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(bad == 0,
+                   "put under the background: as the reference (%u differ)",
+                   bad);
+  ctui_gfx_kitty_unput(9, 2);
+  g_npl = 0;
+  unsigned tiles = paint(vk);
+  CTUI_TEST_ASSERT(tiles == 2 && differ(vk, screen) == 0,
+                   "unput: its tiles painted without it (%u)", tiles);
+
+  ctui_look_png_write(path, px2, 4, 4);
+  ctui_gfx_kitty_place_file(9, path, 3, 2);
+  g_ph_rgba = px2;
+  tiles = paint(vk);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles == 4 && bad == 0,
+                   "the file placed again: its cells' tiles alone, the new "
+                   "texels (%u tiles, %u differ)",
+                   tiles, bad);
+  CTUI_TEST_ASSERT(hash() == 0x2233904e6e0bb59full, "the placed file's hash: %016llx",
+                   (unsigned long long)hash());
+
+  ctui_gfx_kitty_delete(9);
+  g_ph_id = 0;
+  ctui_app_render(app, screen);
+  ctui_screen_flush(screen);
+  paint(vk);
+  CTUI_TEST_ASSERT(differ(vk, screen) == 0,
+                   "deleted, the cells gone: the text alone");
+  ctui_gfx_set_sink(NULL, NULL);
+  unlink(path);
 }
 
 static void test_vk(void) {
@@ -599,6 +732,7 @@ static void test_vk(void) {
                    tiles);
 
   test_images(vk, screen);
+  test_placed(vk, &app, screen);
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

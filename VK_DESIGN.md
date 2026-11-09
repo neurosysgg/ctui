@@ -240,11 +240,29 @@ Three layers; only the first touches what every ctui app links.
      painting and kitty's upload path were nearly all of it. That ~9 %
      is the baseline step 5's plots have to beat (their RGBA is still
      painted on the CPU, only no longer sent through kitty).
-   - **4b, the drawn look -- next**: `place_file` (PNGs: ctui-wm's
-     xdg/png.c promoted for the decoding, look's own and icon themes'
-     alike), placeholder cells sampled by the painter, and
-     `put`/`unput` (`CTUI_DRAWN_UNDER`'s bevels) as sink members. Until
-     then ctui-mus `-w` keeps its look's drawn controls as text.
+   - **4b, the drawn look -- done 2026-11-09**:
+     - ctui-wm's PNG decoder promoted to `look/png_read.c`
+       (`ctui_look_png_decode/load/size`) with its test and Python-made
+       cases (tests/png_test.c, tests/data/png/, tools/png_cases.py);
+       ctui-wm drops its xdg/png.c at its next bump.
+     - `CTUI_GFX_SINK` gains `put`/`unput` (core): only frame_file/
+       animate and reply stay terminal-only.
+     - placements are their own list, (image, placement id) -- display/
+       commit placement 0, put any other; `delete` takes the image and
+       all of them; replacing an image keeps them (kitty's graphics.c).
+     - `place_file` decodes the PNG into an image with a virtual size;
+       a placeholder cell carries a flag, its image row | column in the
+       slot and the id as fg, the row/column resolved left to right as
+       kitty reads the diacritics (and a cell right of a re-resolved one
+       resolved again). The painter looks the id up in an image table
+       (a few dozen icons: a linear scan, on dirty tiles only) and fits
+       the image into its virtual cells, the aspect kept and centred,
+       as a z 0 layer: over the under-text placements, under the over-
+       text ones. Re-placing a file repaints the tiles of exactly the
+       cells and placements showing it.
+     - vk_test 25 -> 33, pixel-exact; ctui-mus `-w` draws its look
+       (faces, bevels, pictograms, sliders) on the card, validation
+       clean.
 5. Plots: `bars` and `grid` first (ctui-mus's spectrum and spectrogram
    as the first users, beside their kitty renderers), then `columns`
    and `polyline` (ctui-daw), each measured against step 4's number

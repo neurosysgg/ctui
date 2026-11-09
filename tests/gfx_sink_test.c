@@ -56,13 +56,25 @@ static void s_place(void *ctx, unsigned int image_id, const char *path,
   (void)ctx;
   rec("place(%u %s %dx%d) ", image_id, path, cols, rows);
 }
+static void s_put(void *ctx, unsigned int image_id, unsigned int placement_id,
+                  int row, int col, int cols, int rows, int z) {
+  (void)ctx;
+  rec("put(%u p%u %d,%d %dx%d z%d) ", image_id, placement_id, row, col, cols,
+      rows, z);
+}
+static void s_unput(void *ctx, unsigned int image_id,
+                    unsigned int placement_id) {
+  (void)ctx;
+  rec("unput(%u p%u) ", image_id, placement_id);
+}
 static void s_flush(void *ctx) {
   (void)ctx;
   rec("flush ");
 }
 
-static const CTUI_GFX_SINK k_sink = {s_display, s_begin, s_commit, s_free,
-                                     s_delete,  s_place, s_flush};
+static const CTUI_GFX_SINK k_sink = {s_display, s_begin, s_commit,
+                                     s_free,    s_delete, s_place,
+                                     s_put,     s_unput,  s_flush};
 
 static int s_frame(void *ctx, const CTUI_SCREEN *s) {
   (void)ctx;
@@ -88,7 +100,8 @@ static void pics_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
     ctui_gfx_kitty_image_commit(g_img, 2, 1, 2, 1, 0);
   }
   ctui_gfx_kitty_place_file(7, "/icons/a.png", 2, 1);
-  ctui_gfx_kitty_put(7, 1, 1, 1, 2, 1, 0);
+  ctui_gfx_kitty_put(7, 1, 1, 1, 2, 1, -2);
+  ctui_gfx_kitty_unput(7, 1);
   ctui_gfx_kitty_delete(5);
 }
 
@@ -132,7 +145,8 @@ int main(void) {
   size_t out = frame(&app, screen);
   CTUI_TEST_ASSERT(!strcmp(g_rec, "frame(t) display(5 2,1 2x1 1x1px z-1 px7) "
                                   "begin(6 2x2 keep1) commit(6 2,1 2x1 z0 "
-                                  "px9) place(7 /icons/a.png 2x1) delete(5) "
+                                  "px9) place(7 /icons/a.png 2x1) put(7 p1 1,1 2x1 z-2) "
+                                  "unput(7 p1) delete(5) "
                                   "flush "),
                    "the frame's text first, then the kitty widget's calls "
                    "at the sink in order, flush last (%s)",

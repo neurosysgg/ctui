@@ -52,9 +52,9 @@ void ctui_gfx_set_mode(unsigned int mode);
  * image_commit() places what was painted in it. flush() ends a frame's
  * graphics (ctui_widget_flush_gfx(), after the text: the screen sink's
  * frame() comes first, and a frame whose cells didn't change has no
- * frame() at all, only this). The terminal-only calls (put/unput,
- * frame_file/animate, reply) have no member: under a sink their escapes
- * are dropped at the flush, logged. */
+ * frame() at all, only this). The terminal-only calls (frame_file/
+ * animate, reply) have no member: under a sink their escapes are dropped
+ * at the flush, logged. */
 typedef struct {
   void (*display)(void *ctx, int row, int col, int cell_cols, int cell_rows,
                   const unsigned char *rgba, int width, int height,
@@ -67,6 +67,9 @@ typedef struct {
   void (*delete)(void *ctx, unsigned int image_id);
   void (*place_file)(void *ctx, unsigned int image_id, const char *path,
                      int cols, int rows);
+  void (*put)(void *ctx, unsigned int image_id, unsigned int placement_id,
+              int row, int col, int cols, int rows, int z);
+  void (*unput)(void *ctx, unsigned int image_id, unsigned int placement_id);
   void (*flush)(void *ctx);
 } CTUI_GFX_SINK;
 

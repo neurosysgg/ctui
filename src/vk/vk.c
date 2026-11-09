@@ -1,6 +1,7 @@
 #include "vk.h"
 
 #include "fonts/spleen.h"
+#include "look/png.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -16,29 +17,39 @@ typedef struct {
 } BUF;
 
 typedef struct {
-  uint32_t surf_w, surf_h, gw, gh, cols, rows, bgra, def_fg, def_bg, nplace;
+  uint32_t surf_w, surf_h, gw, gh, cols, rows, bgra, def_fg, def_bg, nplace,
+      ntab;
 } PUSH;
 
 /* the shader's bindings: tiles, cells, atlas, surface, placements, the
- * images' texels */
-#define BINDINGS 6u
+ * images' texels, the image table (placeholder cells' images by id) */
+#define BINDINGS 7u
+/* an image on the card for placeholder cells: id, offset, w h (texels),
+ * its virtual placement's cols rows */
+#define TAB_WORDS 6u
 /* a placement on the card: x y w h (pixels), the image's offset in the
  * arena (words), its w h (texels), z */
 #define PLACE_WORDS 8u
 
-/* an image (gfx.h's sink: display, image_begin/commit, delete): its
- * texels kept on the host too (what goes up, and again when the arena is
- * compacted), its placement in cells */
+/* an image (gfx.h's sink): its texels kept on the host too (what goes
+ * up, and again when the arena is compacted), the virtual placement
+ * placeholder cells show it in */
 typedef struct {
   unsigned id;
   int w, h;
-  uint32_t *px; /* RGBA bytes, w * h words */
-  size_t cap;   /* words px holds */
-  int placed;
-  int row, col, cols, rows, z; /* 0-based cells */
-  uint32_t off, room;          /* where in the arena, how many words */
-  int up;                      /* texels to go up */
+  uint32_t *px;       /* RGBA bytes, w * h words */
+  size_t cap;         /* words px holds */
+  int vcols, vrows;   /* place_file()'s cells; 0: none */
+  uint32_t off, room; /* where in the arena, how many words */
+  int up;             /* texels to go up */
 } IMG;
+
+/* a placement: display()/image_commit() are placement 0 of their image,
+ * put() any other */
+typedef struct {
+  unsigned id, pid;
+  int row, col, cols, rows, z; /* 0-based cells */
+} PLC;
 
 /* codepoints a log was given for, so each missing one is logged once */
 #define MISSING_LOGGED 64u
@@ -78,6 +89,11 @@ struct CTUI_VK {
 
   IMG *imgs;
   unsigned nimg, img_cap;
+  PLC *plcs;
+  unsigned nplc, plc_cap;
+  BUF tab;
+  size_t tab_cap;
+  unsigned shown, tabbed; /* placements, images in the table, on the card */
   /* on the card: every image's texels at its offset (a bump allocation,
    * compacted when full), the placements, sorted by z */
   BUF arena, places;
@@ -164,6 +180,7 @@ static void free_sized(CTUI_VK *vk) {
   buf_free(vk, &vk->atlas);
   buf_free(vk, &vk->arena);
   buf_free(vk, &vk->places);
+  buf_free(vk, &vk->tab);
   for (unsigned i = 0; i < CTUI_VK_SLOTS; i++) {
     buf_free(vk, &vk->stage[i]);
     vk->stage_bytes[i] = 0;
@@ -190,6 +207,7 @@ void ctui_vk_free(CTUI_VK *vk) {
     free(vk->imgs[i].px);
   }
   free(vk->imgs);
+  free(vk->plcs);
   free(vk->icopies);
   if (vk->pool) {
     vkDestroyDescriptorPool(vk->dev, vk->pool, NULL);
@@ -312,8 +330,8 @@ static void all_tiles(CTUI_VK *vk) {
 }
 
 static void describe(CTUI_VK *vk) {
-  const BUF *b[BINDINGS] = {&vk->tiles, &vk->cells,  &vk->atlas,
-                            &vk->surf,  &vk->places, &vk->arena};
+  const BUF *b[BINDINGS] = {&vk->tiles,  &vk->cells, &vk->atlas, &vk->surf,
+                            &vk->places, &vk->arena, &vk->tab};
   VkDescriptorBufferInfo info[BINDINGS];
   VkWriteDescriptorSet wr[BINDINGS];
   for (unsigned i = 0; i < BINDINGS; i++) {
@@ -357,10 +375,13 @@ static int arena_new(CTUI_VK *vk, size_t words) {
   return 0;
 }
 
+/* room for n placements and n images in the table */
 static int places_new(CTUI_VK *vk, size_t n) {
   size_t want = n * 2 > 16 ? n * 2 : 16;
   buf_free(vk, &vk->places);
-  if (buf_new(vk, &vk->places, want * PLACE_WORDS * 4u, 0)) {
+  buf_free(vk, &vk->tab);
+  if (buf_new(vk, &vk->places, want * PLACE_WORDS * 4u, 0) ||
+      buf_new(vk, &vk->tab, want * TAB_WORDS * 4u, 0)) {
     vk->places_cap = 0;
     return -1;
   }
@@ -401,7 +422,8 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
             buf_new(vk, &vk->cells, cell_bytes, 0) ||
             buf_new(vk, &vk->tiles, ntiles * 4u, 0) ||
             buf_new(vk, &vk->atlas, atlas_bytes, 0) ||
-            arena_new(vk, live_words(vk)) || places_new(vk, vk->nimg);
+            arena_new(vk, live_words(vk)) ||
+            places_new(vk, vk->nplc > vk->nimg ? vk->nplc : vk->nimg);
   if (bad) {
     ctui_logf(E_ERR, "[CTUI:VK] - no memory for a %ux%u surface\n", w, h);
     free_sized(vk);
@@ -478,7 +500,7 @@ static uint32_t rgb_basic(unsigned char c) {
 }
 
 static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch) {
-  if (ch == 0 || ch == CTUI_CELL_CONT || ch == CTUI_GFX_KITTY_PLACEHOLDER) {
+  if (ch == 0 || ch == CTUI_CELL_CONT) {
     return ' ';
   }
   if (!(ch & CTUI_CELL_CLUSTER)) {
@@ -535,9 +557,30 @@ void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
       bg = rgb_basic(c->bg);
     }
   }
+  if (c->ch == CTUI_GFX_KITTY_PLACEHOLDER) {
+    /* the image's id is the fg; its row and column (kitty_row/col + 1,
+     * 0 for "from the left") are resolved by the frame, left to right */
+    out[0] = (uint32_t)c->kitty_row | (uint32_t)c->kitty_col << 8 |
+             (flags | CTUI_VK_PLACEHOLDER) << 16;
+    out[1] = fg;
+    out[2] = bg;
+    return;
+  }
   out[0] = glyph_slot(vk, c->ch) | (c->attr | flags) << 16;
   out[1] = fg;
   out[2] = bg;
+}
+
+/* a placeholder's row and column as kitty reads them: given, else taken
+ * on from the placeholder to its left (left: NULL, or its record) of the
+ * same image -- the same row, the next column */
+static void placeholder_at(uint32_t *w, const uint32_t *left) {
+  unsigned row = w[0] & 0xffu, col = w[0] >> 8 & 0xffu;
+  int same = left && (left[0] >> 16 & CTUI_VK_PLACEHOLDER) && left[1] == w[1];
+  unsigned lrow = left ? left[0] & 0xffu : 0, lcol = left ? left[0] >> 8 & 0xffu : 0;
+  row = row ? row - 1 : same ? lrow : 0;
+  col = col ? col - 1 : same && lrow == row ? lcol + 1 : 0;
+  w[0] = (w[0] & 0xffff0000u) | (row & 0xffu) | (col & 0xffu) << 8;
 }
 
 static int vk_frame(void *ctx, const CTUI_SCREEN *s) {
@@ -555,14 +598,24 @@ static int vk_frame(void *ctx, const CTUI_SCREEN *s) {
   }
   unsigned changed = 0;
   for (unsigned r = 0; r < rows; r++) {
+    /* a placeholder resolved again: the one right of it may follow it */
+    int chain = 0;
     for (unsigned c = 0; c < cols; c++) {
       size_t si = (size_t)r * (unsigned)s->cols + c;
-      if (!memcmp(&s->cells[si], &s->buffer[si], sizeof s->cells[si])) {
+      const CTUI_CELL *cell = &s->cells[si];
+      int follows = chain && cell->ch == CTUI_GFX_KITTY_PLACEHOLDER &&
+                    (!cell->kitty_col || !cell->kitty_row);
+      chain = 0;
+      if (!follows && !memcmp(cell, &s->buffer[si], sizeof *cell)) {
         continue;
       }
       size_t k = (size_t)r * vk->cols + c;
       uint32_t w[CTUI_VK_CELL_WORDS];
-      ctui_vk_cell(vk, &s->cells[si], w);
+      ctui_vk_cell(vk, cell, w);
+      if (w[0] >> 16 & CTUI_VK_PLACEHOLDER) {
+        placeholder_at(w, c ? vk->rec + (k - 1) * CTUI_VK_CELL_WORDS : NULL);
+        chain = 1;
+      }
       uint32_t *have = vk->rec + k * CTUI_VK_CELL_WORDS;
       if (!memcmp(w, have, sizeof w)) {
         continue;
@@ -591,6 +644,15 @@ const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void) {
 
 int ctui_vk_pending(const CTUI_VK *vk) {
   return vk->sized && memchr(vk->tdirty, 1, (size_t)vk->tx * vk->ty) != NULL;
+}
+
+static IMG *img_find(CTUI_VK *vk, unsigned id) {
+  for (unsigned i = 0; i < vk->nimg; i++) {
+    if (vk->imgs[i].id == id) {
+      return &vk->imgs[i];
+    }
+  }
+  return NULL;
 }
 
 static void barrier(VkCommandBuffer cmd, VkPipelineStageFlags src,
@@ -622,10 +684,28 @@ static void mark_rect(CTUI_VK *vk, long x, long y, long w, long h) {
   }
 }
 
-static void mark_img(CTUI_VK *vk, const IMG *im) {
-  if (im->placed) {
-    mark_rect(vk, (long)im->col * vk->gw, (long)im->row * vk->gh,
-              (long)im->cols * vk->gw, (long)im->rows * vk->gh);
+static void mark_plc(CTUI_VK *vk, const PLC *p) {
+  mark_rect(vk, (long)p->col * vk->gw, (long)p->row * vk->gh,
+            (long)p->cols * vk->gw, (long)p->rows * vk->gh);
+}
+
+/* everywhere image id shows: its placements, the placeholder cells */
+static void mark_id(CTUI_VK *vk, unsigned id) {
+  for (unsigned i = 0; i < vk->nplc; i++) {
+    if (vk->plcs[i].id == id) {
+      mark_plc(vk, &vk->plcs[i]);
+    }
+  }
+  if (!vk->sized) {
+    return;
+  }
+  size_t ncells = (size_t)vk->cols * vk->rows;
+  for (size_t k = 0; k < ncells; k++) {
+    const uint32_t *w = vk->rec + k * CTUI_VK_CELL_WORDS;
+    if ((w[0] >> 16 & CTUI_VK_PLACEHOLDER) && w[1] == id) {
+      mark_rect(vk, (long)(k % vk->cols) * vk->gw, (long)(k / vk->cols) * vk->gh,
+                vk->gw, vk->gh);
+    }
   }
 }
 
@@ -646,11 +726,14 @@ static int stage_room(CTUI_VK *vk, unsigned i, size_t bytes) {
 }
 
 static int by_z(const void *a, const void *b) {
-  const IMG *x = *(const IMG *const *)a, *y = *(const IMG *const *)b;
+  const PLC *x = a, *y = b;
   if (x->z != y->z) {
     return x->z < y->z ? -1 : 1;
   }
-  return x->id < y->id ? -1 : x->id > y->id;
+  if (x->id != y->id) {
+    return x->id < y->id ? -1 : 1;
+  }
+  return x->pid < y->pid ? -1 : x->pid > y->pid;
 }
 
 /* offsets in the arena for the images going up; 0, or -1 when it can't
@@ -692,15 +775,13 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
   if (!vk->sized) {
     return 0;
   }
-  unsigned nup = 0, nplace = 0;
+  unsigned nup = 0, nplace = vk->nplc, ntab = vk->nimg;
   size_t img_words = 0;
-  for (unsigned i = 0; i < vk->nimg; i++) {
-    nplace += vk->imgs[i].placed != 0;
-  }
-  if (nplace > vk->places_cap) {
+  unsigned most = nplace > ntab ? nplace : ntab;
+  if (most > vk->places_cap) {
     vkDeviceWaitIdle(vk->dev);
-    if (places_new(vk, nplace)) {
-      ctui_logf(E_ERR, "[CTUI:VK] - no memory for %u placements\n", nplace);
+    if (places_new(vk, most)) {
+      ctui_logf(E_ERR, "[CTUI:VK] - no memory for %u placements\n", most);
       return 0;
     }
     describe(vk);
@@ -722,7 +803,8 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
   const size_t cw = CTUI_VK_CELL_WORDS;
   unsigned next = (vk->slot + 1) % CTUI_VK_SLOTS;
   size_t need = ((size_t)vk->tx * vk->ty + 256u * vk->gh + ncells * cw +
-                 (size_t)nplace * PLACE_WORDS + img_words) * 4u;
+                 (size_t)nplace * PLACE_WORDS + (size_t)ntab * TAB_WORDS +
+                 img_words) * 4u;
   if (stage_room(vk, next, need)) {
     ctui_logf(E_ERR, "[CTUI:VK] - no memory to stage %zu bytes\n", need);
     return 0;
@@ -779,33 +861,44 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
     off += (j - i) * cw;
     i = j;
   }
-  VkBufferCopy places = {0};
-  if (vk->places_up && nplace) {
-    const IMG **order = malloc(nplace * sizeof *order);
-    if (!order) {
-      return 0;
-    }
-    unsigned k = 0;
-    for (unsigned i = 0; i < vk->nimg; i++) {
-      if (vk->imgs[i].placed) {
-        order[k++] = &vk->imgs[i];
+  VkBufferCopy places = {0}, tab = {0};
+  unsigned shown = 0; /* placements whose image is on the card */
+  if (vk->places_up) {
+    qsort(vk->plcs, nplace, sizeof *vk->plcs, by_z);
+    places.srcOffset = off * 4u;
+    for (unsigned k = 0; k < nplace; k++) {
+      const PLC *pl = &vk->plcs[k];
+      const IMG *im = img_find(vk, pl->id);
+      if (!im || !im->room) {
+        continue;
       }
-    }
-    qsort(order, nplace, sizeof order[0], by_z);
-    places = (VkBufferCopy){off * 4u, 0, (size_t)nplace * PLACE_WORDS * 4u};
-    for (k = 0; k < nplace; k++, off += PLACE_WORDS) {
-      const IMG *im = order[k];
       uint32_t *p = st + off;
-      p[0] = (uint32_t)im->col * vk->gw;
-      p[1] = (uint32_t)im->row * vk->gh;
-      p[2] = (uint32_t)im->cols * vk->gw;
-      p[3] = (uint32_t)im->rows * vk->gh;
+      p[0] = (uint32_t)pl->col * vk->gw;
+      p[1] = (uint32_t)pl->row * vk->gh;
+      p[2] = (uint32_t)pl->cols * vk->gw;
+      p[3] = (uint32_t)pl->rows * vk->gh;
       p[4] = im->off;
       p[5] = (uint32_t)im->w;
       p[6] = (uint32_t)im->h;
-      p[7] = (uint32_t)im->z;
+      p[7] = (uint32_t)pl->z;
+      off += PLACE_WORDS;
+      shown++;
     }
-    free(order);
+    places.size = (size_t)shown * PLACE_WORDS * 4u;
+    tab.srcOffset = off * 4u;
+    for (unsigned k = 0; k < ntab; k++, off += TAB_WORDS) {
+      const IMG *im = &vk->imgs[k];
+      uint32_t *t = st + off;
+      t[0] = im->id;
+      t[1] = im->off;
+      t[2] = im->room ? (uint32_t)im->w : 0;
+      t[3] = (uint32_t)im->h;
+      t[4] = (uint32_t)im->vcols;
+      t[5] = (uint32_t)im->vrows;
+    }
+    tab.size = (size_t)ntab * TAB_WORDS * 4u;
+    vk->shown = shown;
+    vk->tabbed = ntab;
   }
   vk->places_up = 0;
   unsigned ni = 0;
@@ -844,6 +937,9 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
   if (places.size) {
     vkCmdCopyBuffer(cmd, stage, vk->places.buf, 1, &places);
   }
+  if (tab.size) {
+    vkCmdCopyBuffer(cmd, stage, vk->tab.buf, 1, &tab);
+  }
   if (ni) {
     vkCmdCopyBuffer(cmd, stage, vk->arena.buf, ni, vk->icopies);
   }
@@ -853,7 +949,7 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
     PUSH p = {vk->w,      vk->h,      vk->gw,
               vk->gh,     vk->cols,   vk->rows,
               (uint32_t)vk->bgra, vk->def_fg, vk->def_bg,
-              nplace};
+              vk->shown,  vk->tabbed};
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->layout,
                             0, 1, &vk->set, 0, NULL);
@@ -872,15 +968,6 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
 
 /* --- the graphics sink: kitty's image calls as images on the card --- */
 
-static IMG *img_find(CTUI_VK *vk, unsigned id) {
-  for (unsigned i = 0; i < vk->nimg; i++) {
-    if (vk->imgs[i].id == id) {
-      return &vk->imgs[i];
-    }
-  }
-  return NULL;
-}
-
 /* id's image at w x h texels, its host copy ready to write; NULL when
  * out of memory */
 static IMG *img_get(CTUI_VK *vk, unsigned id, int w, int h) {
@@ -898,6 +985,7 @@ static IMG *img_get(CTUI_VK *vk, unsigned id, int w, int h) {
     im = &vk->imgs[vk->nimg++];
     memset(im, 0, sizeof *im);
     im->id = id;
+    vk->places_up = 1;
   }
   size_t words = (size_t)w * (size_t)h;
   if (words > im->cap) {
@@ -908,28 +996,43 @@ static IMG *img_get(CTUI_VK *vk, unsigned id, int w, int h) {
     im->px = px;
     im->cap = words;
   }
+  if (im->w != w || im->h != h) {
+    vk->places_up = 1;
+  }
   im->w = w;
   im->h = h;
+  im->up = 1;
   return im;
 }
 
-/* placed at kitty's 1-based (row, col), cols x rows cells, z: its old
- * place and the new one painted again */
-static void img_place(CTUI_VK *vk, IMG *im, int row, int col, int cols,
-                      int rows, int z) {
-  mark_img(vk, im);
-  if (!im->placed || im->row != row - 1 || im->col != col - 1 ||
-      im->cols != cols || im->rows != rows || im->z != z) {
-    vk->places_up = 1;
+/* placement (id, pid) at kitty's 1-based (row, col), cols x rows cells,
+ * z: its old place and the new one painted again */
+static void plc_set(CTUI_VK *vk, unsigned id, unsigned pid, int row, int col,
+                    int cols, int rows, int z) {
+  PLC *p = NULL;
+  for (unsigned i = 0; i < vk->nplc && !p; i++) {
+    if (vk->plcs[i].id == id && vk->plcs[i].pid == pid) {
+      p = &vk->plcs[i];
+    }
   }
-  im->placed = 1;
-  im->row = row - 1;
-  im->col = col - 1;
-  im->cols = cols;
-  im->rows = rows;
-  im->z = z;
-  im->up = 1;
-  mark_img(vk, im);
+  if (!p) {
+    if (vk->nplc == vk->plc_cap) {
+      unsigned cap = vk->plc_cap ? vk->plc_cap * 2 : 8;
+      PLC *n = realloc(vk->plcs, cap * sizeof *n);
+      if (!n) {
+        ctui_logf(E_ERR, "[CTUI:VK] - no memory for a placement\n");
+        return;
+      }
+      vk->plcs = n;
+      vk->plc_cap = cap;
+    }
+    p = &vk->plcs[vk->nplc++];
+  } else {
+    mark_plc(vk, p);
+  }
+  *p = (PLC){id, pid, row - 1, col - 1, cols, rows, z};
+  mark_plc(vk, p);
+  vk->places_up = 1;
 }
 
 static void s_display(void *ctx, int row, int col, int cell_cols,
@@ -947,7 +1050,8 @@ static void s_display(void *ctx, int row, int col, int cell_cols,
     return;
   }
   memcpy(im->px, rgba, (size_t)width * (size_t)height * 4u);
-  img_place(vk, im, row, col, cell_cols, cell_rows, z);
+  mark_id(vk, image_id);
+  plc_set(vk, image_id, 0, row, col, cell_cols, cell_rows, z);
 }
 
 static unsigned char *s_begin(void *ctx, unsigned int image_id, int width,
@@ -963,9 +1067,9 @@ static unsigned char *s_begin(void *ctx, unsigned int image_id, int width,
 static void s_commit(void *ctx, unsigned int image_id, int row, int col,
                      int cell_cols, int cell_rows, int z) {
   CTUI_VK *vk = ctx;
-  IMG *im = img_find(vk, image_id);
-  if (im) {
-    img_place(vk, im, row, col, cell_cols, cell_rows, z);
+  if (img_find(vk, image_id)) {
+    mark_id(vk, image_id);
+    plc_set(vk, image_id, 0, row, col, cell_cols, cell_rows, z);
   }
 }
 
@@ -976,30 +1080,78 @@ static void s_free(void *ctx, unsigned int image_id) {
 
 static void s_delete(void *ctx, unsigned int image_id) {
   CTUI_VK *vk = ctx;
-  IMG *im = img_find(vk, image_id);
-  if (!im) {
-    return;
+  mark_id(vk, image_id);
+  for (unsigned i = 0; i < vk->nplc;) {
+    if (vk->plcs[i].id == image_id) {
+      vk->plcs[i] = vk->plcs[--vk->nplc];
+      vk->places_up = 1;
+    } else {
+      i++;
+    }
   }
-  mark_img(vk, im);
-  if (im->placed) {
+  IMG *im = img_find(vk, image_id);
+  if (im) {
+    free(im->px);
+    *im = vk->imgs[--vk->nimg];
     vk->places_up = 1;
   }
-  free(im->px);
-  *im = vk->imgs[--vk->nimg];
 }
 
+/* the PNG at path as image_id, shown by its placeholder cells, fit into
+ * cols x rows of them (kitty's virtual placement): replacing the image
+ * keeps its placements */
 static void s_place_file(void *ctx, unsigned int image_id, const char *path,
                          int cols, int rows) {
-  (void)ctx, (void)cols, (void)rows;
-  ctui_logf(E_DBG, "[CTUI:VK] - place_file %u (%s): not drawn yet\n", image_id,
-            path);
+  CTUI_VK *vk = ctx;
+  unsigned char *rgba = NULL;
+  int w = 0, h = 0;
+  if (cols <= 0 || rows <= 0 || ctui_look_png_load(path, &rgba, &w, &h)) {
+    ctui_logf(E_WRN, "[CTUI:VK] - place_file %u: %s not placed\n", image_id,
+              path);
+    return;
+  }
+  IMG *im = img_get(vk, image_id, w, h);
+  if (im) {
+    memcpy(im->px, rgba, (size_t)w * (size_t)h * 4u);
+    im->vcols = cols;
+    im->vrows = rows;
+    vk->places_up = 1;
+    mark_id(vk, image_id);
+  } else {
+    ctui_logf(E_ERR, "[CTUI:VK] - no memory for image %u\n", image_id);
+  }
+  free(rgba);
+}
+
+static void s_put(void *ctx, unsigned int image_id, unsigned int placement_id,
+                  int row, int col, int cols, int rows, int z) {
+  if (cols <= 0 || rows <= 0) {
+    ctui_logf(E_WRN, "[CTUI:VK] - put of image %u rejected (%dx%d)\n",
+              image_id, cols, rows);
+    return;
+  }
+  plc_set(ctx, image_id, placement_id, row, col, cols, rows, z);
+}
+
+static void s_unput(void *ctx, unsigned int image_id,
+                    unsigned int placement_id) {
+  CTUI_VK *vk = ctx;
+  for (unsigned i = 0; i < vk->nplc; i++) {
+    if (vk->plcs[i].id == image_id && vk->plcs[i].pid == placement_id) {
+      mark_plc(vk, &vk->plcs[i]);
+      vk->plcs[i] = vk->plcs[--vk->nplc];
+      vk->places_up = 1;
+      return;
+    }
+  }
 }
 
 static void s_flush(void *ctx) { (void)ctx; }
 
 const CTUI_GFX_SINK *ctui_vk_gfx_sink(void) {
-  static const CTUI_GFX_SINK sink = {s_display, s_begin,      s_commit, s_free,
-                                     s_delete,  s_place_file, s_flush};
+  static const CTUI_GFX_SINK sink = {s_display, s_begin,      s_commit,
+                                     s_free,    s_delete,     s_place_file,
+                                     s_put,     s_unput,      s_flush};
   return &sink;
 }
 

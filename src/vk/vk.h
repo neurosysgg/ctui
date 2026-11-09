@@ -37,6 +37,10 @@
 #define CTUI_VK_CELL_WORDS 3u
 #define CTUI_VK_FG_DEFAULT (1u << 8)
 #define CTUI_VK_BG_DEFAULT (1u << 9)
+/* a kitty placeholder cell (CTUI_GFX_KITTY_PLACEHOLDER): its slot is the
+ * image's row | column << 8, its fg the image's id, painted from the
+ * image place_file() gave that id, fit into its virtual cells */
+#define CTUI_VK_PLACEHOLDER (1u << 10)
 /* the slot drawn as a box: a codepoint the atlas lacks */
 #define CTUI_VK_GLYPH_BOX 0xffffu
 
@@ -73,8 +77,10 @@ const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void);
  * under the glyphs (below CTUI_GFX_KITTY_Z_UNDER_BG only where the cell's
  * background is the default), z >= 0 over them, by z then id, alpha
  * blended -- each scaled to its cells by area average (nearest when
- * enlarged). delete() takes one away. place_file() (look's controls,
- * icons, through placeholder cells) isn't drawn yet: VK_DESIGN.md 4b */
+ * enlarged). delete() takes one away with its placements; put()/unput()
+ * place an image held already (placement 0 is display()'s). place_file()
+ * decodes the PNG (look/png.h) for the placeholder cells naming its id:
+ * fit into its cols x rows as kitty does (the aspect kept, centred) */
 const CTUI_GFX_SINK *ctui_vk_gfx_sink(void);
 
 /* something to paint: the next record wouldn't be empty. A host asks

@@ -128,11 +128,11 @@ just the type and the `CTUI_COLOR_*` basic-color enum.
 - `ctui_gfx_set_mode(mode)` — the session's tier set directly, for a
   host that never calls `ctui_init()` (a window, a test).
 - `ctui_gfx_set_sink(sink, ctx)` — the image calls (`display`,
-  `image_begin/commit/free`, `delete`, `place_file`, and the frame's
-  `flush`) go to a `CTUI_GFX_SINK` instead of the terminal (a GPU
+  `image_begin/commit/free`, `delete`, `place_file`, `put`/`unput`, and
+  the frame's `flush`) go to a `CTUI_GFX_SINK` instead of the terminal (a GPU
   backend, a test): same arguments, no wire. An image made under a sink
-  stays on it. Terminal-only calls (put/unput, frame_file/animate,
-  reply) have no member: under a sink their escapes are dropped at the
+  stays on it. Terminal-only calls (frame_file/animate, reply)
+  have no member: under a sink their escapes are dropped at the
   flush, logged. With `ctui_gfx_set_mode(CTUI_GFX_KITTY)`, a widget's
   existing kitty renderer draws through the sink unchanged.
 - `ctui_gfx_kitty_image_new(image_id)` / `_begin(img, w, h, keep)` /

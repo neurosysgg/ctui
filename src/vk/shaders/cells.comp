@@ -18,6 +18,8 @@ layout(set = 0, binding = 3) writeonly buffer Surf { uint px[]; };
 layout(set = 0, binding = 4) readonly buffer Places { uint place[]; };
 // RGBA bytes a word
 layout(set = 0, binding = 5) readonly buffer Arena { uint tex[]; };
+// id, offset, w h, the virtual placement's cols rows (TAB_WORDS)
+layout(set = 0, binding = 6) readonly buffer Tab { uint tab[]; };
 layout(push_constant) uniform Push {
   uint surf_w;
   uint surf_h;
@@ -29,24 +31,20 @@ layout(push_constant) uniform Push {
   uint def_fg; // CTUI_COLOR_DEFAULT's, a cell flagged so takes them
   uint def_bg; // and past the last whole cell
   uint nplace;
+  uint ntab;
 };
 
 // CTUI_ATTR_* (core/cell.h)
 const uint BOLD = 1u, DIM = 2u, UNDERLINE = 8u, STRIKE = 16u;
-const uint FG_DEFAULT = 1u << 8, BG_DEFAULT = 1u << 9, BOX = 0xffffu;
+const uint FG_DEFAULT = 1u << 8, BG_DEFAULT = 1u << 9, PLACEHOLDER = 1u << 10;
+const uint BOX = 0xffffu;
 const int UNDER_BG = -1073741824; // CTUI_GFX_KITTY_Z_UNDER_BG
 // the most texels a side one pixel averages: a bigger shrink skips
 const uint AREA_MAX = 16u;
 
-// placement p's texel at pixel (x, y), as RGBA (rgb << 8 | a), its
-// footprint averaged; alpha 0 outside it
-uint texel(uint p, uint x, uint y) {
-  uint b = p * 8u;
-  uint px0 = place[b], py0 = place[b + 1u], pw = place[b + 2u], ph = place[b + 3u];
-  if (x < px0 || y < py0 || x >= px0 + pw || y >= py0 + ph)
-    return 0u;
-  uint off = place[b + 4u], iw = place[b + 5u], ih = place[b + 6u];
-  uint dx = x - px0, dy = y - py0;
+// an image's (off, iw x ih) texel at (dx, dy) of it drawn pw x ph, as
+// RGBA (rgb << 8 | a), its footprint averaged
+uint area(uint off, uint iw, uint ih, uint dx, uint dy, uint pw, uint ph) {
   uint sx0 = dx * iw / pw, sy0 = dy * ih / ph;
   uint sx1 = max(sx0 + 1u, (dx + 1u) * iw / pw);
   uint sy1 = max(sy0 + 1u, (dy + 1u) * ih / ph);
@@ -63,6 +61,41 @@ uint texel(uint p, uint x, uint y) {
       n++;
     }
   return (r / n) << 24 | (g / n) << 16 | (bl / n) << 8 | a / n;
+}
+
+// placement p's texel at pixel (x, y); alpha 0 outside it
+uint texel(uint p, uint x, uint y) {
+  uint b = p * 8u;
+  uint px0 = place[b], py0 = place[b + 1u], pw = place[b + 2u], ph = place[b + 3u];
+  if (x < px0 || y < py0 || x >= px0 + pw || y >= py0 + ph)
+    return 0u;
+  return area(place[b + 4u], place[b + 5u], place[b + 6u], x - px0, y - py0,
+                pw, ph);
+}
+
+// a placeholder cell's texel: image id's, at (dx, dy) of its virtual
+// placement, the image fit into it with its aspect kept, centred (kitty's
+// graphics.c); alpha 0 where it doesn't reach or there's no such image
+uint placeholder(uint id, uint dx, uint dy) {
+  for (uint i = 0u; i < ntab; i++) {
+    uint b = i * 6u;
+    if (tab[b] != id)
+      continue;
+    uint iw = tab[b + 2u], ih = tab[b + 3u];
+    uint pw = tab[b + 4u] * gw, ph = tab[b + 5u] * gh;
+    if (iw == 0u || pw == 0u || ph == 0u)
+      return 0u;
+    uint dw = pw, dh = ph;
+    if (iw * ph > ih * pw)
+      dh = max(1u, ih * pw / iw);
+    else
+      dw = max(1u, iw * ph / ih);
+    uint ox = (pw - dw) / 2u, oy = (ph - dh) / 2u;
+    if (dx < ox || dy < oy || dx >= ox + dw || dy >= oy + dh)
+      return 0u;
+    return area(tab[b + 1u], iw, ih, dx - ox, dy - oy, dw, dh);
+  }
+  return 0u;
 }
 
 // t (rgb << 8 | a) over dst (0xRRGGBB)
@@ -94,6 +127,7 @@ void main() {
     return;
   uint cx = x / gw, cy = y / gh, rgb = def_bg;
   bool on = false, bg_default = true;
+  uint ph = 0u; // a placeholder cell's image, where the glyph would be
   uint fg = def_fg;
   if (cx < cols && cy < rows) {
     uint i = (cy * cols + cx) * 3u;
@@ -102,7 +136,13 @@ void main() {
     uint bg = (a & BG_DEFAULT) != 0u ? def_bg : cell[i + 2u];
     bg_default = (a & BG_DEFAULT) != 0u;
     uint gx = x % gw, gy = y % gh;
-    if (g == BOX) {
+    if ((a & PLACEHOLDER) != 0u) {
+      // the image is the cell's content: a z 0 placement, over the
+      // ones under text, under the ones over it
+      ph = placeholder(cell[i + 1u], (g >> 8 & 0xffu) * gw + gx,
+                       (g & 0xffu) * gh + gy);
+      a = a & (FG_DEFAULT | BG_DEFAULT | PLACEHOLDER);
+    } else if (g == BOX) {
       on = gx == 0u || gx == gw - 1u || gy == gh / 8u || gy == gh - 1u - gh / 8u;
     } else {
       uint bits = atlas[g * gh + gy];
@@ -124,6 +164,7 @@ void main() {
       rgb = over(rgb, texel(p, x, y));
   if (on)
     rgb = fg;
+  rgb = over(rgb, ph);
   for (; p < nplace; p++)
     rgb = over(rgb, texel(p, x, y));
   px[y * surf_w + x] = word(rgb);

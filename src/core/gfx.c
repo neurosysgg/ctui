@@ -1327,6 +1327,10 @@ size_t ctui_gfx_kitty_unput_escape(char *out, size_t cap, unsigned int image_id,
 
 void ctui_gfx_kitty_put(unsigned int image_id, unsigned int placement_id,
                         int row, int col, int cols, int rows, int z) {
+  if (g_sink) {
+    g_sink->put(g_sink_ctx, image_id, placement_id, row, col, cols, rows, z);
+    return;
+  }
   char out[160];
   size_t n =
       isatty(STDOUT_FILENO)
@@ -1345,6 +1349,10 @@ void ctui_gfx_kitty_put(unsigned int image_id, unsigned int placement_id,
 }
 
 void ctui_gfx_kitty_unput(unsigned int image_id, unsigned int placement_id) {
+  if (g_sink) {
+    g_sink->unput(g_sink_ctx, image_id, placement_id);
+    return;
+  }
   char out[96];
   size_t n =
       isatty(STDOUT_FILENO)

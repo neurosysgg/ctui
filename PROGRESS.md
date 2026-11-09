@@ -237,6 +237,15 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The drawn look on the card; a PNG decoder in ctui** (2026-11-09,
+  VK_DESIGN.md 4b). ctui-wm's xdg/png.c promoted to `look/png_read.c`
+  (`ctui_look_png_decode/load/size`: every colour type and depth, tRNS,
+  Adam7, refusals checked) by its second consumer, with its suite and
+  cases (tests/png_test.c 30). `CTUI_GFX_SINK` gains `put`/`unput`.
+  `src/vk/`: placements a list by (image, placement id); `place_file()`
+  decodes into an image with a virtual size; placeholder cells
+  (`CTUI_VK_PLACEHOLDER`, the row/column resolved from the left as kitty
+  does) paint the image fit and centred in its cells. vk_test 25 -> 33.
 - [x] **Kitty's pixel images on the card** (2026-11-09, VK_DESIGN.md
   4a). `ctui_vk_gfx_sink()`: `display`, `image_begin/commit` and
   `delete` keep each image's texels on the host and upload them into one
