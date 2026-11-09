@@ -1,0 +1,46 @@
+#version 460
+// The GUI's painter (app/ui.h, notes/gui.md): a workgroup a listed tile
+// of a changed widget, each pixel its cell's glyph bit in the
+// foreground's role, else the background's; past the widget's last whole
+// cell, its own background. Integers only: a widget's pixels are a pure
+// function of its records and the look. RGBA8 words, BGRA where the
+// swapchain wants it
+
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(set = 0, binding = 0) readonly buffer Rec { uint rec[]; };
+layout(set = 0, binding = 1) readonly buffer Atlas { uint atlas[]; };
+layout(set = 0, binding = 2) writeonly buffer Surf { uint px[]; };
+layout(push_constant) uniform Push {
+  uint surf_w;
+  uint gw;
+  uint gh;
+  uint bgra;
+  uint tiles;
+  uint cells;
+};
+
+const uint SLICES = 16u, SLICE_WORDS = 8u;
+
+uint word(uint rgb) {
+  uint r = rgb >> 16 & 0xffu, g = rgb >> 8 & 0xffu, b = rgb & 0xffu;
+  return (bgra != 0u ? b | r << 16 : r | b << 16) | g << 8 | 0xff000000u;
+}
+
+void main() {
+  uint t = gl_WorkGroupID.x;
+  uint s = rec[tiles + 2u * t], txy = rec[tiles + 2u * t + 1u];
+  uint b = SLICES + s * SLICE_WORDS;
+  uint sx = rec[b], sy = rec[b + 1u], sw = rec[b + 2u], sh = rec[b + 3u];
+  uint off = rec[b + 4u], cols = rec[b + 5u], rows = rec[b + 6u];
+  uint lx = (txy & 0xffffu) * 16u + gl_LocalInvocationID.x;
+  uint ly = (txy >> 16) * 16u + gl_LocalInvocationID.y;
+  if (lx >= sw || ly >= sh)
+    return;
+  uint cx = lx / gw, cy = ly / gh, role = rec[b + 7u];
+  if (cx < cols && cy < rows) {
+    uint c = rec[cells + off + cy * cols + cx];
+    uint bits = atlas[(c & 0xffu) * gh + ly % gh];
+    role = (bits >> (31u - lx % gw) & 1u) != 0u ? c >> 8 & 0xfu : c >> 12 & 0xfu;
+  }
+  px[(sy + ly) * surf_w + sx + lx] = word(rec[role]);
+}
