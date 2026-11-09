@@ -36,8 +36,17 @@ and placeholder columns past 255 (the seek bar). Next, in this order:
    cpu-clock:u`, no `--call-graph dwarf`), so a target needs a
    `ctui_profile` span first. `bars` / `columns` / `polyline` on the
    card wait for the same.
-4. syNESthesia onto `src/vk/` (its app/ui.c the glue): the user's
-   call, once the ctui work is done.
+4. ~~syNESthesia onto `src/vk/`~~: done (2026-11-09, syNESthesia
+   cf58c84: app/ui.c the glue), then its input through `src/wl/`.
+
+**A window** (2026-11-09): the host's Wayland window is ctui's now,
+`src/wl/` (`CTUI_WL`, wl.h), promoted from ctui-mus's
+src/gui/host/wl.c when syNESthesia, with a present path of its own,
+wanted its input: xkbcommon keys, the pointer, repeats, cursor shapes,
+plus what syNESthesia's own window had -- wp_presentation timing and
+keys by evdev code before they're events (`ctui_wl_set_raw_key()`).
+The rest of the host (the swapchain, the present on wait) stays in
+ctui-mus until a second app wants it as it is.
 
 Loose ends: ctui-wm still has its own xdg/png.c (drop it for ctui's
 `look/png_read.c` at its next bump); the vk test's hash is pinned on

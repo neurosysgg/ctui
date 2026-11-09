@@ -273,6 +273,21 @@ terminal resize.
   a terminal it took (`g_termios_saved`); the mouse/focus/keys state is
   forgotten either way. tests/input_test.c: shutdown without init writes
   nothing, and the mouse's mode is reset all the same.
+- [x] **`src/wl/`: a Wayland window, promoted from ctui-mus**
+  (2026-11-09, its second user syNESthesia; VK_DESIGN.md "A window").
+  `CTUI_WL`: an xdg_toplevel, fractional scale through a viewport (or
+  whole), keys through xkbcommon (the compositor's keymap, compose and
+  dead keys by locale, repeats on a timerfd) and the pointer as ordinary
+  `CTUI_KEYPRESS_EVENT` / `CTUI_MOUSE_EVENT`s, mapped as a terminal's
+  legacy bytes would be; cursor-shape-v1. Added on the way:
+  `ctui_wl_set_raw_key()` (every key by evdev code before it becomes an
+  event, a press it takes made no event: a game's buttons beside ctui's
+  keys), the display's timing (`ctui_wl_feedback()` / `ctui_wl_timing()`,
+  wp_presentation), and `ctui_wl_key_event()`, the keysym mapping on its
+  own. Optional (`WL_OK`), the protocols' glue generated under wl-gen/;
+  tests/wl/wl_test.c (20): keysyms and a US keymap's keys as the
+  terminal's bytes, no compositor a NULL with a reason (it never opens a
+  window).
 - [x] **`ctui_vk_pending()`** (2026-11-09, VK_DESIGN.md step 3): whether
   the next record would paint anything, so a host acquires a swapchain
   image only then (tests/vk/vk_test.c: pending after a first frame, not

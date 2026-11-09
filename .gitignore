@@ -10,3 +10,4 @@ coverage/
 flushbench
 *.spv.h
 *.ttf.h
+wl-gen/

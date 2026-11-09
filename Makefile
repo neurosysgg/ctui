@@ -75,6 +75,30 @@ $(VK_FONT): src/vk/fonts/JetBrainsMono-Regular.ttf
 test-vk_test: $(CORE_SRC) $(CORE_HDR) $(VK_SRC) $(wildcard src/vk/*.h) $(VK_SPV) $(VK_FONT) tests/vk/vk_test.c tools/ctui_test.h
 	$(CC) $(CFLAGS) -Itools -o $@ $(CORE_SRC) $(VK_SRC) tests/vk/vk_test.c $(LDLIBS) $(VK_LIBS)
 
+# src/wl/: a Wayland window (src/wl/wl.h), optional the same way: built
+# where wayland-client, its scanner and protocols, and xkbcommon are. The
+# protocols' glue is generated under wl-gen/ (gitignored); a consumer
+# generates its own. Its test never opens a window
+WL_PKGS = wayland-client wayland-protocols xkbcommon
+WL_OK := $(shell command -v wayland-scanner >/dev/null && pkg-config --exists $(WL_PKGS) && echo y)
+WL_PROTOCOLS := $(if $(WL_OK),$(shell pkg-config --variable=pkgdatadir wayland-protocols))
+WL_XML = $(addprefix $(WL_PROTOCOLS)/,stable/xdg-shell/xdg-shell.xml \
+  stable/viewporter/viewporter.xml staging/fractional-scale/fractional-scale-v1.xml \
+  staging/cursor-shape/cursor-shape-v1.xml stable/tablet/tablet-v2.xml \
+  stable/presentation-time/presentation-time.xml)
+WL_NAMES = $(basename $(notdir $(WL_XML)))
+WL_GEN_H = $(patsubst %,wl-gen/%-client-protocol.h,$(WL_NAMES))
+WL_GEN_C = $(patsubst %,wl-gen/%-protocol.c,$(WL_NAMES))
+vpath %.xml $(sort $(dir $(WL_XML)))
+wl-gen/%-client-protocol.h: %.xml
+	@mkdir -p wl-gen
+	wayland-scanner client-header $< $@
+wl-gen/%-protocol.c: %.xml
+	@mkdir -p wl-gen
+	wayland-scanner private-code $< $@
+test-wl_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/wl.h $(WL_GEN_H) $(WL_GEN_C) tests/wl/wl_test.c tools/ctui_test.h
+	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) src/wl/wl.c $(WL_GEN_C) tests/wl/wl_test.c $(LDLIBS) $(shell pkg-config --libs wayland-client xkbcommon)
+
 # replays recorded apps' output through flush: bytes, time, the same cells
 flushbench: $(CORE_SRC) $(CORE_HDR) tools/harness/vt.c tools/harness/vt.h tools/flushbench.c
 	$(CC) $(CFLAGS) -O2 -Itools -o $@ $(CORE_SRC) tools/harness/vt.c tools/flushbench.c $(LDLIBS)
@@ -85,15 +109,16 @@ query-alone:
 	@$(CC) -Wall -Wextra -std=c11 -fsyntax-only $(wildcard src/query/*.c) || \
 		{ echo "src/query/ reaches outside itself: it must stay libc only"; exit 1; }
 
-test: $(TEST_BIN) query-alone $(if $(VK_OK),test-vk_test)
-	@for t in $(TEST_BIN) $(if $(VK_OK),test-vk_test); do echo "-- $$t --"; ./$$t || exit 1; done
+test: $(TEST_BIN) query-alone $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test)
+	@for t in $(TEST_BIN) $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test); do echo "-- $$t --"; ./$$t || exit 1; done
 	@$(if $(VK_OK),,echo "test-vk_test: no Vulkan headers or glslc: skipped")
+	@$(if $(WL_OK),,echo "test-wl_test: no wayland-client, its scanner and protocols, or xkbcommon: skipped")
 
 coverage: $(CORE_SRC) $(CORE_HDR) $(TEST_SRC) tools/ctui_test.h tools/coverage.sh
 	@bash tools/coverage.sh
 
 clean:
-	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN) test-vk_test $(VK_SPV) $(VK_FONT)
-	rm -rf coverage
+	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN) test-vk_test test-wl_test $(VK_SPV) $(VK_FONT)
+	rm -rf coverage wl-gen
 
 .PHONY: query-alone clean examples all test coverage
