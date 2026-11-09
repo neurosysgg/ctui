@@ -2721,6 +2721,15 @@ terminal resize.
 
 ## Next up
 
+- **The GPU backend's next steps** (VK_DESIGN.md "Where it stands"): the
+  CPU baseline of ctui-mus `-w` playing with its look on (the user
+  measures: nothing here can press play in the window); then step 5,
+  plots drawn from data and evaluated per presented frame (smooth at
+  240 Hz on a 50 Hz app tick); then a rasterised font for the atlas;
+  then syNESthesia onto `src/vk/`. Loose ends: ctui-wm drops its
+  xdg/png.c for `look/png_read.c` at its next bump; vk_test's hash
+  checked on lavapipe once `vulkan-swrast` is in.
+
 - ~~Promote `CTUI_CLOCK` to `src/widgets/`~~ — done: ctui-wm is the
   second app (its zones' `clock` widget). Gained an optional strftime
   `format` field on the way (NULL keeps `%H:%M:%S`).

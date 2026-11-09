@@ -8,6 +8,34 @@ up by copy regions. That reimplements ctui's core on the card; this plan
 makes it a ctui backend instead, so every ctui app and widget gets it,
 and moves the pixel work kitty has been slow at onto the GPU.
 
+## Where it stands (2026-11-09, end of the first session)
+
+Steps 1-4 done (each below has its "how it came out"): core hooks, text
+on the card, the host (ctui-mus `-w`), every kitty image path on the card
+(pixels a frame, placed files, placeholders, put, the drawn look with no
+PNG round trip). The user's verdict: 1:1 with kitty bar the fonts, CPU
+~95 % -> a fraction. Next, in this order:
+
+1. **The baseline**: ctui-mus `-w` playing, look on, visualizers on
+   screen -- the user measures (the /proc/PID/stat one-liner: utime +
+   stime over 10 s); ctui-mus has no scripted input to start playback
+   from here (no node/ui, no wtype). Write it into step 4 below.
+2. **Step 5, plots** -- with "Toward the display's rate" below: data
+   records, not pixels; evaluated per presented frame (the playbar at
+   240 Hz on a 50 Hz tick), presenting paced by the display
+   (wp_presentation / frame callbacks) while something animates.
+3. Fonts (a rasterised glyph cache, grey levels): the one visible
+   difference left.
+4. syNESthesia onto `src/vk/` (its app/ui.c the glue): the user's
+   call, once the ctui work is done.
+
+Loose ends: ctui-wm still has its own xdg/png.c (drop it for ctui's
+`look/png_read.c` at its next bump); the vk test's hash is pinned on
+the RTX 3070 Ti only (lavapipe, `vulkan-swrast`, to check it on the
+CPU too); the host moves from ctui-mus to `src/vk/` when ctui-daw
+wants a window; nothing here is pushed yet (ctui, ctui-mus: the user
+pushes).
+
 ## Problem
 
 - **Kitty's image path is the bottleneck wherever ctui draws pixels.**
