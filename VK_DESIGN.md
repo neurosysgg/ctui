@@ -50,15 +50,44 @@ Three layers; only the first touches what every ctui app links.
 
 1. **Core hooks, backend-neutral, libc-only** (`src/core/`):
    - a **graphics sink** beside the screen sink: today `ctui_gfx_kitty_*`
-     write escapes; a vtable lets a backend take "image id, RGBA, put at
-     cells, under/over text" instead. Kitty stays the default, its path
-     unchanged.
-   - **`CTUI_GFX_GPU`**, a negotiated tier, so `look/` draws controls
-     and widgets pick their GPU renderer.
-   - a widget's **gfx renderers per mode** (today one `gfx_render_mode`):
-     a widget with both a kitty and a GPU renderer keeps both, the
-     negotiated one runs.
-   - the **cell's pixel size** from the backend, not `TIOCGWINSZ`.
+     write escapes; a vtable lets a backend take the same calls instead.
+     Kitty stays the default, its path unchanged. Callers use three
+     image paths, and the vtable is cut at their *semantic* calls, never
+     at the wire (`*_escape`, `apc_*`, `reply*`, `probe_shm`, `shm_*`,
+     `set_compression` stay kitty's own, below the vtable; ctui-wm's
+     pass-through needs them, nothing else does):
+     - **pixels a frame**: `display()`, `image_new/begin/commit/free()`
+       (ctui-mus's five widgets, ctui-daw's screen, ctui-wm's
+       audio/photo/viz, kitty_image). `begin()` already hands out a
+       buffer the caller paints into, so a backend can hand out mapped
+       staging memory: no copy before the upload.
+     - **placed files + placeholder cells**: `place_file()` +
+       `ctui_widget_put_kitty_placeholder()` (look/drawn.c's controls,
+       look/icon.c, ctui-wm's widgets). Today look paints RGBA, writes
+       a PNG (look/png.c, write-only) and the terminal decodes it. The
+       sink takes the RGBA *before* the PNG (a `place_rgba` call, which
+       kitty's implementation turns into png_write + place_file), so the
+       backend never decodes PNG. The placeholders need nothing new:
+       a cell already carries the image id (fg RGB) and its row/col
+       (`kitty_row/col`), so the text painter samples the image in the
+       same pass as the glyphs; z under/over text is a per-image flag.
+     - **animation** (`frame_file`, `animate`, `put/unput`): ctui-wm's
+       webview only; left kitty-only until something outside ctui-wm
+       wants it.
+   - **the tier, without a tty**: `ctui_g_gfx_mode` is set only by
+     `ctui_init()`, which a window host never calls -- a setter
+     (`ctui_gfx_set_mode()`) for a sink host. With the sink above, a
+     widget's existing kitty renderer runs unchanged on the GPU (the
+     tier means "pixel images available", not "a kitty terminal"), so
+     the host negotiates `CTUI_GFX_KITTY` and every kitty widget works
+     on day one. **`CTUI_GFX_GPU`** is only the extra tier for plots.
+   - a widget's **gfx renderers per mode** (today one `gfx_render_mode`,
+     matched exactly): a short table, tried GPU -> KITTY -> text, the
+     first the session has runs. Only the plot widgets register a GPU
+     one.
+   - the **cell's pixel size**: already there -- `ctui_cell_px_set()`
+     (term.h) overrides `TIOCGWINSZ`, and `input.c`'s pixel mouse reads
+     it. The host calls it on every scale change.
 2. **The Vulkan backend** (`src/vk/`, optional: built where Vulkan and
    glslc are, like ctui-player's ALSA): a screen sink + graphics sink on
    the *caller's* device, queue and command buffer. Per frame it records
@@ -66,8 +95,20 @@ Three layers; only the first touches what every ctui app links.
    an image; it owns no window or swapchain, so it drops into
    syNESthesia's present path, and into a host (layer 3).
    - **Text**: cells -> records (glyph slot, fg/bg RGB, attrs), the
-     changed cells' tiles painted (the sink's diff). The atlas becomes a
-     glyph cache (Spleen's ~980 glyphs; width-2 and clusters later).
+     changed cells' tiles painted (the sink's diff). `CTUI_CELL` already
+     has RGB, 256 and basic colours and attrs: what widens is the
+     *record* (cells.comp's `glyph | fg << 8 | bg << 12`: 8-bit glyph,
+     4-bit roles), not the cell. To RGB the backend resolves basic/256
+     (`ctui_gfx_ansi16_rgb()`, a 256 table) and `CTUI_COLOR_DEFAULT`,
+     which in a terminal is the terminal's -- the host supplies a
+     default fg/bg (the look's). Attrs from the 1-bit atlas: bold as a
+     1 px smear right, dim as fg halfway to bg, underline/strike as
+     rows, italic ignored at first. The atlas becomes a glyph cache
+     keyed by codepoint with a 16-bit slot in the record (Spleen's ~980
+     glyphs in the BDFs; the header ships 256), a missing glyph a
+     visible box, logged once per codepoint. `CTUI_CELL_CONT` paints
+     nothing (its lead spans two cells); clusters are boxes until a
+     second font exists.
    - **Images**: kitty's model kept -- an image id, placements in cells,
      z under or over text -- but an image is a VRAM buffer, scaled and
      filtered by a shader at placement (area average, the halftone
@@ -94,22 +135,33 @@ Three layers; only the first touches what every ctui app links.
 
 ## Steps, each measured or pinned before the next
 
-1. Core hooks (layer 1), with tests (screen_test, a new gfx sink test;
+1. Core hooks (layer 1), with tests (screen_test, a new gfx sink test
+   with a recording sink: the calls a kitty widget makes arrive as
+   calls, and the kitty path's bytes are unchanged -- `make
+   flushbench` and `check_flush_kitty.py` on ctui-wm's recording;
    ctui-wm's suites unchanged).
 2. `src/vk/`: text through the sink, the painter moved from
    syNESthesia; a headless test pinning a frame against a host
    reference. syNESthesia's app/ui.c becomes the glue; its window's
-   panels become ctui widgets.
-3. Images (layer 2), the kitty_image widget and look's controls on it.
-4. Plots: `bars` and `grid` first (ctui-mus's spectrum and spectrogram
+   panels become ctui widgets. The test runs on whatever device there
+   is, lavapipe (mesa's CPU Vulkan) where there's no card, and is
+   skipped -- not failed -- with no Vulkan at all, so `make test` stays
+   green on a machine without it; the pinned hash has to hold on both.
+3. The host (layer 3), text only, with ctui-mus in it: its kitty widgets
+   show their text fallback until step 4. Earlier than it was, because
+   the host is where every later step gets measured, and it's the only
+   way ctui-mus/-daw see any of this.
+4. Images (layer 2) through the sink: every existing kitty widget now
+   draws in the host unchanged; look's controls via `place_rgba`.
+   Measured: ctui-mus in the host vs. in kitty, the CPU a tick and
+   frames a second -- the baseline plots have to beat.
+5. Plots: `bars` and `grid` first (ctui-mus's spectrum and spectrogram
    as the first users, beside their kitty renderers), then `columns`
-   and `polyline` (ctui-daw).
-5. The host (layer 3); ctui-mus in a window, measured against its
-   kitty path (the CPU a tick, frames a second).
+   and `polyline` (ctui-daw), each measured against step 4's number
+   for the same widget.
 
 ## Open, the user's call
 
-- Where the host lives: in ctui (`src/vk/host.c`) or an app of its own.
 - Whether ctui-wm's own windows should ever present this way (its
   compositor), or kitty stays its display.
 
@@ -123,7 +175,9 @@ Copied here, ready for step 2:
   https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz.
   12x24 lacks the arrows; every size lacks ▶◀✓✗ (draw them).
 - `src/vk/shaders/cells.comp`: syNESthesia's painter (app/shaders/ui.comp)
-  as it stands: a workgroup a listed 16 x 16 tile; records = roles[16],
+  as it stands (notes/gui.md planned 8 x 8 tiles; the shader has
+  16 x 16 -- the tile list's unit, decided when step 2 measures it): a
+  workgroup a listed 16 x 16 tile; records = roles[16],
   slices (8 words: x y w h cell_off cols rows bg), tiles (slice, x | y <<
   16), cells (glyph | fg << 8 | bg << 12, roles not RGB yet: step 2
   widens a cell to RGB + attrs). Nothing builds `src/vk/` yet; the
@@ -151,3 +205,8 @@ Read in place (syNESthesia, commit 7237758), to port rather than copy:
 
 Decided with the user: Spleen, ctui's win95 look, keys and the mouse;
 kitty stays the default everywhere; the GPU path is optional.
+Then (2026-11-09): the host starts in ctui-mus (its first user;
+syNESthesia keeps its own present path) and moves to `src/vk/` when
+ctui-daw wants it too, by the examples_apps rule; the host reads keys
+through xkbcommon (layouts, compose and dead keys for ctui's forms and
+text inputs), unlike wl.c's evdev codes.
