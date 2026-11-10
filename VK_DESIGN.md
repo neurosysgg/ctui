@@ -48,6 +48,13 @@ keys by evdev code before they're events (`ctui_wl_set_raw_key()`).
 The rest of the host (the swapchain, the present on wait) stays in
 ctui-mus until a second app wants it as it is.
 
+**Several surfaces** (2026-11-10, ctui-wm's notes/kittyless.md z1):
+`CTUI_WL_DPY` the connection, `CTUI_WL` a surface on it -- a window,
+or a layer of the desktop (`src/wl/layer.h`, optional) -- so one
+process paints a desktop's panels on one device. The second user the
+host waited for is ctui-wm's panel host (kittyless.md z2): it moves
+into `src/vk/` then, as several swapchains over one device.
+
 Loose ends: the host moves from ctui-mus to `src/vk/` when ctui-daw
 wants a window. Tidied 2026-11-10: vk_test's hashes hold on lavapipe
 too (`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json

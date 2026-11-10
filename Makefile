@@ -89,15 +89,23 @@ WL_XML = $(addprefix $(WL_PROTOCOLS)/,stable/xdg-shell/xdg-shell.xml \
 WL_NAMES = $(basename $(notdir $(WL_XML)))
 WL_GEN_H = $(patsubst %,wl-gen/%-client-protocol.h,$(WL_NAMES))
 WL_GEN_C = $(patsubst %,wl-gen/%-protocol.c,$(WL_NAMES))
-vpath %.xml $(sort $(dir $(WL_XML)))
+# src/wl/layer.c's on top (wlr-layer-shell isn't in wayland-protocols:
+# ctui's copy, river's upstream one)
+WL_LAYER_XML = protocols/wlr-layer-shell-unstable-v1.xml
+WL_LAYER_GEN_H = wl-gen/wlr-layer-shell-unstable-v1-client-protocol.h
+WL_LAYER_GEN_C = wl-gen/wlr-layer-shell-unstable-v1-protocol.c
+vpath %.xml $(sort $(dir $(WL_XML))) protocols
 wl-gen/%-client-protocol.h: %.xml
 	@mkdir -p wl-gen
 	wayland-scanner client-header $< $@
 wl-gen/%-protocol.c: %.xml
 	@mkdir -p wl-gen
 	wayland-scanner private-code $< $@
-test-wl_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/wl.h $(WL_GEN_H) $(WL_GEN_C) tests/wl/wl_test.c tools/ctui_test.h
+test-wl_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/wl.h src/wl/wl_internal.h $(WL_GEN_H) $(WL_GEN_C) tests/wl/wl_test.c tools/ctui_test.h
 	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) src/wl/wl.c $(WL_GEN_C) tests/wl/wl_test.c $(LDLIBS) $(shell pkg-config --libs wayland-client xkbcommon)
+
+test-wl_layer_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/wl.h src/wl/wl_internal.h src/wl/layer.c src/wl/layer.h $(WL_GEN_H) $(WL_GEN_C) $(WL_LAYER_GEN_H) $(WL_LAYER_GEN_C) tests/wl/layer_test.c tools/ctui_test.h
+	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) src/wl/wl.c src/wl/layer.c $(WL_GEN_C) $(WL_LAYER_GEN_C) tests/wl/layer_test.c $(LDLIBS) $(shell pkg-config --libs wayland-client xkbcommon)
 
 # replays recorded apps' output through flush: bytes, time, the same cells
 flushbench: $(CORE_SRC) $(CORE_HDR) tools/harness/vt.c tools/harness/vt.h tools/flushbench.c
@@ -109,8 +117,8 @@ query-alone:
 	@$(CC) -Wall -Wextra -std=c11 -fsyntax-only $(wildcard src/query/*.c) || \
 		{ echo "src/query/ reaches outside itself: it must stay libc only"; exit 1; }
 
-test: $(TEST_BIN) query-alone $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test)
-	@for t in $(TEST_BIN) $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test); do echo "-- $$t --"; ./$$t || exit 1; done
+test: $(TEST_BIN) query-alone $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test test-wl_layer_test)
+	@for t in $(TEST_BIN) $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test test-wl_layer_test); do echo "-- $$t --"; ./$$t || exit 1; done
 	@$(if $(VK_OK),,echo "test-vk_test: no Vulkan headers or glslc: skipped")
 	@$(if $(WL_OK),,echo "test-wl_test: no wayland-client, its scanner and protocols, or xkbcommon: skipped")
 
@@ -118,7 +126,7 @@ coverage: $(CORE_SRC) $(CORE_HDR) $(TEST_SRC) tools/ctui_test.h tools/coverage.s
 	@bash tools/coverage.sh
 
 clean:
-	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN) test-vk_test test-wl_test $(VK_SPV) $(VK_FONT)
+	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN) test-vk_test test-wl_test test-wl_layer_test $(VK_SPV) $(VK_FONT)
 	rm -rf coverage wl-gen
 
 .PHONY: query-alone clean examples all test coverage

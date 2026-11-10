@@ -237,6 +237,35 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/wl/`: several surfaces on one connection, layer shell**
+  (2026-11-10, ctui-wm's notes/kittyless.md z1: a desktop's panels in
+  one process instead of kitty's). `CTUI_WL_DPY` is the connection now
+  (registry, seat, keyboard, pointer, xkb, the repeat, the input ring,
+  wl_output 4 by name) and `CTUI_WL` one surface on it:
+  `ctui_wl_connect()`, `ctui_wl_window()` (the xdg_toplevel as before),
+  `ctui_wl_dpy_next()` saying which surface an event is for (the
+  keyboard's enter surface, the pointer's; an event whose surface closed
+  while queued is dropped), `ctui_wl_dpy_focus_events()` (FOCUS events
+  on the keyboard's enter / leave, off by default as a terminal's are),
+  `ctui_wl_outputs()`, `ctui_wl_logical()`, `ctui_wl_set_user()`. The
+  pointer's cells come from the surface it's on. `ctui_wl_open()` and
+  every `ctui_wl_*(CTUI_WL *)` call stay what they were (the surface's
+  connection), so ctui-mus and syNESthesia build unchanged (checked:
+  compat_mus.sh, syNESthesia's build and suites). `src/wl/layer.{c,h}`,
+  optional on top: `ctui_wl_layer()` (output by name, layer, anchor,
+  size, margins, exclusive zone, keyboard none / exclusive / on-demand,
+  configured once) and `ctui_wl_layer_set()` (moved, resized, raised;
+  another output or namespace refused). `protocols/wlr-layer-shell-
+  unstable-v1.xml` vendored (kitty's copy of wlr-protocols': not in
+  wayland-protocols; river's has an SPDX comment before the XML
+  declaration, which wayland-scanner refuses). Shared state in a
+  private `src/wl/wl_internal.h`. tests/wl/layer_test.c (18) against a
+  headless sway of its own (the CPU renderer, a scratch runtime dir,
+  skipped without sway): the output's name, a bar as wide as the
+  output, a centred box, a window beside them, a resize configured
+  again, the refusals, a missing output named; clean under ASan +
+  UBSan. Input routing needs devices headless sway lacks: ctui-wm's
+  screens drive it.
 - [x] **Drawn controls without files under a sink** (2026-11-09,
   VK_DESIGN.md 4b). A changing drawn control (ctui-mus's seek slider,
   every tick) went paint -> PNG write -> PNG read in-process: 0.9 ms a
