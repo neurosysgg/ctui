@@ -990,7 +990,10 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
   VkBufferCopy places = {0}, tab = {0};
   unsigned shown = 0; /* placements whose image is on the card */
   if (vk->places_up) {
-    qsort(vk->plcs, nplace, sizeof *vk->plcs, by_z);
+    /* none yet: plcs is NULL, which qsort mustn't get even for 0 */
+    if (nplace) {
+      qsort(vk->plcs, nplace, sizeof *vk->plcs, by_z);
+    }
     places.srcOffset = off * 4u;
     for (unsigned k = 0; k < nplace; k++) {
       const PLC *pl = &vk->plcs[k];
