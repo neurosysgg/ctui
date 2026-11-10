@@ -237,6 +237,27 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/vk/`: what the font lacks from a provider, wide glyphs,
+  past the BMP** (2026-11-10, ctui-wm's notes/kittyless.md z4: window
+  titles, notifications and track names in the panel host).
+  `ctui_vk_set_glyph_fn(vk, fn, ctx)`: a codepoint the built-in font
+  (or CTUI_FONT's) lacks is asked of `fn` -- its coverage into the
+  cell's buffer at `cells * gw x gh`, the em and baseline given -- so a
+  host draws CJK or emoji from fontconfig while ctui links no font
+  library; boxes drawn so far are asked again on their cells' next
+  change. A width-2 glyph spans its cells: two consecutive slots, the
+  lead's word flagged `CTUI_VK_WIDE` (bit 11, the shader ignores it) and
+  its CTUI_CELL_CONT given the next slot by the frame (`ctui_vk_cont()`;
+  a CONT whose lead changed is redone though its own cell didn't). The
+  cache is a hash map keyed by codepoint | width (open addressing,
+  doubling at half full) instead of the 64K-entry BMP table, so U+1xxxx
+  codepoints go in; a cluster is drawn as its first codepoint at the
+  cluster's width, no longer a box. tests/vk/vk_test.c (+7, test_glyphs:
+  a provider's levels per half read back from the slots, 𝐀 narrow past
+  the BMP, é as a cluster the font's e, one refused a box, the card
+  pixel-exact against the reference -- which resolves CONTs the same
+  way -- and two wide glyphs swapped with their CONT cells unchanged);
+  the first frame's hash unchanged; clean under ASan + UBSan.
 - [x] **`src/link/`: a ctui app drawn by another process** (2026-11-10,
   ctui-wm's notes/kittyless.md z3: zone processes painted by one panel
   host). What a terminal carries, minus the terminal, over one

@@ -438,9 +438,12 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
         /* the row's placeholders resolved left to right, as the frame */
         for (unsigned k = 0; k <= cx; k++) {
           memcpy(l, c, sizeof l);
-          ctui_vk_cell(vk, &s->buffer[cy * (unsigned)s->cols + k], c);
+          const CTUI_CELL *sc = &s->buffer[cy * (unsigned)s->cols + k];
+          ctui_vk_cell(vk, sc, c);
           if (c[0] >> 16 & CTUI_VK_PLACEHOLDER) {
             ph_at(c, k ? l : NULL);
+          } else if (sc->ch == CTUI_CELL_CONT) {
+            ctui_vk_cont(c, k ? l : NULL);
           }
         }
         uint32_t g = c[0] & 0xffffu, a = c[0] >> 16;
@@ -905,6 +908,150 @@ static void test_ttf(void) {
   unsetenv("CTUI_FONT");
 }
 
+/* the glyph provider's calls; it draws a codepoint's cells as levels it
+ * can be told by: 0x40 the left cell, 0xc0 the right (a column 0..gw-1
+ * of each set, the rest clear), 0x80 a narrow one; U+1F47B it lacks */
+static unsigned g_asked;
+static uint32_t g_asked_cp[16];
+static int g_asked_cells[16];
+
+static int provide(void *ctx, uint32_t cp, int cells, int gw, int gh, int base,
+                   float em, uint8_t *cov) {
+  (void)ctx, (void)base, (void)em;
+  if (g_asked < 16) {
+    g_asked_cp[g_asked] = cp;
+    g_asked_cells[g_asked] = cells;
+  }
+  g_asked++;
+  if (cp == 0x1f47b) {
+    return -1;
+  }
+  for (int y = 0; y < gh; y++) {
+    for (int x = 0; x < cells * gw; x++) {
+      cov[y * cells * gw + x] = (uint8_t)(cells == 1 ? 0x80
+                                          : x < gw   ? 0x40
+                                                     : 0xc0);
+    }
+  }
+  return 0;
+}
+
+static const char *g_glyphs;
+
+static void render_glyphs(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  ctui_widget_puts(self, comp, 0, 0, g_glyphs, CTUI_COLOR_WHITE,
+                   CTUI_COLOR_DEFAULT);
+}
+
+/* the asked codepoint's index, -1 if never asked */
+static int asked(uint32_t cp, int cells) {
+  for (unsigned i = 0; i < g_asked && i < 16; i++) {
+    if (g_asked_cp[i] == cp && g_asked_cells[i] == cells) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+/* what the font lacks from the provider: width 2 across two slots, past
+ * the BMP, a cluster as its first codepoint */
+static void test_glyphs(void) {
+  CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
+  int rows = 0, cols = 0;
+  if (!vk || ctui_vk_resize(vk, W, H, 120, 0, &rows, &cols) != 0) {
+    CTUI_TEST_ASSERT(0, "a second backend");
+    ctui_vk_free(vk);
+    return;
+  }
+  CTUI_WIDGET text =
+      ctui_widget_make(0, 0, cols, rows, NULL, render_glyphs, NULL);
+  CTUI_WIDGET *ws[] = {&text};
+  CTUI_SCREEN *screen = ctui_screen_create(rows, cols);
+  ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk);
+  CTUI_APP app;
+  ctui_app_init(&app, ws, 1, rows, cols);
+
+  /* 中, then 😀 (both width 2), 𝐀 (U+1D400, width 1, past the BMP), e +
+   * U+0301 (a cluster: the font's e), 👻 (the provider lacks it) */
+  g_glyphs = "\xe4\xb8\xad\xf0\x9f\x98\x80\xf0\x9d\x90\x80"
+             "e\xcc\x81\xf0\x9f\x91\xbb|";
+  ctui_app_render(&app, screen);
+  ctui_screen_flush(screen);
+  uint32_t c[CTUI_VK_CELL_WORDS];
+  ctui_vk_cell(vk, &screen->buffer[0], c);
+  CTUI_TEST_ASSERT((c[0] & 0xffffu) == CTUI_VK_GLYPH_BOX &&
+                       !(c[0] >> 16 & CTUI_VK_WIDE),
+                   "no provider: 中 a box, not wide");
+  ctui_vk_set_glyph_fn(vk, provide, NULL);
+  /* the boxes' cells drawn again from their next change */
+  const char *had = g_glyphs;
+  g_glyphs = "";
+  ctui_app_render(&app, screen);
+  ctui_screen_flush(screen);
+  g_glyphs = had;
+  ctui_app_render(&app, screen);
+  ctui_screen_flush(screen);
+  memset(g_px, 0, W * H * 4u);
+  paint(vk);
+  CTUI_TEST_ASSERT(asked(0x4e2d, 2) >= 0 && asked(0x1f600, 2) >= 0 &&
+                       asked(0x1d400, 1) >= 0 && asked(0x1f47b, 2) >= 0 &&
+                       asked('e', 1) < 0,
+                   "asked of the provider: 中 and 😀 at 2 cells, U+1D400 at 1, "
+                   "👻; e (the font's) not (%u asked)",
+                   g_asked);
+  unsigned gw, gh, sw;
+  const uint32_t *slots;
+  ctui_vk_glyphs(vk, &gw, &gh, &slots, &sw);
+  uint32_t lead[CTUI_VK_CELL_WORDS], cont[CTUI_VK_CELL_WORDS];
+  ctui_vk_cell(vk, &screen->buffer[0], lead);
+  ctui_vk_cell(vk, &screen->buffer[1], cont);
+  ctui_vk_cont(cont, lead);
+  unsigned l = lead[0] & 0xffffu, r = cont[0] & 0xffffu;
+  CTUI_TEST_ASSERT((lead[0] >> 16 & CTUI_VK_WIDE) && r == l + 1 &&
+                       coverage(slots, sw, gw, l, 0, 0) == 0x40 &&
+                       coverage(slots, sw, gw, l, gw - 1, gh - 1) == 0x40 &&
+                       coverage(slots, sw, gw, r, 0, 0) == 0xc0 &&
+                       coverage(slots, sw, gw, r, gw - 1, gh - 1) == 0xc0,
+                   "中: wide, its halves in slots %u and %u", l, r);
+  uint32_t narrow[CTUI_VK_CELL_WORDS], clus[CTUI_VK_CELL_WORDS],
+      ghost[CTUI_VK_CELL_WORDS];
+  ctui_vk_cell(vk, &screen->buffer[4], narrow);
+  ctui_vk_cell(vk, &screen->buffer[5], clus);
+  ctui_vk_cell(vk, &screen->buffer[6], ghost);
+  CTUI_CELL e = {.ch = 'e', .fg = CTUI_COLOR_WHITE};
+  uint32_t plain[CTUI_VK_CELL_WORDS];
+  ctui_vk_cell(vk, &e, plain);
+  CTUI_TEST_ASSERT(
+      (screen->buffer[5].ch & CTUI_CELL_CLUSTER) &&
+          !(narrow[0] >> 16 & CTUI_VK_WIDE) &&
+          coverage(slots, sw, gw, narrow[0] & 0xffffu, 1, 1) == 0x80 &&
+          (clus[0] & 0xffffu) == (plain[0] & 0xffffu) &&
+          (ghost[0] & 0xffffu) == CTUI_VK_GLYPH_BOX,
+      "U+1D400 narrow from the provider, é as a cluster the font's e, "
+      "👻 a box");
+  CTUI_TEST_ASSERT(differ(vk, screen) == 0,
+                   "the card's pixels are the reference's");
+  CTUI_TEST_ASSERT(g_px[gh / 2 * W + gw + gw / 2] != g_px[gh / 2 * W + gw / 2],
+                   "中's right half painted apart from its left (%08x %08x)",
+                   g_px[gh / 2 * W + gw + gw / 2], g_px[gh / 2 * W + gw / 2]);
+
+  /* a wide glyph for another: the CONT cell itself unchanged */
+  unsigned before = g_asked;
+  g_glyphs = "\xf0\x9f\x98\x80\xe4\xb8\xad\xf0\x9d\x90\x80"
+             "e\xcc\x81\xf0\x9f\x91\xbb|";
+  ctui_app_render(&app, screen);
+  ctui_screen_flush(screen);
+  paint(vk);
+  ctui_vk_cell(vk, &screen->buffer[0], lead);
+  CTUI_TEST_ASSERT(
+      g_asked == before && differ(vk, screen) == 0,
+      "中 and 😀 swapped: nothing asked again, the CONT cells follow "
+      "their leads");
+  ctui_app_free(&app);
+  ctui_screen_free(screen);
+  ctui_vk_free(vk);
+}
+
 static void test_vk(void) {
   CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
   int rows = 0, cols = 0;
@@ -1018,6 +1165,7 @@ static void test_vk(void) {
   test_images(vk, screen);
   test_placed(vk, &app, screen);
   test_wipe(vk, &app, screen);
+  test_glyphs();
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

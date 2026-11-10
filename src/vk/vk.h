@@ -15,8 +15,11 @@
  *
  * Text in JetBrains Mono (fonts/, OFL; CTUI_FONT names another TrueType
  * file), a glyph drawn into the cache the first time a cell shows it
- * (ttf.h: grey levels), box drawing stretched to its cell; a codepoint
- * the font lacks is a box.
+ * (ttf.h: grey levels), box drawing stretched to its cell. A codepoint
+ * the font lacks is asked of ctui_vk_set_glyph_fn()'s provider (a host
+ * with fontconfig: ctui itself links no font library), else drawn as a
+ * box. A width-2 glyph spans its two cells; a cluster is drawn as its
+ * first codepoint at the cluster's width (one font, no shaping).
  *
  * Per frame: ctui_screen_flush() (the sink takes the changes), then
  * ctui_vk_record() in a recording, then per image ctui_vk_regions() for
@@ -47,6 +50,9 @@
  * placeholder doesn't draw), its fg the image's id, painted from the
  * image place_file() gave that id, fit into its virtual cells */
 #define CTUI_VK_PLACEHOLDER (1u << 10)
+/* the lead of a width-2 glyph: its right half is the next slot, which
+ * the CTUI_CELL_CONT right of it takes (ctui_vk_cont()) */
+#define CTUI_VK_WIDE (1u << 11)
 /* the slot drawn as a box: a codepoint the atlas lacks */
 #define CTUI_VK_GLYPH_BOX 0xffffu
 
@@ -73,6 +79,18 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
  * every tile, no cell uploaded. ctui_vk_defaults() reads them back */
 void ctui_vk_set_default(CTUI_VK *vk, uint32_t fg, uint32_t bg);
 void ctui_vk_defaults(const CTUI_VK *vk, uint32_t *fg, uint32_t *bg);
+
+/* a glyph the font lacks: cp's coverage into cov (cells * gw x gh, a
+ * byte a pixel, rows of cells * gw, cleared), at em px an em with the
+ * baseline at row base -- the built-in font's cell, which a fallback
+ * font fits itself into. cells: 2 for a width-2 glyph. 0 drawn, -1 not
+ * had (the box). Called while a frame goes in, on its thread */
+typedef int (*CTUI_VK_GLYPH_FN)(void *ctx, uint32_t cp, int cells, int gw,
+                                int gh, int base, float em, uint8_t *cov);
+/* the provider of what the font lacks (NULL: none); codepoints drawn as
+ * boxes so far are asked again, from their cells' next change. Set it
+ * before the first frame; it stays across resizes */
+void ctui_vk_set_glyph_fn(CTUI_VK *vk, CTUI_VK_GLYPH_FN fn, void *ctx);
 
 /* for ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk) */
 const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void);
@@ -120,8 +138,13 @@ unsigned ctui_vk_regions(CTUI_VK *vk, unsigned img, int fresh,
 
 /* a cell as it goes to the card (out: CTUI_VK_CELL_WORDS): the glyph's
  * slot, its attrs, its colours resolved to RGB (or flagged default). A
- * codepoint without a glyph is logged, once */
+ * codepoint without a glyph is logged, once. A CTUI_CELL_CONT comes out
+ * blank: the frame resolves it from the cell left of it, ctui_vk_cont() */
 void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out);
+/* a CTUI_CELL_CONT's words (w, from ctui_vk_cell()) given the cell left
+ * of it as it goes to the card (left: NULL at the row's start): the
+ * right half of a CTUI_VK_WIDE lead's glyph, else blank */
+void ctui_vk_cont(uint32_t *w, const uint32_t *left);
 
 /* the glyph cache: w x h px a glyph, slot k's coverage from slots +
  * k * slot_words (a byte a pixel, rows of w, four to a word from the

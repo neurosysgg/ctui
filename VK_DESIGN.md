@@ -438,6 +438,16 @@ everything moves smoothly, the playbar most of all).
   title/artist/album strings), 7 with any: one Korean title, fullwidth
   quotes, an LRM, an emoji. No fallback font for that: a box, logged
   once. Recount with the same script if a library changes much.
+- **What it lacks, from a provider (2026-11-10, ctui-wm's kittyless z4)**:
+  `ctui_vk_set_glyph_fn()` -- a codepoint the font lacks is asked of
+  the host's callback (its coverage at the cell's size, one or two
+  cells; ctui-wm's panel host over fontconfig + freetype), else a box.
+  A width-2 glyph is two slots, the lead's cell flagged `CTUI_VK_WIDE`
+  and its CONT taking the next slot in the frame (`ctui_vk_cont()`, a
+  CONT also redone when its lead changes); the cache is a hash map
+  keyed by codepoint and width (past the BMP too; the 128 KB BMP table
+  gone); a cluster is its first codepoint at the cluster's width.
+  Colour emoji are not drawn (grey coverage only).
 
 ## Open, the user's call
 
