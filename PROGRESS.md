@@ -237,6 +237,34 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/link/`: a ctui app drawn by another process** (2026-11-10,
+  ctui-wm's notes/kittyless.md z3: zone processes painted by one panel
+  host). What a terminal carries, minus the terminal, over one
+  SOCK_SEQPACKET socket. The app's end (`CTUI_LINK`:
+  `ctui_link_open(fd, mode, &rows, &cols)` -- HELLO, the host's first
+  grid waited for, the cell's pixels to `ctui_cell_px_set()`, the tier
+  set, no `ctui_init()` -- then `ctui_link_attach(screen)`) is a screen
+  sink, a graphics sink and an input source; the host's end
+  (`CTUI_LINK_HOST`: `_new(fd, sinks)`, `_grid()`, `_read()`, `_event()`,
+  `_app()`) hands the same calls to sinks of its own (src/vk/'s, a
+  test's), so the link knows nothing of Vulkan. Cells go through a grid
+  both map (a memfd the host makes at each size, a generation each): a
+  frame is the list of runs that changed, one in flight -- the app's sink
+  always takes a frame and keeps what changed until the host's ack, so a
+  slow host makes the app skip frames, never queue them (and no refused-
+  frame warnings). A frame of an older grid is dropped and acked.
+  Clusters go by their codepoints the first time a cell names one, the
+  host interning its own. Image calls go as they are, pixels in a memfd
+  each (mapped and size-checked on the host). Input (keys, releases, the
+  mouse with its pixels, focus) to the app, a new grid as a
+  CTUI_RESIZE_EVENT, default colours, messages of the app's own both
+  ways. The host never blocks: a full socket drops input (logged), an
+  ack that didn't go is sent at the next chance. Malformed messages end
+  the link (runs past the grid, another build's cell size, a path
+  without its NUL, pixels smaller than said). In `CORE_SRC` (libc and
+  core; Linux: memfd, SCM_RIGHTS). tests/link_test.c (29): both ends in
+  one process -- every path above; clean under ASan + UBSan with leak
+  checks.
 - [x] **`src/vk/present.h`: one device, a presenter per surface; the
   window host promoted** (2026-11-10, ctui-wm's notes/kittyless.md z2).
   ctui-mus's `src/gui/host/host.c` split along what's shared:
