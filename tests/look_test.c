@@ -267,22 +267,22 @@ static void test_slider(void) {
   /* an 11 px thumb (20 / 2, odd) travels 29 px */
   CTUI_TEST_ASSERT(c.value == 15 && c.max == 29, "snapped to the thumb's x");
   CTUI_TEST_ASSERT(
-      ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER, 51, 100,
-                                                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                                 0, 0, NULL, NULL, 0},
+      ctui_look_control_key(&(CTUI_LOOK_CONTROL){.kind = CTUI_LOOK_CTL_SLIDER,
+                                                 .value = 51,
+                                                 .max = 100},
                             &l, 40, 20) ==
-              ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER,
-                                                         50, 100, 0, 0, 0, 0, 0,
-                                                         0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0},
-                                    &l, 40, 20) &&
-          ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER, 60,
-                                                     100, 0, 0, 0, 0, 0, 0, 0,
-                                                     0, 0, 0, 0, 0, NULL, NULL, 0},
-                                &l, 40, 20) !=
-              ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER,
-                                                         50, 100, 0, 0, 0, 0, 0,
-                                                         0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0},
-                                    &l, 40, 20),
+              ctui_look_control_key(
+                  &(CTUI_LOOK_CONTROL){
+                      .kind = CTUI_LOOK_CTL_SLIDER, .value = 50, .max = 100},
+                  &l, 40, 20) &&
+          ctui_look_control_key(
+              &(CTUI_LOOK_CONTROL){
+                  .kind = CTUI_LOOK_CTL_SLIDER, .value = 60, .max = 100},
+              &l, 40, 20) !=
+              ctui_look_control_key(
+                  &(CTUI_LOOK_CONTROL){
+                      .kind = CTUI_LOOK_CTL_SLIDER, .value = 50, .max = 100},
+                  &l, 40, 20),
       "50 %% and 51 %% are one image, 60 %% another");
 
   const unsigned char *p =
@@ -453,14 +453,14 @@ static void test_level_signal(void) {
           px(p, 18, &l, 16, 4) == 'g' && px(p, 18, &l, 16, 2) == '.',
       "2 of 4 bars lit, rising");
   CTUI_TEST_ASSERT(
-      ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SIGNAL, 9, 4, 0,
-                                                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                                 0, NULL, NULL, 0},
+      ctui_look_control_key(&(CTUI_LOOK_CONTROL){.kind = CTUI_LOOK_CTL_SIGNAL,
+                                                 .value = 9,
+                                                 .max = 4},
                             &l, 18, 20) ==
-          ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SIGNAL, 4, 4,
-                                                     0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                                     0, 0, 0, NULL, NULL, 0},
-                                &l, 18, 20),
+          ctui_look_control_key(
+              &(CTUI_LOOK_CONTROL){
+                  .kind = CTUI_LOOK_CTL_SIGNAL, .value = 4, .max = 4},
+              &l, 18, 20),
       "more than max lit: all of them");
 }
 
@@ -524,16 +524,18 @@ static void test_toggles(void) {
   p = paint(c, &l, 36, 20);
   CTUI_TEST_ASSERT(px(p, 36, &l, 35, 15) == 'd' && px(p, 36, &l, 5, 10) == 'a',
                    "on: the thumb right, the accent");
-  CTUI_TEST_ASSERT(
-      ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER, 5, 10, 0,
-                                                 CTUI_LOOK_CTL_CHECKED, 0, 0, 0,
-                                                 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0},
-                            &l, 36, 20) ==
-          ctui_look_control_key(&(CTUI_LOOK_CONTROL){CTUI_LOOK_CTL_SLIDER, 5,
-                                                     10, 0, 0, 0, 0, 0, 0, 0, 0,
-                                                     0, 0, 0, 0, NULL, NULL, 0},
-                                &l, 36, 20),
-      "a flag a kind doesn't draw doesn't split its images");
+  CTUI_TEST_ASSERT(ctui_look_control_key(
+                       &(CTUI_LOOK_CONTROL){.kind = CTUI_LOOK_CTL_SLIDER,
+                                            .value = 5,
+                                            .max = 10,
+                                            .flags = CTUI_LOOK_CTL_CHECKED},
+                       &l, 36, 20) ==
+                       ctui_look_control_key(
+                           &(CTUI_LOOK_CONTROL){.kind = CTUI_LOOK_CTL_SLIDER,
+                                                .value = 5,
+                                                .max = 10},
+                           &l, 36, 20),
+                   "a flag a kind doesn't draw doesn't split its images");
 }
 
 static void test_buttons(void) {
@@ -674,7 +676,7 @@ static void test_caption_glyphs(void) {
 static void test_scroll(void) {
   CTUI_LOOK l = test_look();
   CTUI_LOOK_CONTROL c = {
-      CTUI_LOOK_CTL_SCROLL, 75, 100, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0};
+      .kind = CTUI_LOOK_CTL_SCROLL, .value = 75, .max = 100, .span = 25};
   const unsigned char *p = paint(c, &l, 10, 40);
   CTUI_TEST_ASSERT(
       px(p, 10, &l, 0, 0) == 'f' && px(p, 10, &l, 1, 0) == 'h' &&
@@ -685,11 +687,11 @@ static void test_scroll(void) {
   CTUI_TEST_ASSERT(c.value == 30 && c.span == 10 && c.max == 40,
                    "snapped: the thumb's y and length");
   c = (CTUI_LOOK_CONTROL){
-      CTUI_LOOK_CTL_SCROLL, 0, 1000, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0};
+      .kind = CTUI_LOOK_CTL_SCROLL, .value = 0, .max = 1000, .span = 1};
   ctui_look_control_snap(&c, &l, 40, 10);
   CTUI_TEST_ASSERT(c.span == 10, "horizontal: a thumb never under square");
   c = (CTUI_LOOK_CONTROL){
-      CTUI_LOOK_CTL_SCROLL, 3, 10, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 0};
+      .kind = CTUI_LOOK_CTL_SCROLL, .value = 3, .max = 10, .span = 20};
   p = paint(c, &l, 10, 40);
   CTUI_TEST_ASSERT(px(p, 10, &l, 0, 0) == 'h' && px(p, 10, &l, 9, 39) == 'd',
                    "all of it shown: the thumb fills the track");
@@ -823,23 +825,20 @@ static void test_snap_invariant(void) {
       for (size_t s = 0; s < sizeof sizes / sizeof *sizes; s++) {
         int w = sizes[s][0], h = sizes[s][1];
         for (int v = -5; v <= 120; v += 7) {
-          CTUI_LOOK_CONTROL c = {(CTUI_LOOK_CTL_KIND)k,
-                                 v,
-                                 100,
-                                 30,
-                                 (unsigned)v & 15u,
-                                 (CTUI_LOOK_GLYPH)((v + 7) % CTUI_LOOK_GLYPHS),
-                                 (CTUI_LOOK_PICTO)((v + 5) % CTUI_LOOK_PICTOS),
-                                 0,
-                                 0,
-                                 (uint8_t)(v % CTUI_LOOK_BOXES),
-                                 (uint8_t)v,
-                                 (uint8_t)(v * 3),
-                                 (v & 4)   ? CTUI_LOOK_CTL_TINT | 0x506070u
-                                 : (v & 2) ? 0x77u
-                                           : 0,
-                                 0,
-                                 0, NULL, NULL, 0};
+          CTUI_LOOK_CONTROL c = {
+              .kind = (CTUI_LOOK_CTL_KIND)k,
+              .value = v,
+              .max = 100,
+              .span = 30,
+              .flags = (unsigned)v & 15u,
+              .glyph = (CTUI_LOOK_GLYPH)((v + 7) % CTUI_LOOK_GLYPHS),
+              .picto = (CTUI_LOOK_PICTO)((v + 5) % CTUI_LOOK_PICTOS),
+              .box = (uint8_t)(v % CTUI_LOOK_BOXES),
+              .sides = (uint8_t)v,
+              .place = (uint8_t)(v * 3),
+              .fill = (v & 4)   ? CTUI_LOOK_CTL_TINT | 0x506070u
+                      : (v & 2) ? 0x77u
+                                : 0};
           if (k == CTUI_LOOK_CTL_GRAPH) {
             static const unsigned char hist[] = {0, 100, 37, 120, 5, 64, 64};
             c.samples = hist;

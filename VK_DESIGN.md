@@ -48,13 +48,14 @@ keys by evdev code before they're events (`ctui_wl_set_raw_key()`).
 The rest of the host (the swapchain, the present on wait) stays in
 ctui-mus until a second app wants it as it is.
 
-Loose ends: ctui-wm still has its own xdg/png.c (drop it for ctui's
-`look/png_read.c` at its next bump); the vk test's hash is pinned on
-the RTX 3070 Ti only (lavapipe, `vulkan-swrast`, to check it on the
-CPU too); the host moves from ctui-mus to `src/vk/` when ctui-daw
-wants a window; tests/look_test.c has old -Wmissing-field-initializers
-warnings (`mod_lo`); nothing here is pushed yet (ctui, ctui-mus: the
-user pushes).
+Loose ends: the host moves from ctui-mus to `src/vk/` when ctui-daw
+wants a window. Tidied 2026-11-10: vk_test's hashes hold on lavapipe
+too (`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+./test-vk_test`: 53 passed, the same three hashes as the RTX 3070 Ti);
+look_test's literals designated, no -Wmissing-field-initializers left;
+ctui-wm's xdg/png.c gone for `look/png_read.c` at its bump. Pushed:
+everything but ctui's 74f0513 (`wl`) and ctui-mus's b1975d2, and
+what came after them.
 
 ## Problem
 
@@ -224,9 +225,9 @@ Three layers; only the first touches what every ctui app links.
      once; a width-2 glyph's CONT blank; placeholders blank until step 4.
    - Vulkan 1.0 calls only, the shader built for vulkan1.0: nothing
      asked of the caller's device but a compute queue.
-   - not done: lavapipe isn't installed here, so the hash is pinned on
-     the card only; syNESthesia's side (its app/ui.c onto this) is its
-     own repo's step.
+   - the hash holds on lavapipe too (checked 2026-11-10, see "Where it
+     stands"); syNESthesia's side (its app/ui.c onto this) was its own
+     repo's step (cf58c84).
 3. The host (layer 3), text only, with ctui-mus in it: its kitty widgets
    show their text fallback until step 4. Earlier than it was, because
    the host is where every later step gets measured, and it's the only
@@ -442,7 +443,9 @@ everything moves smoothly, the playbar most of all).
 
 ## Handoff from syNESthesia (2026-11-09)
 
-Copied here, ready for step 2:
+History: what came over before step 2. Spleen and tools/bdf2h.py have
+since gone for JetBrains Mono ("Fonts, how it came out"), and cells.comp
+was rewritten for ctui's grid.
 
 - `src/vk/fonts/spleen.h` + `LICENSE.spleen`: the atlases (8x16, 12x24,
   16x32, 32x64; 256 glyphs: Latin-1 + 32 extras). Regenerate with
@@ -478,7 +481,8 @@ Read in place (syNESthesia, commit 7237758), to port rather than copy:
 - `notes/gui.md`: the step-1 write-up and its measurements (within noise
   of no GUI at 1646 x 1360; a repaint once a second for the status).
 
-Decided with the user: Spleen, ctui's win95 look, keys and the mouse;
+Decided with the user: Spleen (since replaced by JetBrains Mono, the
+user's kitty font), ctui's win95 look, keys and the mouse;
 kitty stays the default everywhere; the GPU path is optional.
 Then (2026-11-09): the host starts in ctui-mus (its first user;
 syNESthesia keeps its own present path) and moves to `src/vk/` when

@@ -2742,8 +2742,9 @@ terminal resize.
   plots drawn from data and evaluated per presented frame (smooth at
   240 Hz on a 50 Hz app tick); then a rasterised font for the atlas;
   then syNESthesia onto `src/vk/`. Loose ends: ctui-wm drops its
-  xdg/png.c for `look/png_read.c` at its next bump; vk_test's hash
-  checked on lavapipe once `vulkan-swrast` is in.
+  xdg/png.c for `look/png_read.c` at its next bump (done 2026-11-10);
+  vk_test's hash checked on lavapipe (2026-11-10: the same three
+  hashes, 53 passed).
 
 - ~~Promote `CTUI_CLOCK` to `src/widgets/`~~ — done: ctui-wm is the
   second app (its zones' `clock` widget). Gained an optional strftime
