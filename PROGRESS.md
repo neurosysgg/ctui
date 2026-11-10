@@ -237,6 +237,28 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/vk/present.h`: one device, a presenter per surface; the
+  window host promoted** (2026-11-10, ctui-wm's notes/kittyless.md z2).
+  ctui-mus's `src/gui/host/host.c` split along what's shared:
+  `CTUI_VK_GPU` (`ctui_vk_gpu_open(dpy)`: the instance, one queue that
+  computes and presents, the command pool) and `CTUI_VK_WIN`
+  (`ctui_vk_win_new(gpu, wl)`: a surface's swapchain, its recordings,
+  its own CTUI_VK; `_resize()`, `_present(now, &next)` -- moving wipes
+  placed, nothing presented without a change), so one process paints any
+  number of surfaces on one device (on nvidia a device is ~23 MB private
+  + 5 MB VRAM a process). Lavapipe isn't loaded
+  (`VK_LOADER_DRIVERS_DISABLE=*lvp*` around the instance's creation:
+  -33 MB PSS) unless nothing else presents or the user chose drivers.
+  `src/vk/host.{c,h}` is ctui-mus's `CTUI_HOST` on top, its API
+  unchanged. The Makefile's vk lists are explicit now (`VK_SRC` vk.c +
+  ttf.c, `VK_WL_SRC` present.c + host.c, which need src/wl/).
+  tests/vk/present_test.c (17): two layer surfaces on one device in a
+  headless sway on lavapipe -- a first frame each, nothing presented
+  unchanged, one cell presenting one surface, the scale sway gives before
+  mapping, a bar made taller and presented again, the validation layer
+  clean -- and the host opened and closed; tests/wl/headless.h the sway
+  both wl suites share. On the way: vk.c qsorted a NULL placement list
+  of 0 (UBSan).
 - [x] **`src/wl/`: several surfaces on one connection, layer shell**
   (2026-11-10, ctui-wm's notes/kittyless.md z1: a desktop's panels in
   one process instead of kitty's). `CTUI_WL_DPY` is the connection now

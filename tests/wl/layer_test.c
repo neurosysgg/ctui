@@ -10,48 +10,11 @@
 
 #include "ctui.h"
 #include "ctui_test.h"
+#include "headless.h"
 #include "wl/layer.h"
 #include "wl/wl.h"
 
-#include <dirent.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/prctl.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <time.h>
-#include <unistd.h>
 #include <wayland-client.h>
-
-static char root[] = "/tmp/ctui-wl-XXXXXX";
-
-static long now_ms(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
-
-static void sleep_ms(long ms) {
-  nanosleep(
-      &(struct timespec){.tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000000},
-      NULL);
-}
-
-static pid_t spawn(char *const *argv, const char *log) {
-  fflush(NULL);
-  pid_t pid = fork();
-  if (pid == 0) {
-    prctl(PR_SET_PDEATHSIG, SIGTERM);
-    if (!freopen(log, "w", stdout) || dup2(1, 2) < 0) {
-      _exit(127);
-    }
-    execvp(argv[0], argv);
-    _exit(127);
-  }
-  return pid;
-}
 
 /* 1920x1080 at 1.5: 1280x720 logical */
 static const CTUI_WL_LAYER k_bar = {
@@ -162,65 +125,18 @@ static void test_open(void) {
 
 int main(void) {
   ctui_log_init(E_ALL);
-  if (system("command -v sway >/dev/null") != 0) {
+  if (!headless_available()) {
     printf("  -- no sway: skipped\n");
     return ctui_test_summary();
   }
-  if (!mkdtemp(root)) {
-    perror("mkdtemp");
-    return 1;
-  }
-  chmod(root, 0700);
-  setenv("XDG_RUNTIME_DIR", root, 1);
-  unsetenv("WAYLAND_DISPLAY");
-  unsetenv("DISPLAY");
-  unsetenv("SWAYSOCK");
-  setenv("WLR_BACKENDS", "headless", 1);
-  setenv("WLR_RENDERER", "pixman", 1);
-  setenv("WLR_LIBINPUT_NO_DEVICES", "1", 1);
-  char conf[128], log[128];
-  snprintf(conf, sizeof conf, "%s/sway.conf", root);
-  FILE *f = fopen(conf, "w");
-  if (f) {
-    fputs("output HEADLESS-1 resolution 1920x1080 scale 1.5\n", f);
-    fclose(f);
-  }
-  snprintf(log, sizeof log, "%s/sway.log", root);
-  char *argv[] = {"sway", "--unsupported-gpu", "-c", conf, NULL};
-  pid_t sway = spawn(argv, log);
-  if (sway <= 0) {
-    return 1;
-  }
-  char wl[64] = "";
-  for (long end = now_ms() + 5000; !wl[0] && now_ms() < end;) {
-    DIR *dir = opendir(root);
-    struct dirent *e;
-    while (dir && (e = readdir(dir))) {
-      if (!strncmp(e->d_name, "wayland-", 8) && !strchr(e->d_name, '.')) {
-        snprintf(wl, sizeof wl, "%.60s", e->d_name);
-      }
-    }
-    if (dir) {
-      closedir(dir);
-    }
-    sleep_ms(50);
-  }
-  CTUI_TEST_ASSERT(wl[0], "a headless sway (%s)", wl);
+  int up = headless_start("output HEADLESS-1 resolution 1920x1080 scale 1.5\n");
+  CTUI_TEST_ASSERT(up == 0, "a headless sway (%s)",
+                   up == 0 ? getenv("WAYLAND_DISPLAY") : "none");
   /* never a client on another compositor: only with its socket found */
-  if (wl[0]) {
-    char path[160];
-    snprintf(path, sizeof path, "%s/%s", root, wl);
-    setenv("WAYLAND_DISPLAY", path, 1);
-    sleep_ms(200);
+  if (up == 0) {
     test_surfaces();
     test_open();
   }
-  kill(sway, SIGTERM);
-  waitpid(sway, NULL, 0);
-  char cmd[128];
-  snprintf(cmd, sizeof cmd, "rm -rf '%s'", root);
-  if (system(cmd) != 0) {
-    printf("  -- couldn't remove %s\n", root);
-  }
+  headless_stop();
   return ctui_test_summary();
 }

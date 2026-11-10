@@ -64,7 +64,9 @@ HASH := \#
 VK_OK := $(shell command -v glslc >/dev/null && echo '$(HASH)include <vulkan/vulkan.h>' | \
   $(CC) -E -x c - >/dev/null 2>&1 && echo y)
 VK_LIBS := $(shell pkg-config --libs vulkan 2>/dev/null || echo -lvulkan)
-VK_SRC = $(wildcard src/vk/*.c)
+VK_SRC = src/vk/vk.c src/vk/ttf.c
+# what presents it to Wayland surfaces (present.h, host.h): src/wl/ too
+VK_WL_SRC = src/vk/present.c src/vk/host.c
 VK_SPV = $(patsubst %.comp,%.spv.h,$(wildcard src/vk/shaders/*.comp))
 src/vk/shaders/%.spv.h: src/vk/shaders/%.comp
 	glslc --target-env=vulkan1.0 -O -mfmt=c -o $@ $<
@@ -72,7 +74,7 @@ src/vk/shaders/%.spv.h: src/vk/shaders/%.comp
 VK_FONT = src/vk/fonts/JetBrainsMono-Regular.ttf.h
 $(VK_FONT): src/vk/fonts/JetBrainsMono-Regular.ttf
 	xxd -i -n ctui_vk_font_ttf $< | sed 's/^unsigned/static const unsigned/' > $@
-test-vk_test: $(CORE_SRC) $(CORE_HDR) $(VK_SRC) $(wildcard src/vk/*.h) $(VK_SPV) $(VK_FONT) tests/vk/vk_test.c tools/ctui_test.h
+test-vk_test: $(CORE_SRC) $(CORE_HDR) $(VK_SRC) src/vk/vk.h src/vk/ttf.h $(VK_SPV) $(VK_FONT) tests/vk/vk_test.c tools/ctui_test.h
 	$(CC) $(CFLAGS) -Itools -o $@ $(CORE_SRC) $(VK_SRC) tests/vk/vk_test.c $(LDLIBS) $(VK_LIBS)
 
 # src/wl/: a Wayland window (src/wl/wl.h), optional the same way: built
@@ -107,6 +109,11 @@ test-wl_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/wl.h src/wl/wl_internal
 test-wl_layer_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/wl.h src/wl/wl_internal.h src/wl/layer.c src/wl/layer.h $(WL_GEN_H) $(WL_GEN_C) $(WL_LAYER_GEN_H) $(WL_LAYER_GEN_C) tests/wl/layer_test.c tools/ctui_test.h
 	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) src/wl/wl.c src/wl/layer.c $(WL_GEN_C) $(WL_LAYER_GEN_C) tests/wl/layer_test.c $(LDLIBS) $(shell pkg-config --libs wayland-client xkbcommon)
 
+# the presenters (src/vk/present.c, host.c) on layer surfaces and a
+# window, in a headless sway on lavapipe (skipped without either)
+test-present_test: $(CORE_SRC) $(CORE_HDR) $(VK_SRC) $(VK_WL_SRC) $(wildcard src/vk/*.h) $(VK_SPV) $(VK_FONT) src/wl/wl.c src/wl/layer.c $(wildcard src/wl/*.h) $(WL_GEN_H) $(WL_GEN_C) $(WL_LAYER_GEN_H) $(WL_LAYER_GEN_C) tests/vk/present_test.c tools/ctui_test.h
+	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) $(VK_SRC) $(VK_WL_SRC) src/wl/wl.c src/wl/layer.c $(WL_GEN_C) $(WL_LAYER_GEN_C) tests/vk/present_test.c $(LDLIBS) $(VK_LIBS) $(shell pkg-config --libs wayland-client xkbcommon)
+
 # replays recorded apps' output through flush: bytes, time, the same cells
 flushbench: $(CORE_SRC) $(CORE_HDR) tools/harness/vt.c tools/harness/vt.h tools/flushbench.c
 	$(CC) $(CFLAGS) -O2 -Itools -o $@ $(CORE_SRC) tools/harness/vt.c tools/flushbench.c $(LDLIBS)
@@ -117,8 +124,9 @@ query-alone:
 	@$(CC) -Wall -Wextra -std=c11 -fsyntax-only $(wildcard src/query/*.c) || \
 		{ echo "src/query/ reaches outside itself: it must stay libc only"; exit 1; }
 
-test: $(TEST_BIN) query-alone $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test test-wl_layer_test)
-	@for t in $(TEST_BIN) $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test test-wl_layer_test); do echo "-- $$t --"; ./$$t || exit 1; done
+VKWL_TEST = $(if $(VK_OK),$(if $(WL_OK),test-present_test))
+test: $(TEST_BIN) query-alone $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test test-wl_layer_test) $(VKWL_TEST)
+	@for t in $(TEST_BIN) $(if $(VK_OK),test-vk_test) $(if $(WL_OK),test-wl_test test-wl_layer_test) $(VKWL_TEST); do echo "-- $$t --"; ./$$t || exit 1; done
 	@$(if $(VK_OK),,echo "test-vk_test: no Vulkan headers or glslc: skipped")
 	@$(if $(WL_OK),,echo "test-wl_test: no wayland-client, its scanner and protocols, or xkbcommon: skipped")
 
@@ -126,7 +134,7 @@ coverage: $(CORE_SRC) $(CORE_HDR) $(TEST_SRC) tools/ctui_test.h tools/coverage.s
 	@bash tools/coverage.sh
 
 clean:
-	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN) test-vk_test test-wl_test test-wl_layer_test $(VK_SPV) $(VK_FONT)
+	rm -f ctui-demo ctui-demo-advanced ctui-gallery ctui-hello ctui-clock ctui-file_browser ctui-calculator ctui-flicker ctui-matrix ctui-player ctui-kitty_demo $(TEST_BIN) test-vk_test test-wl_test test-wl_layer_test test-present_test $(VK_SPV) $(VK_FONT)
 	rm -rf coverage wl-gen
 
 .PHONY: query-alone clean examples all test coverage

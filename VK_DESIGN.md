@@ -52,11 +52,13 @@ ctui-mus until a second app wants it as it is.
 `CTUI_WL_DPY` the connection, `CTUI_WL` a surface on it -- a window,
 or a layer of the desktop (`src/wl/layer.h`, optional) -- so one
 process paints a desktop's panels on one device. The second user the
-host waited for is ctui-wm's panel host (kittyless.md z2): it moves
-into `src/vk/` then, as several swapchains over one device.
+host waited for was ctui-wm's panel host: it's in `src/vk/` now
+(kittyless.md z2) -- `present.h`, a device (`CTUI_VK_GPU`) and a
+presenter per surface (`CTUI_VK_WIN`), and `host.h`, the one-window
+`CTUI_HOST` ctui-mus had, on top.
 
-Loose ends: the host moves from ctui-mus to `src/vk/` when ctui-daw
-wants a window. Tidied 2026-11-10: vk_test's hashes hold on lavapipe
+Loose ends: the host is ctui's since 2026-11-10 (above), so ctui-daw's
+window builds on it. Tidied 2026-11-10: vk_test's hashes hold on lavapipe
 too (`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
 ./test-vk_test`: 53 passed, the same three hashes as the RTX 3070 Ti);
 look_test's literals designated, no -Wmissing-field-initializers left;
