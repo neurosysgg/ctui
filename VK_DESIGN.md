@@ -448,6 +448,12 @@ everything moves smoothly, the playbar most of all).
   keyed by codepoint and width (past the BMP too; the 128 KB BMP table
   gone); a cluster is its first codepoint at the cluster's width.
   Colour emoji are not drawn (grey coverage only).
+- **A terminal's palette and padding (2026-11-10, ctui-wm's panel
+  host)**: `ctui_vk_set_palette()` for the 16 colours (a host gives its
+  terminal's theme; xterm's until then), `ctui_vk_set_pad()` for an
+  inset round the cells in logical px (kitty's window padding), the
+  cells' origin a push constant and `ctui_wl_cell_origin()` for the
+  pointer.
 
 ## Open, the user's call
 

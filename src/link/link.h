@@ -33,7 +33,9 @@ typedef struct CTUI_LINK CTUI_LINK;
  * first grid waited for -- *rows / *cols for ctui_screen_create(), the
  * cell's pixels told to ctui_cell_px_set(). The graphics sink is set to
  * the link (before any image is made) and the tier to mode
- * (CTUI_GFX_TRUECOLOR, | CTUI_GFX_KITTY for images): no ctui_init().
+ * (CTUI_GFX_TRUECOLOR; CTUI_GFX_KITTY for images -- alone, as a kitty's
+ * ctui_init() sets it: a widget's gfx renderer runs only at exactly its
+ * mode, the text truecolor either way): no ctui_init().
  * NULL, or why in err */
 CTUI_LINK *ctui_link_open(int fd, unsigned mode, int *rows, int *cols,
                           char *err, size_t n);

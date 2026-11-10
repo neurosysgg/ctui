@@ -25,7 +25,7 @@ typedef struct {
 
 typedef struct {
   uint32_t surf_w, surf_h, gw, gh, cols, rows, bgra, def_fg, def_bg, nplace,
-      ntab;
+      ntab, pad_x, pad_y;
 } PUSH;
 
 /* the shader's bindings: tiles, cells, atlas, surface, placements, the
@@ -104,6 +104,11 @@ struct CTUI_VK {
   unsigned w, h, gw, gh, cols, rows, tx, ty;
   int bgra, sized;
   uint32_t def_fg, def_bg;
+  /* the 16 colours a 256 / basic index takes (ctui_vk_set_palette()) */
+  uint32_t pal[16];
+  /* the inset asked (logical px: top, right, bottom, left) and the cells'
+   * origin it made at the last resize (buffer px) */
+  unsigned pad[4], px0, py0;
   /* the font (CTUI_FONT's file, else the one built in) and its size */
   CTUI_TTF ttf;
   uint8_t *ttf_file;
@@ -315,6 +320,7 @@ CTUI_VK *ctui_vk_new(VkPhysicalDevice phys, VkDevice dev) {
   vk->dev = dev;
   vk->def_fg = 0xc0c0c0u;
   vk->def_bg = 0x000000u;
+  ctui_vk_set_palette(vk, NULL);
   vkGetPhysicalDeviceMemoryProperties(phys, &vk->mem);
   load_font(vk);
 
@@ -476,8 +482,20 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
     ctui_logf(E_ERR, "[CTUI:VK] - no memory for the glyph cache\n");
     return -1;
   }
-  vk->cols = w / vk->gw;
-  vk->rows = h / vk->gh;
+  /* the inset at this scale, as kitty pads: the cells from its top left,
+   * what they leave over right and below; the cells first when it leaves
+   * none */
+  unsigned s120 = (unsigned)(scale120 > 0 ? scale120 : 120), p[4];
+  for (int i = 0; i < 4; i++) {
+    p[i] = (vk->pad[i] * s120 + 60u) / 120u;
+  }
+  if (p[1] + p[3] + vk->gw > w || p[0] + p[2] + vk->gh > h) {
+    p[0] = p[1] = p[2] = p[3] = 0;
+  }
+  vk->px0 = p[3];
+  vk->py0 = p[0];
+  vk->cols = (w - p[1] - p[3]) / vk->gw;
+  vk->rows = (h - p[0] - p[2]) / vk->gh;
   vk->tx = (w + CTUI_VK_TILE - 1) / CTUI_VK_TILE;
   vk->ty = (h + CTUI_VK_TILE - 1) / CTUI_VK_TILE;
   size_t ncells = (size_t)vk->cols * vk->rows, ntiles = (size_t)vk->tx * vk->ty;
@@ -534,6 +552,28 @@ void ctui_vk_set_default(CTUI_VK *vk, uint32_t fg, uint32_t bg) {
   }
 }
 
+void ctui_vk_set_palette(CTUI_VK *vk, const uint32_t pal[16]) {
+  /* xterm's */
+  static const uint32_t k16[16] = {
+      0x000000, 0xcd0000, 0x00cd00, 0xcdcd00, 0x0000ee, 0xcd00cd,
+      0x00cdcd, 0xe5e5e5, 0x7f7f7f, 0xff0000, 0x00ff00, 0xffff00,
+      0x5c5cff, 0xff00ff, 0x00ffff, 0xffffff};
+  for (int i = 0; i < 16; i++) {
+    vk->pal[i] = (pal ? pal[i] : k16[i]) & 0xffffffu;
+  }
+}
+
+void ctui_vk_set_pad(CTUI_VK *vk, const unsigned pad[4]) {
+  for (int i = 0; i < 4; i++) {
+    vk->pad[i] = pad ? pad[i] : 0;
+  }
+}
+
+void ctui_vk_origin(const CTUI_VK *vk, unsigned *x, unsigned *y) {
+  *x = vk->px0;
+  *y = vk->py0;
+}
+
 void ctui_vk_defaults(const CTUI_VK *vk, uint32_t *fg, uint32_t *bg) {
   *fg = vk->def_fg;
   *bg = vk->def_bg;
@@ -549,14 +589,10 @@ void ctui_vk_glyphs(const CTUI_VK *vk, unsigned *w, unsigned *h,
 
 VkBuffer ctui_vk_surface(const CTUI_VK *vk) { return vk->surf.buf; }
 
-/* xterm's 256: the 16, a 6 x 6 x 6 cube, 24 greys */
-static uint32_t rgb256(unsigned i) {
-  static const uint32_t k16[16] = {
-      0x000000, 0xcd0000, 0x00cd00, 0xcdcd00, 0x0000ee, 0xcd00cd,
-      0x00cdcd, 0xe5e5e5, 0x7f7f7f, 0xff0000, 0x00ff00, 0xffff00,
-      0x5c5cff, 0xff00ff, 0x00ffff, 0xffffff};
+/* xterm's 256: the palette's 16, a 6 x 6 x 6 cube, 24 greys */
+static uint32_t rgb256(const CTUI_VK *vk, unsigned i) {
   if (i < 16) {
-    return k16[i];
+    return vk->pal[i];
   }
   if (i < 232) {
     static const uint32_t lv[6] = {0, 95, 135, 175, 215, 255};
@@ -567,10 +603,11 @@ static uint32_t rgb256(unsigned i) {
   return g << 16 | g << 8 | g;
 }
 
-static uint32_t rgb_basic(unsigned char c) {
-  unsigned char r, g, b;
-  ctui_gfx_ansi16_rgb(c, &r, &g, &b);
-  return (uint32_t)r << 16 | (uint32_t)g << 8 | b;
+/* a CTUI_COLOR_* index (BLACK..WHITE: the palette's 0..7) */
+static uint32_t rgb_basic(const CTUI_VK *vk, unsigned char c) {
+  return c >= CTUI_COLOR_BLACK && c <= CTUI_COLOR_WHITE
+             ? vk->pal[c - CTUI_COLOR_BLACK]
+             : 0;
 }
 
 /* box drawing and blocks: stretched to the cell, so lines meet */
@@ -744,27 +781,27 @@ void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
     bg = (uint32_t)c->bg_r << 16 | (uint32_t)c->bg_g << 8 | c->bg_b;
     break;
   case CTUI_COLOR_MODE_256:
-    fg = rgb256(c->fg);
-    bg = rgb256(c->bg);
+    fg = rgb256(vk, c->fg);
+    bg = rgb256(vk, c->bg);
     break;
   case CTUI_COLOR_MODE_RGB_FG:
     fg = (uint32_t)c->fg_r << 16 | (uint32_t)c->fg_g << 8 | c->fg_b;
     if (c->bg == CTUI_COLOR_DEFAULT) {
       flags |= CTUI_VK_BG_DEFAULT;
     } else {
-      bg = rgb_basic(c->bg);
+      bg = rgb_basic(vk, c->bg);
     }
     break;
   default:
     if (c->fg == CTUI_COLOR_DEFAULT) {
       flags |= CTUI_VK_FG_DEFAULT;
     } else {
-      fg = rgb_basic(c->fg);
+      fg = rgb_basic(vk, c->fg);
     }
     if (c->bg == CTUI_COLOR_DEFAULT) {
       flags |= CTUI_VK_BG_DEFAULT;
     } else {
-      bg = rgb_basic(c->bg);
+      bg = rgb_basic(vk, c->bg);
     }
   }
   if (c->ch == CTUI_GFX_KITTY_PLACEHOLDER) {
@@ -854,10 +891,10 @@ static int vk_frame(void *ctx, const CTUI_SCREEN *s) {
       }
       memcpy(have, w, sizeof w);
       vk->dirty[k] = 1;
-      unsigned x0 = c * vk->gw / CTUI_VK_TILE,
-               x1 = ((c + 1) * vk->gw - 1) / CTUI_VK_TILE,
-               y0 = r * vk->gh / CTUI_VK_TILE,
-               y1 = ((r + 1) * vk->gh - 1) / CTUI_VK_TILE;
+      unsigned x0 = (vk->px0 + c * vk->gw) / CTUI_VK_TILE,
+               x1 = (vk->px0 + (c + 1) * vk->gw - 1) / CTUI_VK_TILE,
+               y0 = (vk->py0 + r * vk->gh) / CTUI_VK_TILE,
+               y1 = (vk->py0 + (r + 1) * vk->gh - 1) / CTUI_VK_TILE;
       for (unsigned y = y0; y <= y1; y++) {
         memset(vk->tdirty + (size_t)y * vk->tx + x0, 1, x1 - x0 + 1);
       }
@@ -934,8 +971,8 @@ static void mark_rect(CTUI_VK *vk, long x, long y, long w, long h) {
 
 /* where a placement shows, in the surface's pixels */
 static void plc_rect(const CTUI_VK *vk, const PLC *p, long r[4]) {
-  r[0] = (long)p->col * vk->gw;
-  r[1] = (long)p->row * vk->gh;
+  r[0] = (long)vk->px0 + (long)p->col * vk->gw;
+  r[1] = (long)vk->py0 + (long)p->row * vk->gh;
   r[2] = (long)p->cols * vk->gw;
   r[3] = (long)p->rows * vk->gh;
   if (p->pw > 0) {
@@ -966,8 +1003,8 @@ static void mark_id(CTUI_VK *vk, unsigned id) {
   for (size_t k = 0; k < ncells; k++) {
     const uint32_t *w = vk->rec + k * CTUI_VK_CELL_WORDS;
     if ((w[0] >> 16 & CTUI_VK_PLACEHOLDER) && w[1] == id) {
-      mark_rect(vk, (long)(k % vk->cols) * vk->gw, (long)(k / vk->cols) * vk->gh,
-                vk->gw, vk->gh);
+      mark_rect(vk, (long)vk->px0 + (long)(k % vk->cols) * vk->gw,
+                (long)vk->py0 + (long)(k / vk->cols) * vk->gh, vk->gw, vk->gh);
     }
   }
 }
@@ -1242,7 +1279,8 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
     PUSH p = {vk->w,      vk->h,      vk->gw,
               vk->gh,     vk->cols,   vk->rows,
               (uint32_t)vk->bgra, vk->def_fg, vk->def_bg,
-              vk->shown,  vk->tabbed};
+              vk->shown,  vk->tabbed, vk->px0,
+              vk->py0};
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->layout,
                             0, 1, &vk->set, 0, NULL);

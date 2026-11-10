@@ -119,6 +119,9 @@ void ctui_wl_viewport(CTUI_WL *wl);
 int ctui_wl_scale120(CTUI_WL *wl);
 /* the cell's size in buffer pixels: the pointer's cells */
 void ctui_wl_cell(CTUI_WL *wl, int cw, int ch);
+/* where the cells start, in buffer pixels (0, 0 until said): the
+ * pointer's cells and pixels counted from there */
+void ctui_wl_cell_origin(CTUI_WL *wl, int x, int y);
 
 /* the display's timing: ask for the next commit's feedback (before the
  * present that commits), tagged with the host's time then

@@ -130,6 +130,7 @@ struct CTUI_WL {
   int pw, ph;    /* the buffer's last size handed out */
   int configured, closed;
   int cw, ch; /* a cell in buffer pixels */
+  int cx0, cy0; /* the cells' origin in buffer pixels (a host's inset) */
 };
 
 /* a bare surface on d (scale, viewport), no role yet; NULL when out of

@@ -426,9 +426,14 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
   ctui_vk_glyphs(vk, &gw, &gh, &slots, &sw);
   uint32_t dfg, dbg;
   ctui_vk_defaults(vk, &dfg, &dbg);
+  /* the inset's origin: (lx, ly) from it, past every cell and placement
+   * (wrapped) in the inset */
+  unsigned ox, oy;
+  ctui_vk_origin(vk, &ox, &oy);
   for (unsigned y = 0; y < H; y++) {
     for (unsigned x = 0; x < W; x++) {
-      unsigned cx = x / gw, cy = y / gh, gx = x % gw, gy = y % gh;
+      unsigned lx = x - ox, ly = y - oy;
+      unsigned cx = lx / gw, cy = ly / gh, gx = lx % gw, gy = ly % gh;
       uint32_t rgb = dbg, fg = dfg;
       unsigned cov = 0;
       int bg_default = 1;
@@ -474,13 +479,13 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
       unsigned p = 0;
       for (; p < g_npl && g_pl[p].z < 0; p++) {
         if (g_pl[p].z >= CTUI_GFX_KITTY_Z_UNDER_BG || bg_default) {
-          rgb = over(rgb, texel(&g_pl[p], gw, gh, x, y));
+          rgb = over(rgb, texel(&g_pl[p], gw, gh, lx, ly));
         }
       }
       rgb = blend(rgb, fg, cov);
       rgb = over(rgb, ph);
       for (; p < g_npl; p++) {
-        rgb = over(rgb, texel(&g_pl[p], gw, gh, x, y));
+        rgb = over(rgb, texel(&g_pl[p], gw, gh, lx, ly));
       }
       px[y * W + x] = rgba(rgb);
     }
@@ -1052,6 +1057,90 @@ static void test_glyphs(void) {
   ctui_vk_free(vk);
 }
 
+/* kitty's padding and theme: the cells from an inset's top left, the
+ * inset the default background, a palette for the basic and low 256
+ * indices; an image placed at a cell goes with it */
+static void test_pad(void) {
+  CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
+  static const uint32_t pal[16] = {
+      0x1e1e1f, 0xa17efc, 0x75bfff, 0xb3dbff, 0xb294ff, 0x75bfff,
+      0xc5adff, 0x97959d, 0x5e5c60, 0x8ac8ff, 0x2b2b2c, 0x515053,
+      0x6a686e, 0xe5dbff, 0x69b5f7, 0xf4f0ff};
+  const unsigned pad[4] = {3, 0, 5, 10};
+  int rows = 0, cols = 0;
+  if (vk) {
+    ctui_vk_set_palette(vk, pal);
+    ctui_vk_set_pad(vk, pad);
+  }
+  if (!vk || ctui_vk_resize(vk, W, H, 120, 0, &rows, &cols) != 0) {
+    CTUI_TEST_ASSERT(0, "a padded backend");
+    ctui_vk_free(vk);
+    return;
+  }
+  unsigned ox, oy;
+  ctui_vk_origin(vk, &ox, &oy);
+  CTUI_TEST_ASSERT(ox == 10 && oy == 3 && cols == (int)((W - 10) / GW) &&
+                       rows == (int)((H - 8) / GH),
+                   "the cells from (10, 3), %dx%d of them", cols, rows);
+  CTUI_WIDGET text = ctui_widget_make(0, 0, cols, rows, NULL, render_text,
+                                      NULL);
+  CTUI_WIDGET *ws[] = {&text};
+  CTUI_SCREEN *screen = ctui_screen_create(rows, cols);
+  ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk);
+  CTUI_APP app;
+  ctui_app_init(&app, ws, 1, rows, cols);
+  g_title = "padded";
+  ctui_app_render(&app, screen);
+  ctui_screen_flush(screen);
+  static uint8_t under[4 * 4];
+  for (int i = 0; i < 16; i += 4) {
+    under[i] = 9, under[i + 1] = 99, under[i + 2] = 199, under[i + 3] = 255;
+  }
+  ctui_gfx_set_sink(ctui_vk_gfx_sink(), vk);
+  ctui_gfx_set_mode(CTUI_GFX_KITTY);
+  ctui_gfx_kitty_display(2, 20, 2, 1, under, 2, 2, 7, 1);
+  g_pl[0] = (PL){1, 19, 2, 1, 1, under, 2, 2, 0, 0, 0, 0};
+  g_npl = 1;
+  memset(g_px, 0, W * H * 4u);
+  unsigned tiles = paint(vk);
+  unsigned bad = differ(vk, screen);
+  uint32_t c[CTUI_VK_CELL_WORDS];
+  ctui_vk_cell(vk, &screen->buffer[1 * cols + 5], c);
+  uint32_t red = c[2];
+  ctui_vk_cell(vk, &screen->buffer[1 * cols], c);
+  uint32_t yellow = c[1], blue = c[2];
+  CTUI_TEST_ASSERT(tiles == tiles_under(0, 0, W, H) && bad == 0,
+                   "the card's pixels are the reference's: %u differ", bad);
+  CTUI_TEST_ASSERT(red == 0xa17efc && yellow == 0xb3dbff && blue == 0xb294ff,
+                   "basic colours from the palette (%06x %06x %06x)", red,
+                   yellow, blue);
+  CTUI_TEST_ASSERT(g_px[0] == rgba(0x000000) &&
+                       g_px[(GH + 3) * W + 9] == rgba(0x000000) &&
+                       g_px[(GH + 3) * W + 10 + 5 * GW] == rgba(0xa17efc) &&
+                       g_px[(3 + GH) * W + 10 + 19 * GW] == rgba(0x0963c7),
+                   "the inset the default background, the red space at its "
+                   "cell from (10, 3), the image at its (%08x %08x %08x %08x)",
+                   g_px[0], g_px[(GH + 3) * W + 9],
+                   g_px[(GH + 3) * W + 10 + 5 * GW],
+                   g_px[(3 + GH) * W + 10 + 19 * GW]);
+  ctui_gfx_kitty_delete(7);
+  g_npl = 0;
+  ctui_gfx_set_sink(NULL, NULL);
+  ctui_vk_resize(vk, W, H, 240, 0, &rows, &cols);
+  ctui_vk_origin(vk, &ox, &oy);
+  CTUI_TEST_ASSERT(ox == 20 && oy == 6, "at scale 2 the inset doubles: (%u, %u)",
+                   ox, oy);
+  const unsigned huge[4] = {H, 0, 0, 0};
+  ctui_vk_set_pad(vk, huge);
+  ctui_vk_resize(vk, W, H, 120, 0, &rows, &cols);
+  ctui_vk_origin(vk, &ox, &oy);
+  CTUI_TEST_ASSERT(ox == 0 && oy == 0 && rows == (int)(H / GH),
+                   "an inset leaving no cell is ignored");
+  ctui_app_free(&app);
+  ctui_screen_free(screen);
+  ctui_vk_free(vk);
+}
+
 static void test_vk(void) {
   CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
   int rows = 0, cols = 0;
@@ -1166,6 +1255,7 @@ static void test_vk(void) {
   test_placed(vk, &app, screen);
   test_wipe(vk, &app, screen);
   test_glyphs();
+  test_pad();
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

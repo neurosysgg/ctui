@@ -237,6 +237,29 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/vk/`: a terminal's palette and padding** (2026-11-10,
+  ctui-wm's panel host: its bars drew the 16 colours as xterm's -- the
+  user's kitty theme makes color1 and color4 purples, they came out red
+  and deep blue -- and without the padding kitty gave them).
+  `ctui_vk_set_palette(vk, pal)`: the 16 colours a 256 index below 16
+  and a basic `CTUI_COLOR_*` (BLACK..WHITE: 0..7) take, xterm's until
+  set (resolved on the host as before, cells drawn from then on).
+  `ctui_vk_set_pad(vk, pad)`: top, right, bottom, left in logical px,
+  at the next resize scaled by its scale120; the cells start at its top
+  left and the inset is the default background (the shader's push
+  constants gain `pad_x` / `pad_y`; placements, tiles and placeholders
+  follow the origin, `ctui_vk_origin()` says it), one leaving no whole
+  cell ignored. `ctui_wl_cell_origin()`: the pointer's cells and pixels
+  counted from there, as a terminal reports them past its padding;
+  `ctui_vk_win_resize()` sets it. link.h's comment corrected: an app
+  wanting its widgets' gfx renderers opens the link with
+  `CTUI_GFX_KITTY` alone (the dispatch wants the exact tier).
+  tests/vk/vk_test.c +6 (test_pad: the origin, the grid it leaves, the
+  palette's colours, the card pixel-exact against the reference -- now
+  counting from the origin -- with an image placed at a cell, the inset
+  doubled at scale 2, one too big ignored); the first frame's hash
+  unchanged; ASan + UBSan clean (the driver's and libdbus's own leaks
+  aside); compat_mus.sh identical.
 - [x] **`src/vk/`: what the font lacks from a provider, wide glyphs,
   past the BMP** (2026-11-10, ctui-wm's notes/kittyless.md z4: window
   titles, notifications and track names in the panel host).

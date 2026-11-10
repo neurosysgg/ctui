@@ -383,6 +383,9 @@ int ctui_vk_win_resize(CTUI_VK_WIN *w, int *rows, int *cols) {
   const uint32_t *slots;
   ctui_vk_glyphs(w->vk, &gw, &gh, &slots, &slot_words);
   ctui_wl_cell(w->wl, (int)gw, (int)gh);
+  unsigned ox, oy;
+  ctui_vk_origin(w->vk, &ox, &oy);
+  ctui_wl_cell_origin(w->wl, (int)ox, (int)oy);
   free(w->regions);
   w->regions = malloc((w->sh / CTUI_VK_TILE + 1) * sizeof *w->regions);
   w->viewport = 1;

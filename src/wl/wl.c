@@ -400,8 +400,12 @@ static int moved(CTUI_WL_DPY *d, wl_fixed_t x, wl_fixed_t y) {
     return 0;
   }
   double s = scale120(wl) / 120.0;
-  d->px = wl_fixed_to_double(x) * s;
-  d->py = wl_fixed_to_double(y) * s;
+  /* from the cells' origin, as a terminal reports them past its padding;
+   * in the inset, the first cell's edge */
+  double fx = wl_fixed_to_double(x) * s - wl->cx0;
+  double fy = wl_fixed_to_double(y) * s - wl->cy0;
+  d->px = fx > 0 ? fx : 0;
+  d->py = fy > 0 ? fy : 0;
   int col = wl->cw > 0 ? (int)d->px / wl->cw : 0;
   int row = wl->ch > 0 ? (int)d->py / wl->ch : 0;
   int changed = col != d->col || row != d->row;
@@ -1114,6 +1118,11 @@ int ctui_wl_scale120(CTUI_WL *wl) { return scale120(wl); }
 void ctui_wl_cell(CTUI_WL *wl, int cw, int ch) {
   wl->cw = cw;
   wl->ch = ch;
+}
+
+void ctui_wl_cell_origin(CTUI_WL *wl, int x, int y) {
+  wl->cx0 = x;
+  wl->cy0 = y;
 }
 
 int ctui_wl_closed(const CTUI_WL *wl) { return wl->closed; }

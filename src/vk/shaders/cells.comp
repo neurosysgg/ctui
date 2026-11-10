@@ -1,11 +1,11 @@
 #version 450
 // The painter (src/vk/vk.h): a workgroup a listed 16 x 16 tile of the
 // surface, each pixel its cell's background with the foreground over it
-// by the glyph's coverage (past the last whole cell, the default
-// background), with
-// the images placed over it as kitty composites them: z < 0 under the
-// glyph (below UNDER_BG only on a default background), z >= 0 over it,
-// in z order, alpha blended, each scaled to its rect by area average.
+// by the glyph's coverage, the cells from (pad_x, pad_y) on (in the inset
+// and past the last whole cell, the default background), with the images
+// placed over it as kitty composites them: z < 0 under the glyph (below
+// UNDER_BG only on a default background), z >= 0 over it, in z order,
+// alpha blended, each scaled to its rect by area average.
 // Integers only: the pixels are a pure function of the cells, the
 // placements and the texels, so a test pins them against a host
 // reference (tests/vk/vk_test.c)
@@ -36,6 +36,8 @@ layout(push_constant) uniform Push {
   uint def_bg; // and past the last whole cell
   uint nplace;
   uint ntab;
+  uint pad_x; // the cells' origin (src/vk/vk.h ctui_vk_set_pad()): the
+  uint pad_y; // inset around them is the default background
 };
 
 // CTUI_ATTR_* (core/cell.h)
@@ -159,7 +161,10 @@ void main() {
   uint y = (t >> 16) * 16u + gl_LocalInvocationID.y;
   if (x >= surf_w || y >= surf_h)
     return;
-  uint cx = x / gw, cy = y / gh, rgb = def_bg;
+  // past the inset: no cell (cols / rows), the default background
+  uint cx = x >= pad_x ? (x - pad_x) / gw : cols;
+  uint cy = y >= pad_y ? (y - pad_y) / gh : rows;
+  uint rgb = def_bg;
   uint cov = 0u;
   bool bg_default = true;
   uint ph = 0u; // a placeholder cell's image, where the glyph would be
@@ -170,7 +175,7 @@ void main() {
     fg = (a & FG_DEFAULT) != 0u ? def_fg : cell[i + 1u];
     uint bg = (a & BG_DEFAULT) != 0u ? def_bg : cell[i + 2u];
     bg_default = (a & BG_DEFAULT) != 0u;
-    uint gx = x % gw, gy = y % gh;
+    uint gx = (x - pad_x) % gw, gy = (y - pad_y) % gh;
     if ((a & PLACEHOLDER) != 0u) {
       // the image is the cell's content: a z 0 placement, over the
       // ones under text, under the ones over it

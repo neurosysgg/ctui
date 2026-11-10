@@ -80,6 +80,20 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
 void ctui_vk_set_default(CTUI_VK *vk, uint32_t fg, uint32_t bg);
 void ctui_vk_defaults(const CTUI_VK *vk, uint32_t *fg, uint32_t *bg);
 
+/* the 16 colours a CTUI_COLOR_MODE_256 index below 16 and a basic
+ * CTUI_COLOR_* one (BLACK..WHITE: 0..7) take, as a terminal's palette
+ * does (0xRRGGBB; NULL: xterm's, the default). Cells drawn from then on */
+void ctui_vk_set_palette(CTUI_VK *vk, const uint32_t pal[16]);
+
+/* an inset around the cells as a terminal's padding: top, right, bottom,
+ * left in logical pixels (NULL: none, the default), at the next
+ * ctui_vk_resize() (scaled by its scale120). The cells start at its top
+ * left, what they leave over goes right and below, all of it in the
+ * default background; one too big for a cell is ignored. The cells'
+ * origin it made, in buffer pixels: ctui_vk_origin() */
+void ctui_vk_set_pad(CTUI_VK *vk, const unsigned pad[4]);
+void ctui_vk_origin(const CTUI_VK *vk, unsigned *x, unsigned *y);
+
 /* a glyph the font lacks: cp's coverage into cov (cells * gw x gh, a
  * byte a pixel, rows of cells * gw, cleared), at em px an em with the
  * baseline at row base -- the built-in font's cell, which a fallback
