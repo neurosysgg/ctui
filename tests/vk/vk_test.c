@@ -879,6 +879,19 @@ static void test_ttf(void) {
   CTUI_TEST_ASSERT(cw == 9 && ch == 20 && base == 15,
                    "11 pt at 96 dpi: a 9x20 cell, the baseline at 15 (%dx%d, %d)", cw, ch,
                    base);
+  /* kitty's cells for 11 pt at these scales (measured: TIOCGWINSZ in a
+   * headless sway): its width the advance rounded, not rounded up */
+  static const struct {
+    float scale;
+    int cw, ch;
+  } KITTY[] = {{1.0f, 9, 20}, {1.25f, 11, 25}, {1.5f, 13, 30}, {2.0f, 18, 39}};
+  for (size_t k = 0; k < sizeof KITTY / sizeof *KITTY; k++) {
+    int kw, kh, kb;
+    ctui_ttf_cell(&t, em * KITTY[k].scale, &kw, &kh, &kb);
+    CTUI_TEST_ASSERT(kw == KITTY[k].cw && kh == KITTY[k].ch,
+                     "at scale %.2f kitty's %dx%d cell (%dx%d)", (double)KITTY[k].scale,
+                     KITTY[k].cw, KITTY[k].ch, kw, kh);
+  }
   CTUI_TEST_ASSERT(ctui_ttf_glyph(&t, 'A') && ctui_ttf_glyph(&t, 0x2500) &&
                        !ctui_ttf_glyph(&t, 0x2603) && !ctui_ttf_glyph(&t, 0x1f602),
                    "A and box drawing in its cmap; no snowman, nothing past the BMP");

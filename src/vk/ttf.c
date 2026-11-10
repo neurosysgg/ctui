@@ -342,7 +342,10 @@ static int decode(const CTUI_TTF *f, uint16_t gid, OUTLINE *o, int dx, int dy, i
 
 void ctui_ttf_cell(const CTUI_TTF *f, float em, int *cw, int *ch, int *base) {
   float s = em / f->upem;
-  *cw = (int)ceilf(advance(f, ctui_ttf_glyph(f, 'M')) * s - 1e-3f);
+  /* the advance rounded, as FreeType hints it and kitty takes it (13.2 px
+   * at 22 px -- 11 pt at 1.5 -- is 13, not 14); the height rounded up */
+  int w = (int)lroundf(advance(f, ctui_ttf_glyph(f, 'M')) * s);
+  *cw = w > 0 ? w : 1;
   *ch = (int)ceilf((f->ascender - f->descender + f->line_gap) * s - 1e-3f);
   *base = (int)ceilf(f->ascender * s - 1e-3f);
 }

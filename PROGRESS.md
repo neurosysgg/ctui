@@ -237,6 +237,17 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/vk/`: a cell as wide as kitty's at every scale**
+  (2026-11-11, ctui-wm's notes/kittyless.md: its panel host at a 1.5
+  output). `ctui_ttf_cell()` took the advance rounded up; kitty takes
+  FreeType's hinted advance, rounded. 11 pt at 1.5 is a 22 px em, 13.2
+  px an advance: kitty's cell 13 px, ours 14 -- a 3840 px bar 274
+  columns instead of kitty's 295. Rounded now (the height still rounded
+  up, which matches). Kitty's cells measured in a headless sway
+  (TIOCGWINSZ): 9x20, 11x25, 13x30, 18x39 at 1, 1.25, 1.5, 2;
+  tests/vk/vk_test.c +4 asserts them. Scale 1 and 2 unchanged (8.8 and
+  17.6 round as they rounded up), so the first frame's hash too; ASan +
+  UBSan clean; compat_mus.sh identical.
 - [x] **`src/vk/`: a terminal's palette and padding** (2026-11-10,
   ctui-wm's panel host: its bars drew the 16 colours as xterm's -- the
   user's kitty theme makes color1 and color4 purples, they came out red
