@@ -80,6 +80,17 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
 void ctui_vk_set_default(CTUI_VK *vk, uint32_t fg, uint32_t bg);
 void ctui_vk_defaults(const CTUI_VK *vk, uint32_t *fg, uint32_t *bg);
 
+/* the default background's alpha (0 clear .. 255 opaque, the default),
+ * as kitty's background_opacity: only pixels on that background take it
+ * (a cell with CTUI_COLOR_DEFAULT's, the inset, past the last cell);
+ * glyphs and images composite "over" it, so the surface comes out
+ * premultiplied -- a glyph on a clear background is its coverage, an
+ * opaque image stays opaque. A presenter (present.h) asks the compositor
+ * to blend it while it's below 255. The next record repaints every tile.
+ * ctui_vk_opacity() reads it back */
+void ctui_vk_set_opacity(CTUI_VK *vk, unsigned alpha);
+unsigned ctui_vk_opacity(const CTUI_VK *vk);
+
 /* the 16 colours a CTUI_COLOR_MODE_256 index below 16 and a basic
  * CTUI_COLOR_* one (BLACK..WHITE: 0..7) take, as a terminal's palette
  * does (0xRRGGBB; NULL: xterm's, the default). Cells drawn from then on */

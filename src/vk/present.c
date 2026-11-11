@@ -56,6 +56,8 @@ struct CTUI_VK_WIN {
   uint32_t count;
   VkSurfaceTransformFlagBitsKHR transform;
   VkCompositeAlphaFlagBitsKHR alpha;
+  VkCompositeAlphaFlagsKHR alphas; /* the surface's */
+  int no_pre;                      /* asked for it without: logged */
   VkImageUsageFlags usages;
   int viewport;
   VkBufferImageCopy *regions;
@@ -363,6 +365,24 @@ static int views_new(CTUI_VK_WIN *w) {
  * hand the grid out first): RGBA8 or BGRA8 UNORM (the painter writes
  * either), FIFO, as few images as allowed, painted into where it can be
  * (the painter told). 0, or -1 */
+/* the composite alpha for the painter's opacity: premultiplied while it's
+ * below 255 (the painter's pixels are), else opaque */
+static VkCompositeAlphaFlagBitsKHR pick_alpha(CTUI_VK_WIN *w) {
+  if (ctui_vk_opacity(w->vk) < 255u) {
+    if (w->alphas & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) {
+      return VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+    }
+    if (!w->no_pre) {
+      w->no_pre = 1;
+      ctui_logf(E_WRN, "[CTUI:VK] - no premultiplied alpha on this surface: "
+                       "shown opaque\n");
+    }
+  }
+  return w->alphas & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+             ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+             : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+}
+
 static int sizing(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
   CTUI_VK_GPU *g = w->g;
   idle(w);
@@ -412,9 +432,8 @@ static int sizing(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
   }
   w->count = count > IMAGES ? IMAGES : count;
   w->transform = caps.currentTransform;
-  w->alpha = caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-                 ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-                 : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+  w->alphas = caps.supportedCompositeAlpha;
+  w->alpha = pick_alpha(w);
   w->usages = caps.supportedUsageFlags;
   w->sw = pw;
   w->sh = ph;
@@ -463,10 +482,14 @@ static int make(CTUI_VK_WIN *w) {
   w->stale = 0;
   w->due = 0;
   ctui_logf(E_INF,
-            "[CTUI:VK] - swapchain %ux%u, %u images (%u asked), %s, %s @ "
+            "[CTUI:VK] - swapchain %ux%u, %u images (%u asked), %s, %s, %s @ "
             "tick %d\n",
             w->sw, w->sh, w->n, w->count, w->bgra ? "BGRA" : "RGBA",
-            w->direct ? "painted into" : "copied into", ctui_tick_advance());
+            w->direct ? "painted into" : "copied into",
+            w->alpha == VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR
+                ? "see-through"
+                : "opaque",
+            ctui_tick_advance());
   return 0;
 }
 
@@ -605,6 +628,10 @@ static void image_barrier(VkCommandBuffer cmd, VkImage img, VkImageLayout from,
   vkCmdPipelineBarrier(cmd, src, dst, 0, 0, NULL, 0, NULL, 1, &b);
 }
 
+int ctui_vk_win_see_through(const CTUI_VK_WIN *w) {
+  return w->sc && w->alpha == VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+}
+
 int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns) {
   CTUI_VK_GPU *g = w->g;
   uint64_t next = 0;
@@ -625,6 +652,17 @@ int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns) {
    * when (ctui_wl_dpy_flush()) */
   if (ctui_wl_frame_waiting(w->wl)) {
     return 0;
+  }
+  /* the composite alpha for the opacity now (set after sizing(), or
+   * crossing 255 since): a swapchain due takes it, a made one is made
+   * again with it (the painter repaints the new images) */
+  VkCompositeAlphaFlagBitsKHR want = pick_alpha(w);
+  if (want != w->alpha) {
+    if (!w->due) {
+      idle(w);
+      w->due = 1;
+    }
+    w->alpha = want;
   }
   uint32_t img = 0;
   for (int attempt = 0;; attempt++) {

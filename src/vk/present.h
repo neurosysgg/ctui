@@ -61,4 +61,10 @@ int ctui_vk_win_resize(CTUI_VK_WIN *w, int *rows, int *cols);
  * ms), -1 no swapchain or image to present to (logged) */
 int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns);
 
+/* the swapchain's composite alpha premultiplied: the painter's opacity
+ * (ctui_vk_set_opacity()) below 255 and the surface offering it. The
+ * swapchain is made again at the next present when the opacity crosses
+ * 255; until then this is the last one's */
+int ctui_vk_win_see_through(const CTUI_VK_WIN *w);
+
 #endif

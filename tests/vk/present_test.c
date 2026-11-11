@@ -163,6 +163,36 @@ static void test_presenters(void) {
   ctui_screen_puts(sb, br - 1, 0, "last row", 7, 0);
   ctui_screen_flush(sb);
   CTUI_TEST_ASSERT(present(wb) == 1, "the taller bar presented");
+  pump(d, bar, 2000);
+
+  /* see-through: the box's swapchain made again premultiplied at its next
+   * present, and opaque again after */
+  CTUI_TEST_ASSERT(!ctui_vk_win_see_through(wx), "the box opaque");
+  ctui_vk_set_opacity(ctui_vk_win_vk(wx), 140);
+  CTUI_TEST_ASSERT(present(wx) == 1 && ctui_vk_win_see_through(wx),
+                   "at 140: presented see-through");
+  pump(d, box, 2000);
+  ctui_vk_set_opacity(ctui_vk_win_vk(wx), 255);
+  CTUI_TEST_ASSERT(present(wx) == 1 && !ctui_vk_win_see_through(wx),
+                   "at 255: opaque again");
+  pump(d, box, 2000);
+  /* set before its first present (a host sets it after making the
+   * presenter): its first swapchain see-through already */
+  int nr = 0, nc = 0;
+  ctui_screen_set_sink(sx, NULL, NULL);
+  ctui_vk_win_free(wx);
+  CTUI_VK_WIN *wn = ctui_vk_win_new(g, box, &nr, &nc, err, sizeof err);
+  wx = wn;
+  if (wn) {
+    ctui_vk_set_opacity(ctui_vk_win_vk(wx), 100);
+    ctui_screen_puts(sx, 0, 0, "x", 7, 0);
+    ctui_screen_set_sink(sx, ctui_vk_screen_sink(), ctui_vk_win_vk(wx));
+    ctui_screen_flush(sx);
+  }
+  CTUI_TEST_ASSERT(wn && present(wx) == 1 && ctui_vk_win_see_through(wx),
+                   "set before the first present: see-through from the "
+                   "first swapchain");
+  pump(d, box, 2000);
   CTUI_TEST_ASSERT(ctui_vk_gpu_warnings(g) == 0,
                    "the validation layer: %u warnings",
                    ctui_vk_gpu_warnings(g));

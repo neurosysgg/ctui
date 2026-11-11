@@ -237,6 +237,31 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/vk/`: see-through surfaces, the image arena shrinking**
+  (2026-11-11, ctui-wm's layout editor and screenshot popup on its panel
+  host, which kitty showed at `background_opacity`). The painter's
+  pixels were all opaque. Now `ctui_vk_set_opacity()` gives the default
+  background an alpha, as kitty's `background_opacity` does (only that
+  background: a coloured cell, a glyph's ink and an opaque image stay
+  opaque), and cells.comp carries alpha through its composite as
+  premultiplied RGBA: the base premultiplied once, then the same
+  integer sums as before for the colours (premultiplied "over" is the
+  same formula) and `over_a()` for the alpha -- so at 255, the default,
+  every pixel is what it was (vk_test's hashes unchanged). The CPU
+  reference does the same; vk_test paints a half-clear and a clear
+  surface (text, a red cell, an opaque and a half image), into the
+  buffer and into RGBA / BGRA images. present.c asks for
+  `COMPOSITE_ALPHA_PRE_MULTIPLIED` while the opacity is below 255 (nvidia
+  offers it on Wayland), picked whenever a swapchain is due -- a host
+  sets the opacity after making the presenter, and a first swapchain
+  made opaque left sway culling what's under it -- and makes the
+  swapchain again when it crosses 255 (`ctui_vk_win_see_through()`,
+  present_test). The image arena only
+  grew (made again at twice the live texels when full): after a 4K
+  capture closed, ~66 MB of VRAM stayed held. `arena_place()` now makes
+  it again smaller once the live images hold under a quarter of it
+  (vk_test: 8 MB -> 1 MB after a 1024 x 1024 image goes).
+
 - [x] **`src/vk/present.c`: the swapchain made at the first present**
   (2026-11-11, ctui-wm's popups on its panel host). `ctui_vk_win_new()`
   and `ctui_vk_win_resize()` made the swapchain before sizing the

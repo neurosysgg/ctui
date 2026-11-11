@@ -35,7 +35,7 @@ typedef struct {
 
 typedef struct {
   uint32_t surf_w, surf_h, gw, gh, cols, rows, bgra, def_fg, def_bg, nplace,
-      ntab, pad_x, pad_y;
+      ntab, pad_x, pad_y, def_a;
 } PUSH;
 
 /* the shader's bindings: tiles, cells, atlas, surface, placements, the
@@ -125,6 +125,7 @@ struct CTUI_VK {
   unsigned w, h, gw, gh, cols, rows, tx, ty;
   int bgra, sized;
   uint32_t def_fg, def_bg;
+  unsigned def_a; /* the default background's alpha (ctui_vk_set_opacity()) */
   /* the 16 colours a 256 / basic index takes (ctui_vk_set_palette()) */
   uint32_t pal[16];
   /* the inset asked (logical px: top, right, bottom, left) and the cells'
@@ -356,6 +357,7 @@ CTUI_VK *ctui_vk_new(VkPhysicalDevice phys, VkDevice dev) {
   vk->dev = dev;
   vk->def_fg = 0xc0c0c0u;
   vk->def_bg = 0x000000u;
+  vk->def_a = 255u;
   ctui_vk_set_palette(vk, NULL);
   vkGetPhysicalDeviceMemoryProperties(phys, &vk->mem);
   load_font(vk);
@@ -744,6 +746,18 @@ void ctui_vk_set_default(CTUI_VK *vk, uint32_t fg, uint32_t bg) {
   if (vk->sized) {
     all_tiles(vk);
   }
+}
+
+void ctui_vk_set_opacity(CTUI_VK *vk, unsigned alpha) {
+  alpha = alpha > 255u ? 255u : alpha;
+  if (alpha != vk->def_a && vk->sized) {
+    all_tiles(vk);
+  }
+  vk->def_a = alpha;
+}
+
+unsigned ctui_vk_opacity(const CTUI_VK *vk) {
+  return vk->def_a;
 }
 
 void ctui_vk_set_palette(CTUI_VK *vk, const uint32_t pal[16]) {
@@ -1233,6 +1247,19 @@ static int by_z(const void *a, const void *b) {
 /* offsets in the arena for the images going up; 0, or -1 when it can't
  * be made big enough */
 static int arena_place(CTUI_VK *vk) {
+  /* it only grows as images come: made again smaller once the live ones
+   * hold under a quarter of it (a closed popup's 4K capture would keep
+   * its 33 MB twice over otherwise) */
+  size_t live = live_words(vk);
+  if (vk->arena_words > (1u << 18) && live * 4u < vk->arena_words) {
+    vkDeviceWaitIdle(vk->dev);
+    if (arena_new(vk, live)) {
+      return -1;
+    }
+    describe(vk);
+    ctui_logf(E_INF, "[CTUI:VK] - image arena down to %zu words @ tick %d\n",
+              vk->arena_words, ctui_tick_advance());
+  }
   for (int pass = 0; pass < 2; pass++) {
     int full = 0;
     for (unsigned i = 0; i < vk->nimg && !full; i++) {
@@ -1490,7 +1517,7 @@ static unsigned record(CTUI_VK *vk, VkCommandBuffer cmd, int img, int fresh) {
               vk->gh,     vk->cols,   vk->rows,
               (uint32_t)vk->bgra, vk->def_fg, vk->def_bg,
               vk->shown,  vk->tabbed, vk->px0,
-              vk->py0};
+              vk->py0,    vk->def_a};
     VkPipelineLayout lay = img >= 0 ? vk->dlayout : vk->layout;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                       img >= 0 ? vk->dpipe : vk->pipe);

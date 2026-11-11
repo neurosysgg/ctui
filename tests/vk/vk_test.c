@@ -265,9 +265,13 @@ static unsigned paint(CTUI_VK *vk) {
   return n;
 }
 
-static uint32_t rgba(uint32_t rgb) {
+static uint32_t rgba_a(uint32_t rgb, unsigned al) {
   return (rgb >> 16 & 0xffu) | (rgb & 0xff00u) | (rgb & 0xffu) << 16 |
-         0xff000000u;
+         (uint32_t)al << 24;
+}
+
+static uint32_t rgba(uint32_t rgb) {
+  return rgba_a(rgb, 255);
 }
 
 /* the images the reference composites, as placed (cells, 0-based), in
@@ -402,7 +406,11 @@ static uint32_t blend(uint32_t bg, uint32_t fg, unsigned c) {
   return o;
 }
 
-/* the 16 x 16 tiles under a rect of pixels */
+/* cells.comp's over_a(): the premultiplied "over"'s alpha */
+static unsigned over_a(unsigned al, unsigned c) {
+  return (255u * c + al * (255u - c) + 127u) / 255u;
+}
+
 /* VK_TEST_PPM=FILE: the surface as it is, to look at */
 static void dump_ppm(const char *what) {
   const char *path = getenv("VK_TEST_PPM");
@@ -420,6 +428,7 @@ static void dump_ppm(const char *what) {
   printf("  (%s written to %s)\n", what, path);
 }
 
+/* the 16 x 16 tiles under a rect of pixels */
 static unsigned tiles_under(unsigned x, unsigned y, unsigned w, unsigned h) {
   unsigned x1 = x + w > W ? W : x + w, y1 = y + h > H ? H : y + h;
   return ((x1 - 1) / 16 - x / 16 + 1) * ((y1 - 1) / 16 - y / 16 + 1);
@@ -432,6 +441,7 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
   ctui_vk_glyphs(vk, &gw, &gh, &slots, &sw);
   uint32_t dfg, dbg;
   ctui_vk_defaults(vk, &dfg, &dbg);
+  unsigned def_a = ctui_vk_opacity(vk);
   /* the inset's origin: (lx, ly) from it, past every cell and placement
    * (wrapped) in the inset */
   unsigned ox, oy;
@@ -482,18 +492,29 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
         }
         rgb = bg;
       }
+      unsigned al = 255;
+      if (bg_default && def_a != 255) {
+        al = def_a;
+        rgb = blend(0, rgb, al);
+      }
       unsigned p = 0;
       for (; p < g_npl && g_pl[p].z < 0; p++) {
         if (g_pl[p].z >= CTUI_GFX_KITTY_Z_UNDER_BG || bg_default) {
-          rgb = over(rgb, texel(&g_pl[p], gw, gh, lx, ly));
+          uint32_t t = texel(&g_pl[p], gw, gh, lx, ly);
+          rgb = over(rgb, t);
+          al = over_a(al, t & 0xffu);
         }
       }
       rgb = blend(rgb, fg, cov);
+      al = over_a(al, cov);
       rgb = over(rgb, ph);
+      al = over_a(al, ph & 0xffu);
       for (; p < g_npl; p++) {
-        rgb = over(rgb, texel(&g_pl[p], gw, gh, lx, ly));
+        uint32_t t = texel(&g_pl[p], gw, gh, lx, ly);
+        rgb = over(rgb, t);
+        al = over_a(al, t & 0xffu);
       }
-      px[y * W + x] = rgba(rgb);
+      px[y * W + x] = rgba_a(rgb, al);
     }
   }
 }
@@ -1356,6 +1377,151 @@ static void test_direct(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
   dimg_free(&d[1]);
 }
 
+/* --- a see-through surface (ctui_vk_set_opacity()) --- */
+
+/* the pixels of row 0's cells (the title, default colours) at alpha a,
+ * and those between it and 255 (glyph edges) */
+static void title_alphas(unsigned a, unsigned *full, unsigned *edge) {
+  *full = *edge = 0;
+  for (unsigned y = 0; y < GH; y++) {
+    for (unsigned x = 0; x < 16 * GW; x++) {
+      unsigned al = g_px[y * W + x] >> 24;
+      *full += al == 255;
+      *edge += al > a && al < 255;
+    }
+  }
+}
+
+static void test_opacity(void) {
+  CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
+  int rows = 0, cols = 0;
+  if (!vk || ctui_vk_resize(vk, W, H, 120, 0, &rows, &cols) != 0) {
+    CTUI_TEST_ASSERT(0, "a backend to see through");
+    ctui_vk_free(vk);
+    return;
+  }
+  CTUI_TEST_ASSERT(ctui_vk_opacity(vk) == 255, "opaque until set");
+  ctui_vk_set_default(vk, 0xe0e0e0, 0x204060);
+  CTUI_WIDGET text = ctui_widget_make(0, 0, cols, rows, NULL, render_text,
+                                      NULL);
+  CTUI_WIDGET *ws[] = {&text};
+  CTUI_SCREEN *screen = ctui_screen_create(rows, cols);
+  ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk);
+  CTUI_APP app;
+  ctui_app_init(&app, ws, 1, rows, cols);
+  g_title = "see through";
+  ctui_app_render(&app, screen);
+  ctui_screen_flush(screen);
+  /* an opaque green image over the text at (5, 10), a half-transparent
+   * white one under it at (5, 14): both on the default background */
+  static uint8_t green[2 * 2 * 4], white[2 * 2 * 4];
+  for (int i = 0; i < 16; i += 4) {
+    green[i] = 0, green[i + 1] = 200, green[i + 2] = 0, green[i + 3] = 255;
+    white[i] = 255, white[i + 1] = 255, white[i + 2] = 255, white[i + 3] = 128;
+  }
+  ctui_gfx_set_sink(ctui_vk_gfx_sink(), vk);
+  ctui_gfx_set_mode(CTUI_GFX_KITTY);
+  ctui_gfx_kitty_display(6, 15, 2, 1, white, 2, 2, 8, -1);
+  ctui_gfx_kitty_display(6, 11, 2, 1, green, 2, 2, 9, 1);
+  g_pl[0] = (PL){5, 14, 2, 1, -1, white, 2, 2, 0, 0, 0, 0};
+  g_pl[1] = (PL){5, 10, 2, 1, 1, green, 2, 2, 0, 0, 0, 0};
+  g_npl = 2;
+  unsigned tiles = paint(vk);
+  CTUI_TEST_ASSERT(differ(vk, screen) == 0 && g_px[0] == rgba(0x204060) &&
+                       (g_px[(5 * GH + 3) * W + 10 * GW + 3] >> 24) == 255,
+                   "opaque: the reference's, alpha 255 all over (%08x)",
+                   g_px[0]);
+  ctui_vk_set_opacity(vk, 128);
+  CTUI_TEST_ASSERT(ctui_vk_opacity(vk) == 128 && ctui_vk_pending(vk),
+                   "half see-through: something to paint");
+  tiles = paint(vk);
+  unsigned bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles == tiles_under(0, 0, W, H) && bad == 0,
+                   "every tile again, the reference's (%u differ)", bad);
+  /* 0x204060 premultiplied by 128 / 255 */
+  uint32_t red = g_px[GH * W + 5 * GW],
+           img = g_px[(5 * GH + 3) * W + 10 * GW + 3];
+  uint32_t half = g_px[(5 * GH + 3) * W + 14 * GW + 3];
+  uint32_t want_half = rgba_a(over(0x102030, 0xffffff80u), over_a(128, 128));
+  CTUI_TEST_ASSERT(g_px[0] == rgba_a(0x102030, 128) &&
+                       g_px[(H - 2) * W + 3] == rgba_a(0x102030, 128) &&
+                       red == rgba(0xcd0000) && img == rgba_a(0x00c800, 255) &&
+                       half == want_half,
+                   "the default background premultiplied at 128, the strip "
+                   "past the cells too, a coloured cell opaque, the opaque "
+                   "image opaque, the half one over the half background "
+                   "(%08x %08x %08x %08x)",
+                   g_px[0], red, img, half);
+  unsigned full, edge;
+  title_alphas(128, &full, &edge);
+  CTUI_TEST_ASSERT(full > 0 && edge > 0,
+                   "the title's glyphs opaque where whole, between at their "
+                   "edges (%u, %u pixels)",
+                   full, edge);
+  ctui_vk_set_opacity(vk, 0);
+  paint(vk);
+  bad = differ(vk, screen);
+  title_alphas(0, &full, &edge);
+  half = g_px[(5 * GH + 3) * W + 14 * GW + 3];
+  CTUI_TEST_ASSERT(bad == 0 && g_px[0] == 0 && full > 0 && edge > 0 &&
+                       half == rgba_a(0x808080, 128),
+                   "clear: the background nothing at all, a glyph its "
+                   "coverage, the half image alone (%u differ, %08x %08x)",
+                   bad, g_px[0], half);
+  ctui_vk_set_opacity(vk, 300);
+  paint(vk);
+  CTUI_TEST_ASSERT(ctui_vk_opacity(vk) == 255 && differ(vk, screen) == 0 &&
+                       g_px[0] == rgba(0x204060),
+                   "past 255: opaque again");
+
+  /* the direct path's alpha: into an RGBA and a BGRA image */
+  DIMG d[2];
+  memset(d, 0, sizeof d);
+  int made = g_direct && dimg_new(&d[0], VK_FORMAT_R8G8B8A8_UNORM) == 0 &&
+             dimg_new(&d[1], VK_FORMAT_B8G8R8A8_UNORM) == 0;
+  if (made && ctui_vk_set_direct(vk, 1) == 0) {
+    const VkImageView views[2] = {d[0].view, d[1].view};
+    ctui_vk_set_images(vk, 2, views);
+    ctui_vk_set_opacity(vk, 128);
+    paint_into(vk, &d[0], 0, 1);
+    unsigned bad0 = differ(vk, screen);
+    uint32_t p0 = g_px[0];
+    paint_into(vk, &d[1], 1, 1);
+    unsigned bad1 = differ(vk, screen);
+    CTUI_TEST_ASSERT(bad0 == 0 && bad1 == 0 && p0 == rgba_a(0x102030, 128) &&
+                         g_px[0] == p0,
+                     "painted into images: the same alpha, in either byte "
+                     "order (%u, %u differ)",
+                     bad0, bad1);
+    ctui_vk_set_direct(vk, 0);
+    ctui_vk_set_opacity(vk, 255);
+  }
+  dimg_free(&d[0]);
+  dimg_free(&d[1]);
+
+  /* the arena: a big picture (1 M texels: the arena twice that) gone,
+   * made again smaller at the next record, the small ones up again */
+  static uint8_t big[1024 * 1024 * 4];
+  memset(big, 0x40, sizeof big);
+  ctui_gfx_kitty_display(1, 20, 4, 2, big, 1024, 1024, 10, 2);
+  paint(vk);
+  ctui_gfx_kitty_delete(10);
+  tiles = paint(vk);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles > 0 && bad == 0,
+                   "a big image gone: the arena smaller, the two left "
+                   "composited as before (%u differ)",
+                   bad);
+
+  ctui_gfx_kitty_delete(8);
+  ctui_gfx_kitty_delete(9);
+  g_npl = 0;
+  ctui_gfx_set_sink(NULL, NULL);
+  ctui_app_free(&app);
+  ctui_screen_free(screen);
+  ctui_vk_free(vk);
+}
+
 static void test_vk(void) {
   CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
   int rows = 0, cols = 0;
@@ -1472,6 +1638,7 @@ static void test_vk(void) {
   test_wipe(vk, &app, screen);
   test_glyphs();
   test_pad();
+  test_opacity();
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

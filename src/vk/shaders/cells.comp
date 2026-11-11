@@ -5,7 +5,12 @@
 // and past the last whole cell, the default background), with the images
 // placed over it as kitty composites them: z < 0 under the glyph (below
 // UNDER_BG only on a default background), z >= 0 over it, in z order,
-// alpha blended, each scaled to its rect by area average.
+// alpha blended, each scaled to its rect by area average. The default
+// background has alpha def_a (ctui_vk_set_opacity(): kitty's
+// background_opacity, which only that background takes): the pixels
+// come out premultiplied, glyphs and images composited "over" it, so a
+// glyph on a clear background is its coverage and an opaque image stays
+// opaque. At 255 the colours are what they'd be without it.
 // Integers only: the pixels are a pure function of the cells, the
 // placements and the texels, so a test pins them against a host
 // reference (tests/vk/vk_test.c)
@@ -45,6 +50,7 @@ layout(push_constant) uniform Push {
   uint ntab;
   uint pad_x; // the cells' origin (src/vk/vk.h ctui_vk_set_pad()): the
   uint pad_y; // inset around them is the default background
+  uint def_a; // the default background's alpha
 };
 
 // CTUI_ATTR_* (core/cell.h)
@@ -141,7 +147,13 @@ uint blend(uint bg, uint fg, uint c) {
   return o;
 }
 
-// t (rgb << 8 | a) over dst (0xRRGGBB)
+// alpha over alpha by c of 255: the premultiplied "over"'s alpha
+uint over_a(uint al, uint c) {
+  return (255u * c + al * (255u - c) + 127u) / 255u;
+}
+
+// t (rgb << 8 | a) over dst (0xRRGGBB, premultiplied): the same sum
+// premultiplied or not
 uint over(uint dst, uint t) {
   uint a = t & 0xffu;
   if (a == 0u)
@@ -157,9 +169,9 @@ uint over(uint dst, uint t) {
   return o;
 }
 
-uint word(uint rgb) {
+uint word(uint rgb, uint al) {
   uint r = rgb >> 16 & 0xffu, g = rgb >> 8 & 0xffu, b = rgb & 0xffu;
-  return (bgra != 0u ? b | r << 16 : r | b << 16) | g << 8 | 0xff000000u;
+  return (bgra != 0u ? b | r << 16 : r | b << 16) | g << 8 | al << 24;
 }
 
 void main() {
@@ -205,19 +217,33 @@ void main() {
       fg = ((fg & 0xfefefeu) >> 1) + ((bg & 0xfefefeu) >> 1);
     rgb = bg;
   }
+  // the default background premultiplied by its alpha, any other opaque
+  uint al = 255u;
+  if (bg_default && def_a != 255u) {
+    al = def_a;
+    rgb = blend(0u, rgb, al);
+  }
   uint p = 0u;
   for (; p < nplace && int(place[p * 8u + 7u]) < 0; p++)
-    if (int(place[p * 8u + 7u]) >= UNDER_BG || bg_default)
-      rgb = over(rgb, texel(p, x, y));
+    if (int(place[p * 8u + 7u]) >= UNDER_BG || bg_default) {
+      uint t = texel(p, x, y);
+      rgb = over(rgb, t);
+      al = over_a(al, t & 0xffu);
+    }
   rgb = blend(rgb, fg, cov);
+  al = over_a(al, cov);
   rgb = over(rgb, ph);
-  for (; p < nplace; p++)
-    rgb = over(rgb, texel(p, x, y));
+  al = over_a(al, ph & 0xffu);
+  for (; p < nplace; p++) {
+    uint t = texel(p, x, y);
+    rgb = over(rgb, t);
+    al = over_a(al, t & 0xffu);
+  }
 #ifdef DIRECT
   // a UNORM channel stores round(v * 255): c / 255 comes back as c
   imageStore(surf_img, ivec2(x, y),
-             vec4(uvec4(rgb >> 16 & 0xffu, rgb >> 8 & 0xffu, rgb & 0xffu, 255u)) / 255.0);
+             vec4(uvec4(rgb >> 16 & 0xffu, rgb >> 8 & 0xffu, rgb & 0xffu, al)) / 255.0);
 #else
-  px[y * surf_w + x] = word(rgb);
+  px[y * surf_w + x] = word(rgb, al);
 #endif
 }
