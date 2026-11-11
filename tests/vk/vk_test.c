@@ -34,6 +34,7 @@ static VkFence g_fence;
 static VkDebugUtilsMessengerEXT g_msgr;
 static unsigned g_warnings;
 static int g_validation;
+static int g_direct; /* shaderStorageImageWriteWithoutFormat enabled */
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL
 on_message(VkDebugUtilsMessageSeverityFlagBitsEXT sev,
@@ -128,10 +129,15 @@ static const char *open_device(void) {
       .queueCount = 1,
       .pQueuePriorities = &prio,
   };
+  VkPhysicalDeviceFeatures have, want = {0};
+  vkGetPhysicalDeviceFeatures(g_phys, &have);
+  g_direct = have.shaderStorageImageWriteWithoutFormat == VK_TRUE;
+  want.shaderStorageImageWriteWithoutFormat = have.shaderStorageImageWriteWithoutFormat;
   VkDeviceCreateInfo dci = {
       .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
       .queueCreateInfoCount = 1,
       .pQueueCreateInfos = &qci,
+      .pEnabledFeatures = &want,
   };
   if (vkCreateDevice(g_phys, &dci, NULL, &g_dev) != VK_SUCCESS) {
     return "no logical device";
@@ -1154,6 +1160,202 @@ static void test_pad(void) {
   ctui_vk_free(vk);
 }
 
+/* --- painting into images (ctui_vk_set_direct()) --- */
+
+typedef struct {
+  VkImage img;
+  VkDeviceMemory mem;
+  VkImageView view;
+  VkFormat fmt;
+  int used; /* painted before: in TRANSFER_SRC from the readback */
+} DIMG;
+
+static int dimg_new(DIMG *d, VkFormat fmt) {
+  memset(d, 0, sizeof *d);
+  d->fmt = fmt;
+  VkFormatProperties fp;
+  vkGetPhysicalDeviceFormatProperties(g_phys, fmt, &fp);
+  if (!(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)) {
+    return -1;
+  }
+  VkImageCreateInfo ici = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+      .imageType = VK_IMAGE_TYPE_2D,
+      .format = fmt,
+      .extent = {W, H, 1},
+      .mipLevels = 1,
+      .arrayLayers = 1,
+      .samples = VK_SAMPLE_COUNT_1_BIT,
+      .tiling = VK_IMAGE_TILING_OPTIMAL,
+      .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+      .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+  };
+  if (vkCreateImage(g_dev, &ici, NULL, &d->img) != VK_SUCCESS) {
+    return -1;
+  }
+  VkMemoryRequirements req;
+  vkGetImageMemoryRequirements(g_dev, d->img, &req);
+  VkPhysicalDeviceMemoryProperties mem;
+  vkGetPhysicalDeviceMemoryProperties(g_phys, &mem);
+  uint32_t t = 0;
+  while (t < mem.memoryTypeCount && !(req.memoryTypeBits & (1u << t))) {
+    t++;
+  }
+  VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                              .allocationSize = req.size,
+                              .memoryTypeIndex = t};
+  VkImageViewCreateInfo vci = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+      .image = d->img,
+      .viewType = VK_IMAGE_VIEW_TYPE_2D,
+      .format = fmt,
+      .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+  };
+  if (t == mem.memoryTypeCount ||
+      vkAllocateMemory(g_dev, &mai, NULL, &d->mem) != VK_SUCCESS ||
+      vkBindImageMemory(g_dev, d->img, d->mem, 0) != VK_SUCCESS ||
+      vkCreateImageView(g_dev, &vci, NULL, &d->view) != VK_SUCCESS) {
+    return -1;
+  }
+  return 0;
+}
+
+static void dimg_free(DIMG *d) {
+  if (d->view) {
+    vkDestroyImageView(g_dev, d->view, NULL);
+  }
+  if (d->img) {
+    vkDestroyImage(g_dev, d->img, NULL);
+  }
+  if (d->mem) {
+    vkFreeMemory(g_dev, d->mem, NULL);
+  }
+}
+
+static void dimg_barrier(DIMG *d, VkImageLayout from, VkImageLayout to,
+                         VkAccessFlags sa, VkAccessFlags da,
+                         VkPipelineStageFlags ss, VkPipelineStageFlags ds) {
+  VkImageMemoryBarrier b = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+      .srcAccessMask = sa,
+      .dstAccessMask = da,
+      .oldLayout = from,
+      .newLayout = to,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .image = d->img,
+      .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+  };
+  vkCmdPipelineBarrier(g_cmd, ss, ds, 0, 0, NULL, 0, NULL, 1, &b);
+}
+
+/* image k of the backend's painted into (fresh: as just made), copied
+ * back into g_px as RGBA words; the tiles */
+static unsigned paint_into(CTUI_VK *vk, DIMG *d, unsigned k, int fresh) {
+  VkCommandBufferBeginInfo bi = {
+      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+      .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+  };
+  vkResetCommandBuffer(g_cmd, 0);
+  vkBeginCommandBuffer(g_cmd, &bi);
+  dimg_barrier(d, d->used ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+               VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+  unsigned n = ctui_vk_record_image(vk, g_cmd, k, fresh);
+  dimg_barrier(d, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+               VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+  d->used = 1;
+  VkBufferImageCopy c = {
+      .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+      .imageExtent = {W, H, 1},
+  };
+  vkCmdCopyImageToBuffer(g_cmd, d->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_back, 1, &c);
+  VkMemoryBarrier mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                        .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
+  vkCmdPipelineBarrier(g_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1,
+                       &mb, 0, NULL, 0, NULL);
+  vkEndCommandBuffer(g_cmd);
+  VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                     .commandBufferCount = 1,
+                     .pCommandBuffers = &g_cmd};
+  vkQueueSubmit(g_queue, 1, &si, g_fence);
+  vkWaitForFences(g_dev, 1, &g_fence, VK_TRUE, UINT64_MAX);
+  vkResetFences(g_dev, 1, &g_fence);
+  if (d->fmt == VK_FORMAT_B8G8R8A8_UNORM) {
+    for (unsigned i = 0; i < W * H; i++) {
+      uint32_t p = g_px[i];
+      g_px[i] = (p & 0xff00ff00u) | (p >> 16 & 0xffu) | (p & 0xffu) << 16;
+    }
+  }
+  return n;
+}
+
+static void test_direct(CTUI_VK *vk, CTUI_APP *app, CTUI_SCREEN *screen) {
+  DIMG d[2];
+  int made = dimg_new(&d[0], VK_FORMAT_R8G8B8A8_UNORM) == 0 &&
+             dimg_new(&d[1], VK_FORMAT_B8G8R8A8_UNORM) == 0;
+  if (!g_direct || !made) {
+    printf("  skipped: painting into images (no storage images without a "
+           "format here)\n");
+    dimg_free(&d[0]);
+    dimg_free(&d[1]);
+    return;
+  }
+  CTUI_TEST_ASSERT(ctui_vk_set_direct(vk, 1) == 0 && ctui_vk_direct(vk),
+                   "direct painting on (shaders/cells_direct.spv.h built)");
+  const VkImageView views[2] = {d[0].view, d[1].view};
+  ctui_vk_set_images(vk, 2, views);
+  CTUI_TEST_ASSERT(ctui_vk_record(vk, g_cmd) == 0,
+                   "direct: ctui_vk_record() paints nothing");
+  const char *was = g_title;
+  memset(g_px, 0, W * H * 4u);
+  unsigned tiles = paint_into(vk, &d[0], 0, 1);
+  unsigned bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles == tiles_under(0, 0, W, H) && bad == 0,
+                   "a fresh RGBA image: every tile painted (%u), the "
+                   "reference's pixels (%u differ)",
+                   tiles, bad);
+  g_title = "into the image";
+  ctui_app_render(app, screen);
+  ctui_screen_flush(screen);
+  tiles = paint_into(vk, &d[1], 1, 1);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles == tiles_under(0, 0, W, H) && bad == 0,
+                   "a fresh BGRA image: every tile (%u), the bytes in its "
+                   "order (%u differ)",
+                   tiles, bad);
+  g_title = "caught up";
+  ctui_app_render(app, screen);
+  ctui_screen_flush(screen);
+  tiles = paint_into(vk, &d[0], 0, 0);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles > 0 && tiles < tiles_under(0, 0, W, H) && bad == 0,
+                   "the first image again: two titles' tiles (%u of %u), "
+                   "caught up (%u differ)",
+                   tiles, tiles_under(0, 0, W, H), bad);
+  tiles = paint_into(vk, &d[1], 1, 0);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles > 0 && tiles < tiles_under(0, 0, W, H) && bad == 0,
+                   "the second: the last title's (%u), caught up (%u differ)",
+                   tiles, bad);
+  CTUI_TEST_ASSERT(ctui_vk_set_direct(vk, 0) == 0 && !ctui_vk_direct(vk),
+                   "direct painting off: the surface buffer again");
+  g_title = was;
+  ctui_app_render(app, screen);
+  ctui_screen_flush(screen);
+  memset(g_px, 0, W * H * 4u);
+  tiles = paint(vk);
+  bad = differ(vk, screen);
+  CTUI_TEST_ASSERT(tiles == tiles_under(0, 0, W, H) && bad == 0,
+                   "back on the buffer: every tile into it (%u), the "
+                   "reference's (%u differ)",
+                   tiles, bad);
+  dimg_free(&d[0]);
+  dimg_free(&d[1]);
+}
+
 static void test_vk(void) {
   CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
   int rows = 0, cols = 0;
@@ -1264,6 +1466,7 @@ static void test_vk(void) {
                    "no cell up again (%u)",
                    tiles);
 
+  test_direct(vk, &app, screen);
   test_images(vk, screen);
   test_placed(vk, &app, screen);
   test_wipe(vk, &app, screen);

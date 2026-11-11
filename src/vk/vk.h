@@ -136,12 +136,35 @@ int ctui_vk_at(CTUI_VK *vk, uint64_t now_ns, uint64_t *next_ns);
 
 /* into cmd (recording): what changed since the last record uploaded and
  * painted, between barriers, so the caller may copy from the surface
- * after it. The tiles painted (0: nothing recorded at all) */
+ * after it. The tiles painted (0: nothing recorded at all; always, direct) */
 unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd);
 
 /* the surface: w * h words, row-major, a storage and transfer source
  * buffer on the card */
 VkBuffer ctui_vk_surface(const CTUI_VK *vk);
+
+/* painting straight into the caller's images instead (on != 0): no
+ * surface buffer (w * h * 4 bytes of VRAM saved, 11 MB for a 2112 x 1310
+ * panel), ctui_vk_record_image() in place of ctui_vk_record() +
+ * ctui_vk_regions(). The device needs shaderStorageImageWriteWithoutFormat
+ * enabled and the images VK_IMAGE_USAGE_STORAGE_BIT, their views given by
+ * ctui_vk_set_images(). Any time (the device waited for), every tile
+ * painted again after. 0, or -1: not built with shaders/cells_direct.spv.h
+ * (glslc -DDIRECT) or its pipeline not made -- the buffer stays */
+int ctui_vk_set_direct(CTUI_VK *vk, int on);
+int ctui_vk_direct(const CTUI_VK *vk);
+/* direct: the swapchain's n views (n <= CTUI_VK_IMAGES), image i the one
+ * ctui_vk_record_image(..., i, ...) paints. With the device idle (none of
+ * the old ones in use), after the swapchain is made */
+void ctui_vk_set_images(CTUI_VK *vk, unsigned n, const VkImageView *views);
+/* direct, into cmd (recording): what changed uploaded, then painted into
+ * image img -- the tiles changed since the last record and the ones it's
+ * behind on (every one when fresh: it holds nothing of the surface) --
+ * between barriers. The image in VK_IMAGE_LAYOUT_GENERAL from before the
+ * call (its last access done), its writes the compute stage's for the
+ * caller's barrier after. The tiles painted */
+unsigned ctui_vk_record_image(CTUI_VK *vk, VkCommandBuffer cmd, unsigned img,
+                              int fresh);
 
 /* the copy regions swapchain image img (< CTUI_VK_IMAGES) is behind on,
  * into out (room for at least one region a tile row: h / 16 + 1); fresh

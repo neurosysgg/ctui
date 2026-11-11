@@ -67,9 +67,13 @@ VK_LIBS := $(shell pkg-config --libs vulkan 2>/dev/null || echo -lvulkan)
 VK_SRC = src/vk/vk.c src/vk/ttf.c
 # what presents it to Wayland surfaces (present.h, host.h): src/wl/ too
 VK_WL_SRC = src/vk/present.c src/vk/host.c
-VK_SPV = $(patsubst %.comp,%.spv.h,$(wildcard src/vk/shaders/*.comp))
+VK_SPV = $(patsubst %.comp,%.spv.h,$(wildcard src/vk/shaders/*.comp)) \
+  src/vk/shaders/cells_direct.spv.h
 src/vk/shaders/%.spv.h: src/vk/shaders/%.comp
 	glslc --target-env=vulkan1.0 -O -mfmt=c -o $@ $<
+# the painter into a storage image (vk.h ctui_vk_set_direct())
+src/vk/shaders/cells_direct.spv.h: src/vk/shaders/cells.comp
+	glslc --target-env=vulkan1.0 -O -mfmt=c -DDIRECT -o $@ $<
 # the built-in font as a C array (xxd, made const: read-only data)
 VK_FONT = src/vk/fonts/JetBrainsMono-Regular.ttf.h
 $(VK_FONT): src/vk/fonts/JetBrainsMono-Regular.ttf

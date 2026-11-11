@@ -157,7 +157,9 @@ Three layers; only the first touches what every ctui app links.
    glslc are, like ctui-player's ALSA): a screen sink + graphics sink on
    the *caller's* device, queue and command buffer. Per frame it records
    its passes and hands back the surface buffer and the copy regions for
-   an image; it owns no window or swapchain, so it drops into
+   an image -- or paints straight into the image, where storage images
+   allow (`ctui_vk_set_direct()`, 2026-11-11: no surface buffer); it owns
+   no window or swapchain, so it drops into
    syNESthesia's present path, and into a host (layer 3).
    - **Text**: cells -> records (glyph slot, fg/bg RGB, attrs), the
      changed cells' tiles painted (the sink's diff). `CTUI_CELL` already

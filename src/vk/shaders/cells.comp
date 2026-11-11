@@ -15,7 +15,14 @@ layout(set = 0, binding = 0) readonly buffer Tiles { uint tile[]; };
 layout(set = 0, binding = 1) readonly buffer Cells { uint cell[]; };
 // the glyph cache: a slot's coverage, a byte a pixel, four to a word
 layout(set = 0, binding = 2) readonly buffer Atlas { uint atlas[]; };
+#ifdef DIRECT
+// cells_direct.spv.h: into a swapchain image as a storage image, its
+// format the image's (shaderStorageImageWriteWithoutFormat), the bytes'
+// order the format's -- so bgra goes unread
+layout(set = 0, binding = 3) writeonly uniform image2D surf_img;
+#else
 layout(set = 0, binding = 3) writeonly buffer Surf { uint px[]; };
+#endif
 // x y w h, the texels' offset, their w h, z (src/vk/vk.c PLACE_WORDS)
 layout(set = 0, binding = 4) readonly buffer Places { uint place[]; };
 // RGBA bytes a word
@@ -206,5 +213,11 @@ void main() {
   rgb = over(rgb, ph);
   for (; p < nplace; p++)
     rgb = over(rgb, texel(p, x, y));
+#ifdef DIRECT
+  // a UNORM channel stores round(v * 255): c / 255 comes back as c
+  imageStore(surf_img, ivec2(x, y),
+             vec4(uvec4(rgb >> 16 & 0xffu, rgb >> 8 & 0xffu, rgb & 0xffu, 255u)) / 255.0);
+#else
   px[y * surf_w + x] = word(rgb);
+#endif
 }

@@ -14,6 +14,16 @@
 static const uint32_t k_cells_spv[] =
 #include "shaders/cells.spv.h"
     ;
+/* the painter into a storage image (glslc -DDIRECT): optional, so an app
+ * whose build makes only cells.spv.h keeps the surface buffer */
+#if defined(__has_include)
+#if __has_include("shaders/cells_direct.spv.h")
+#define HAVE_DIRECT 1
+static const uint32_t k_cells_direct_spv[] =
+#include "shaders/cells_direct.spv.h"
+    ;
+#endif
+#endif
 
 #include "fonts/JetBrainsMono-Regular.ttf.h"
 
@@ -31,6 +41,8 @@ typedef struct {
 /* the shader's bindings: tiles, cells, atlas, surface, placements, the
  * images' texels, the image table (placeholder cells' images by id) */
 #define BINDINGS 7u
+/* the surface: a buffer, or direct the image painted into */
+#define SURF_BINDING 3u
 /* an image on the card for placeholder cells: id, offset, w h (texels),
  * its virtual placement's cols rows; a wipe's split column (NO_WIPE:
  * none), its left image's offset, its marker's offset, w h (w 0: none) */
@@ -94,6 +106,15 @@ struct CTUI_VK {
   VkPipeline pipe;
   VkDescriptorPool pool;
   VkDescriptorSet set;
+  /* painting into the caller's images (ctui_vk_set_direct()): no surface
+   * buffer, a set per swapchain image, its binding 3 that image's view */
+  int direct;
+  VkShaderModule dmodule;
+  VkDescriptorSetLayout dset_layout;
+  VkPipelineLayout dlayout;
+  VkPipeline dpipe;
+  VkDescriptorPool dpool;
+  VkDescriptorSet dset[CTUI_VK_IMAGES];
   /* on the card: the surface, the cells, the tile list, the atlas */
   BUF surf, cells, tiles, atlas;
   /* mapped, one a recording in flight: a record's tile list, the atlas
@@ -308,6 +329,21 @@ void ctui_vk_free(CTUI_VK *vk) {
   if (vk->module) {
     vkDestroyShaderModule(vk->dev, vk->module, NULL);
   }
+  if (vk->dpool) {
+    vkDestroyDescriptorPool(vk->dev, vk->dpool, NULL);
+  }
+  if (vk->dpipe) {
+    vkDestroyPipeline(vk->dev, vk->dpipe, NULL);
+  }
+  if (vk->dlayout) {
+    vkDestroyPipelineLayout(vk->dev, vk->dlayout, NULL);
+  }
+  if (vk->dset_layout) {
+    vkDestroyDescriptorSetLayout(vk->dev, vk->dset_layout, NULL);
+  }
+  if (vk->dmodule) {
+    vkDestroyShaderModule(vk->dev, vk->dmodule, NULL);
+  }
   free(vk);
 }
 
@@ -400,23 +436,180 @@ static void all_tiles(CTUI_VK *vk) {
   memset(vk->tdirty, 1, (size_t)vk->tx * vk->ty);
 }
 
+/* the buffers into the set the painter binds: direct, every image's set
+ * but its binding 3 (the image, ctui_vk_set_images()); called with the
+ * device idle */
 static void describe(CTUI_VK *vk) {
   const BUF *b[BINDINGS] = {&vk->tiles,  &vk->cells, &vk->atlas, &vk->surf,
                             &vk->places, &vk->arena, &vk->tab};
   VkDescriptorBufferInfo info[BINDINGS];
-  VkWriteDescriptorSet wr[BINDINGS];
+  VkWriteDescriptorSet wr[BINDINGS * CTUI_VK_IMAGES];
+  unsigned n = 0, sets = vk->direct ? CTUI_VK_IMAGES : 1;
   for (unsigned i = 0; i < BINDINGS; i++) {
     info[i] = (VkDescriptorBufferInfo){b[i]->buf, 0, VK_WHOLE_SIZE};
-    wr[i] = (VkWriteDescriptorSet){
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = vk->set,
-        .dstBinding = i,
+  }
+  for (unsigned k = 0; k < sets; k++) {
+    for (unsigned i = 0; i < BINDINGS; i++) {
+      if (vk->direct && i == SURF_BINDING) {
+        continue;
+      }
+      wr[n++] = (VkWriteDescriptorSet){
+          .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+          .dstSet = vk->direct ? vk->dset[k] : vk->set,
+          .dstBinding = i,
+          .descriptorCount = 1,
+          .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          .pBufferInfo = &info[i],
+      };
+    }
+  }
+  vkUpdateDescriptorSets(vk->dev, n, wr, 0, NULL);
+}
+
+/* the direct painter's pipeline and sets, made the first time */
+static int direct_new(CTUI_VK *vk) {
+#ifdef HAVE_DIRECT
+  if (vk->dpipe) {
+    return 0;
+  }
+  VkDescriptorSetLayoutBinding bind[BINDINGS];
+  for (unsigned i = 0; i < BINDINGS; i++) {
+    bind[i] = (VkDescriptorSetLayoutBinding){
+        .binding = i,
+        .descriptorType = i == SURF_BINDING ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                            : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo = &info[i],
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
     };
   }
-  vkUpdateDescriptorSets(vk->dev, BINDINGS, wr, 0, NULL);
+  VkShaderModuleCreateInfo smi = {
+      .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+      .codeSize = sizeof k_cells_direct_spv,
+      .pCode = k_cells_direct_spv,
+  };
+  VkDescriptorSetLayoutCreateInfo dli = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      .bindingCount = BINDINGS,
+      .pBindings = bind,
+  };
+  VkPushConstantRange range = {
+      .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+      .size = sizeof(PUSH),
+  };
+  VkPipelineLayoutCreateInfo pli = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+      .setLayoutCount = 1,
+      .pushConstantRangeCount = 1,
+      .pPushConstantRanges = &range,
+  };
+  VkDescriptorPoolSize size[2] = {
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, (BINDINGS - 1) * CTUI_VK_IMAGES},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, CTUI_VK_IMAGES},
+  };
+  VkDescriptorPoolCreateInfo dpi = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+      .maxSets = CTUI_VK_IMAGES,
+      .poolSizeCount = 2,
+      .pPoolSizes = size,
+  };
+  if (vkCreateShaderModule(vk->dev, &smi, NULL, &vk->dmodule) != VK_SUCCESS ||
+      vkCreateDescriptorSetLayout(vk->dev, &dli, NULL, &vk->dset_layout) !=
+          VK_SUCCESS ||
+      (pli.pSetLayouts = &vk->dset_layout,
+       vkCreatePipelineLayout(vk->dev, &pli, NULL, &vk->dlayout) != VK_SUCCESS)) {
+    return -1;
+  }
+  VkComputePipelineCreateInfo cpi = {
+      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                .module = vk->dmodule,
+                .pName = "main"},
+      .layout = vk->dlayout,
+  };
+  VkDescriptorSetLayout layouts[CTUI_VK_IMAGES];
+  for (unsigned i = 0; i < CTUI_VK_IMAGES; i++) {
+    layouts[i] = vk->dset_layout;
+  }
+  VkDescriptorSetAllocateInfo dai = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+      .descriptorSetCount = CTUI_VK_IMAGES,
+      .pSetLayouts = layouts,
+  };
+  if (vkCreateComputePipelines(vk->dev, VK_NULL_HANDLE, 1, &cpi, NULL,
+                               &vk->dpipe) != VK_SUCCESS) {
+    vk->dpipe = VK_NULL_HANDLE;
+    return -1;
+  }
+  if (vkCreateDescriptorPool(vk->dev, &dpi, NULL, &vk->dpool) != VK_SUCCESS ||
+      (dai.descriptorPool = vk->dpool,
+       vkAllocateDescriptorSets(vk->dev, &dai, vk->dset) != VK_SUCCESS)) {
+    vkDestroyPipeline(vk->dev, vk->dpipe, NULL);
+    vk->dpipe = VK_NULL_HANDLE;
+    return -1;
+  }
+  return 0;
+#else
+  (void)vk;
+  return -1;
+#endif
+}
+
+int ctui_vk_set_direct(CTUI_VK *vk, int on) {
+  on = !!on;
+  if (on == vk->direct) {
+    return 0;
+  }
+  if (on && direct_new(vk) != 0) {
+    ctui_logf(E_WRN, "[CTUI:VK] - no direct painter: the surface buffer stays\n");
+    return -1;
+  }
+  vkDeviceWaitIdle(vk->dev);
+  if (vk->sized) {
+    if (on) {
+      buf_free(vk, &vk->surf);
+    } else if (buf_new(vk, &vk->surf, (size_t)vk->w * vk->h * 4u, 0)) {
+      ctui_logf(E_ERR, "[CTUI:VK] - no memory for the surface buffer\n");
+      return -1;
+    }
+    /* what's on the card is in neither: every tile again */
+    all_tiles(vk);
+    for (unsigned i = 0; i < CTUI_VK_IMAGES * vk->ty; i++) {
+      vk->behind[2 * i] = 0;
+      vk->behind[2 * i + 1] = (int)vk->tx - 1;
+    }
+  }
+  vk->direct = on;
+  if (vk->sized) {
+    describe(vk);
+  }
+  ctui_logf(E_INF, "[CTUI:VK] - painting %s @ tick %d\n",
+            on ? "into the images" : "into the surface buffer", ctui_tick_advance());
+  return 0;
+}
+
+int ctui_vk_direct(const CTUI_VK *vk) { return vk->direct; }
+
+void ctui_vk_set_images(CTUI_VK *vk, unsigned n, const VkImageView *views) {
+  VkDescriptorImageInfo info[CTUI_VK_IMAGES];
+  VkWriteDescriptorSet wr[CTUI_VK_IMAGES];
+  n = n > CTUI_VK_IMAGES ? CTUI_VK_IMAGES : n;
+  if (!vk->direct) {
+    return;
+  }
+  for (unsigned i = 0; i < n; i++) {
+    info[i] = (VkDescriptorImageInfo){.imageView = views[i],
+                                      .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
+    wr[i] = (VkWriteDescriptorSet){
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = vk->dset[i],
+        .dstBinding = SURF_BINDING,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .pImageInfo = &info[i],
+    };
+  }
+  vkUpdateDescriptorSets(vk->dev, n, wr, 0, NULL);
 }
 
 static size_t live_words(const CTUI_VK *vk) {
@@ -509,7 +702,8 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
    * and the tile list's and the atlas's */
   vk->copies = malloc((ncells / 2 + 3) * sizeof *vk->copies);
   int bad = !vk->rec || !vk->dirty || !vk->tdirty || !vk->behind ||
-            !vk->copies || buf_new(vk, &vk->surf, (size_t)w * h * 4u, 0) ||
+            !vk->copies ||
+            (!vk->direct && buf_new(vk, &vk->surf, (size_t)w * h * 4u, 0)) ||
             buf_new(vk, &vk->cells, cell_bytes, 0) ||
             buf_new(vk, &vk->tiles, ntiles * 4u, 0) ||
             buf_new(vk, &vk->atlas, atlas_bytes, 0) ||
@@ -1071,7 +1265,10 @@ static int arena_place(CTUI_VK *vk) {
   return -1;
 }
 
-unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
+/* what changed up, then painted: into the surface buffer (img < 0), or
+ * into image img directly -- this frame's tiles, the ones it's behind
+ * on, every one when fresh */
+static unsigned record(CTUI_VK *vk, VkCommandBuffer cmd, int img, int fresh) {
   if (!vk->sized) {
     return 0;
   }
@@ -1112,7 +1309,8 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
       img_words += (size_t)vk->imgs[i].w * (size_t)vk->imgs[i].h;
     }
   }
-  if (!ctui_vk_pending(vk) && !nup && !vk->places_up && !glyph_words) {
+  if (!ctui_vk_pending(vk) && !nup && !vk->places_up && !glyph_words &&
+      img < 0) {
     return 0;
   }
   size_t ncells = (size_t)vk->cols * vk->rows;
@@ -1138,15 +1336,27 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
   unsigned nt = 0;
   for (unsigned y = 0; y < vk->ty; y++) {
     int first = -1, last = -1;
+    /* direct: the span img is behind on, painted with this frame's */
+    int *own = img >= 0 ? vk->behind + ((unsigned)img * vk->ty + y) * 2 : NULL;
+    int bf = own ? (fresh ? 0 : own[0]) : 1, bl = own ? (fresh ? (int)vk->tx - 1 : own[1]) : 0;
     for (unsigned x = 0; x < vk->tx; x++) {
-      if (vk->tdirty[y * vk->tx + x]) {
+      int now = vk->tdirty[y * vk->tx + x];
+      if (now || ((int)x >= bf && (int)x <= bl)) {
         st[nt++] = x | y << 16;
+      }
+      if (now) {
         first = first < 0 ? (int)x : first;
         last = (int)x;
       }
     }
-    for (unsigned img = 0; first >= 0 && img < CTUI_VK_IMAGES; img++) {
-      int *b = vk->behind + (img * vk->ty + y) * 2;
+    if (own) {
+      own[0] = 1, own[1] = 0;
+    }
+    for (unsigned k = 0; first >= 0 && k < CTUI_VK_IMAGES; k++) {
+      if ((int)k == img) {
+        continue;
+      }
+      int *b = vk->behind + (k * vk->ty + y) * 2;
       if (b[0] > b[1]) {
         b[0] = first, b[1] = last;
       } else {
@@ -1281,11 +1491,12 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
               (uint32_t)vk->bgra, vk->def_fg, vk->def_bg,
               vk->shown,  vk->tabbed, vk->px0,
               vk->py0};
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->pipe);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk->layout,
-                            0, 1, &vk->set, 0, NULL);
-    vkCmdPushConstants(cmd, vk->layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                       sizeof p, &p);
+    VkPipelineLayout lay = img >= 0 ? vk->dlayout : vk->layout;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      img >= 0 ? vk->dpipe : vk->pipe);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, lay, 0, 1,
+                            img >= 0 ? &vk->dset[img] : &vk->set, 0, NULL);
+    vkCmdPushConstants(cmd, lay, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof p, &p);
     vkCmdDispatch(cmd, nt, 1, 1);
   }
   barrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
@@ -1295,6 +1506,18 @@ unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
             "placed @ tick %d\n",
             nt, nc, ni, nplace, ctui_tick_advance());
   return nt;
+}
+
+unsigned ctui_vk_record(CTUI_VK *vk, VkCommandBuffer cmd) {
+  return vk->direct ? 0 : record(vk, cmd, -1, 0);
+}
+
+unsigned ctui_vk_record_image(CTUI_VK *vk, VkCommandBuffer cmd, unsigned img,
+                              int fresh) {
+  if (!vk->direct || img >= CTUI_VK_IMAGES) {
+    return 0;
+  }
+  return record(vk, cmd, (int)img, fresh);
 }
 
 /* --- the graphics sink: kitty's image calls as images on the card --- */

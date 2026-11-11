@@ -22,6 +22,9 @@ struct CTUI_VK_GPU {
   VkCommandPool pool;
   struct wl_display *dpy;
   unsigned warnings;
+  /* shaderStorageImageWriteWithoutFormat enabled: the painters may paint
+   * into their swapchains' images (CTUI_VK_DIRECT=0: never) */
+  int direct;
 };
 
 struct CTUI_VK_WIN {
@@ -41,6 +44,8 @@ struct CTUI_VK_WIN {
   int bgra;
   uint32_t n;
   VkImage img[IMAGES];
+  VkImageView view[IMAGES]; /* direct: the painter's, an image each */
+  int direct;               /* the painter paints into img, no copy */
   VkSemaphore done[IMAGES];
   int ready[IMAGES]; /* presented since the swapchain was made */
   unsigned sw, sh;
@@ -222,8 +227,16 @@ CTUI_VK_GPU *ctui_vk_gpu_open(CTUI_WL_DPY *d, char *err, unsigned n) {
       .queueCount = 1,
       .pQueuePriorities = &prio,
   };
+  VkPhysicalDeviceFeatures have = {0}, want = {0};
+  if (!why) {
+    vkGetPhysicalDeviceFeatures(g->phys, &have);
+  }
+  const char *dv = getenv("CTUI_VK_DIRECT");
+  g->direct = have.shaderStorageImageWriteWithoutFormat && !(dv && *dv == '0');
+  want.shaderStorageImageWriteWithoutFormat = g->direct ? VK_TRUE : VK_FALSE;
   VkDeviceCreateInfo dci = {
       .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+      .pEnabledFeatures = &want,
       .queueCreateInfoCount = 1,
       .pQueueCreateInfos = &qci,
       .enabledExtensionCount = 1,
@@ -291,6 +304,56 @@ static void idle(CTUI_VK_WIN *w) {
   vkQueueWaitIdle(w->g->queue);
 }
 
+static void views_free(CTUI_VK_WIN *w) {
+  for (unsigned i = 0; i < IMAGES; i++) {
+    if (w->view[i]) {
+      vkDestroyImageView(w->g->dev, w->view[i], NULL);
+      w->view[i] = VK_NULL_HANDLE;
+    }
+  }
+}
+
+/* whether this surface's images can be painted into: the device's
+ * feature, the surface's usage, the format's storage */
+static int can_direct(CTUI_VK_WIN *w, const VkSurfaceCapabilitiesKHR *caps) {
+  if (!w->g->direct ||
+      !(caps->supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT)) {
+    return 0;
+  }
+  VkFormatProperties fp;
+  vkGetPhysicalDeviceFormatProperties(w->g->phys, w->fmt, &fp);
+  return (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
+}
+
+/* direct: a view an image, given to the painter; else (or none made) the
+ * painter on its buffer. 0, or -1 */
+static int views_new(CTUI_VK_WIN *w) {
+  views_free(w);
+  for (unsigned i = 0; w->direct && i < w->n; i++) {
+    VkImageViewCreateInfo vci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = w->img[i],
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = w->fmt,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+    };
+    if (vkCreateImageView(w->g->dev, &vci, NULL, &w->view[i]) != VK_SUCCESS) {
+      w->view[i] = VK_NULL_HANDLE;
+      views_free(w);
+      w->direct = 0;
+    }
+  }
+  if (ctui_vk_set_direct(w->vk, w->direct) != 0) {
+    views_free(w);
+    w->direct = 0;
+    return ctui_vk_set_direct(w->vk, 0);
+  }
+  if (w->direct) {
+    ctui_vk_set_images(w->vk, w->n, w->view);
+  }
+  return 0;
+}
+
 /* the swapchain at w x h (made, or made again): RGBA8 or BGRA8 UNORM
  * (the painter writes either), FIFO, as few images as allowed. 0, or -1 */
 static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
@@ -319,6 +382,7 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
     return -1;
   }
   w->bgra = w->fmt == VK_FORMAT_B8G8R8A8_UNORM;
+  w->direct = can_direct(w, &caps);
   /* Wayland leaves the size to us (currentExtent 0xffffffff) */
   if (caps.currentExtent.width != UINT32_MAX) {
     pw = caps.currentExtent.width;
@@ -338,6 +402,7 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
   }
   count = count > IMAGES ? IMAGES : count;
   VkSwapchainKHR old = w->sc;
+  views_free(w); /* the old images' */
   VkSwapchainCreateInfoKHR ci = {
       .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
       .surface = w->surf,
@@ -346,7 +411,8 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
       .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
       .imageExtent = {pw, ph},
       .imageArrayLayers = 1,
-      .imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .imageUsage = w->direct ? VK_IMAGE_USAGE_STORAGE_BIT
+                              : VK_IMAGE_USAGE_TRANSFER_DST_BIT,
       .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
       .preTransform = caps.currentTransform,
       .compositeAlpha =
@@ -367,15 +433,18 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
   }
   w->n = IMAGES;
   vkGetSwapchainImagesKHR(g->dev, w->sc, &w->n, w->img);
+  if (views_new(w) != 0) {
+    return -1;
+  }
   memset(w->ready, 0, sizeof w->ready);
   w->sw = pw;
   w->sh = ph;
   w->stale = 0;
   ctui_logf(E_INF,
-            "[CTUI:VK] - swapchain %ux%u, %u images (%u at least), %s @ tick "
-            "%d\n",
+            "[CTUI:VK] - swapchain %ux%u, %u images (%u at least), %s, %s @ "
+            "tick %d\n",
             pw, ph, w->n, caps.minImageCount, w->bgra ? "BGRA" : "RGBA",
-            ctui_tick_advance());
+            w->direct ? "painted into" : "copied into", ctui_tick_advance());
   return 0;
 }
 
@@ -467,6 +536,7 @@ void ctui_vk_win_free(CTUI_VK_WIN *w) {
   idle(w);
   ctui_vk_free(w->vk);
   free(w->regions);
+  views_free(w);
   if (w->sc) {
     vkDestroySwapchainKHR(dev, w->sc, NULL);
   }
@@ -497,7 +567,8 @@ CTUI_WL *ctui_vk_win_wl(CTUI_VK_WIN *w) { return w->wl; }
 
 static void image_barrier(VkCommandBuffer cmd, VkImage img, VkImageLayout from,
                           VkImageLayout to, VkAccessFlags src_access,
-                          VkAccessFlags dst_access, VkPipelineStageFlags dst) {
+                          VkAccessFlags dst_access, VkPipelineStageFlags src,
+                          VkPipelineStageFlags dst) {
   VkImageMemoryBarrier b = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
       .srcAccessMask = src_access,
@@ -509,8 +580,7 @@ static void image_barrier(VkCommandBuffer cmd, VkImage img, VkImageLayout from,
       .image = img,
       .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
   };
-  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, dst, 0, 0, NULL, 0,
-                       NULL, 1, &b);
+  vkCmdPipelineBarrier(cmd, src, dst, 0, 0, NULL, 0, NULL, 1, &b);
 }
 
 int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns) {
@@ -577,23 +647,39 @@ int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns) {
   };
   vkResetCommandBuffer(cmd, 0);
   vkBeginCommandBuffer(cmd, &bi);
-  unsigned tiles = ctui_vk_record(w->vk, cmd);
   int fresh = !w->ready[img];
-  image_barrier(cmd, w->img[img],
-                fresh ? VK_IMAGE_LAYOUT_UNDEFINED
-                      : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
-                VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-  unsigned n = ctui_vk_regions(w->vk, img, fresh, w->regions);
-  if (n) {
-    vkCmdCopyBufferToImage(cmd, ctui_vk_surface(w->vk), w->img[img],
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, n, w->regions);
+  VkImageLayout was =
+      fresh ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  unsigned tiles, n = 0;
+  /* the stage the acquire's semaphore holds back: the first to touch the
+   * image */
+  VkPipelineStageFlags wait_at;
+  if (w->direct) {
+    wait_at = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    image_barrier(cmd, w->img[img], was, VK_IMAGE_LAYOUT_GENERAL, 0,
+                  VK_ACCESS_SHADER_WRITE_BIT, wait_at, wait_at);
+    tiles = ctui_vk_record_image(w->vk, cmd, img, fresh);
+    image_barrier(cmd, w->img[img], VK_IMAGE_LAYOUT_GENERAL,
+                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_SHADER_WRITE_BIT,
+                  0, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                  VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+  } else {
+    wait_at = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    tiles = ctui_vk_record(w->vk, cmd);
+    image_barrier(cmd, w->img[img], was, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  0, VK_ACCESS_TRANSFER_WRITE_BIT, wait_at, wait_at);
+    n = ctui_vk_regions(w->vk, img, fresh, w->regions);
+    if (n) {
+      vkCmdCopyBufferToImage(cmd, ctui_vk_surface(w->vk), w->img[img],
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, n,
+                             w->regions);
+    }
+    image_barrier(cmd, w->img[img], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT,
+                  0, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                  VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
   }
-  image_barrier(cmd, w->img[img], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT,
-                0, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
   vkEndCommandBuffer(cmd);
-  VkPipelineStageFlags wait_at = VK_PIPELINE_STAGE_TRANSFER_BIT;
   VkSubmitInfo si = {
       .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
       .waitSemaphoreCount = 1,

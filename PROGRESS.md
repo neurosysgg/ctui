@@ -237,6 +237,32 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/vk/`: painting straight into the swapchain's images**
+  (2026-11-11, ctui-wm's panel host: VRAM). The painter wrote a storage
+  buffer the size of the surface, copied into each image by the tiles
+  it was behind on -- w x h x 4 bytes of VRAM a surface on top of its
+  images (11 MB for a 2112 x 1310 panel). Now, where the device has
+  `shaderStorageImageWriteWithoutFormat` and the surface offers
+  `VK_IMAGE_USAGE_STORAGE_BIT` for a format with storage (nvidia: yes,
+  BGRA8), `cells.comp` built with `-DDIRECT` (`cells_direct.spv.h`, a
+  second glslc rule from the same source) `imageStore()`s into the image
+  itself: `ctui_vk_set_direct()` (no surface buffer; any time, every tile
+  again), `ctui_vk_set_images()` (the views, a descriptor set each),
+  `ctui_vk_record_image()` (this frame's tiles plus the ones that image is
+  behind on -- the same `behind` spans the copy regions came from --, all
+  of them when fresh). The UNORM store's `c / 255` comes back as `c`, so
+  the pixels are the buffer's to the bit, and the format's own order
+  makes `bgra` moot there. `present.c` turns it on per swapchain (the
+  feature enabled at device creation; `CTUI_VK_DIRECT=0` keeps the copy),
+  a view an image, the acquire waited for at the compute stage. `vk.c`
+  takes the direct shader only `__has_include` it: an app whose build
+  makes `cells.spv.h` alone keeps the buffer. tests/vk/vk_test.c +8:
+  an RGBA and a BGRA storage image painted fresh, then caught up on two
+  titles' tiles (18 of 120), against the host reference to the pixel,
+  and back onto the buffer; present_test presents through it (0
+  validation warnings). ctui-wm's headless bench: VRAM 1 / 2 / 4 / 8 bars
+  15 / 19 / 27 / 44 -> 14 / 17 / 24 / 37 MB, the big panel 47 -> 36; PSS
+  and USS the same.
 - [x] **`src/vk/` + `src/wl/`: presents paced by frame callbacks, a hidden
   surface never blocks; 2 swapchain images** (2026-11-11, ctui-wm's
   panel host live: a bar under a fullscreen video hung it). FIFO and an
