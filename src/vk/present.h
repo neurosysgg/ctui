@@ -36,7 +36,10 @@ void ctui_vk_gpu_close(CTUI_VK_GPU *g);
 unsigned ctui_vk_gpu_warnings(const CTUI_VK_GPU *g);
 
 /* a presenter for wl (configured: a window, a layer surface) at its
- * size; *rows / *cols its grid. NULL, or why in err */
+ * size; *rows / *cols its grid. The painter is sized at once, the
+ * swapchain made at the first present (the driver's slow part: 3-13 ms
+ * on nvidia), so a caller can hand the grid to its app first and the
+ * app draws meanwhile. NULL, or why in err */
 CTUI_VK_WIN *ctui_vk_win_new(CTUI_VK_GPU *g, CTUI_WL *wl, int *rows, int *cols,
                              char *err, unsigned n);
 /* waits for its frames first */
@@ -44,17 +47,18 @@ void ctui_vk_win_free(CTUI_VK_WIN *w);
 CTUI_VK *ctui_vk_win_vk(CTUI_VK_WIN *w);
 CTUI_WL *ctui_vk_win_wl(CTUI_VK_WIN *w);
 
-/* the surface resized (ctui_wl_size() said so): swapchain, painter and
- * grid at its new size, the next present repainting it all. 0, or -1 */
+/* the surface resized (ctui_wl_size() said so): painter and grid at its
+ * new size, the swapchain made again at the next present, which repaints
+ * it all. 0, or -1 */
 int ctui_vk_win_resize(CTUI_VK_WIN *w, int *rows, int *cols);
 
 /* the painter's changes, if it has any, recorded, copied into an image
- * and presented; a stale swapchain made again first. Moving wipes are
+ * and presented; a swapchain made first when due (new, resized, stale). Moving wipes are
  * where now_ns puts them (ctui_vk_at()); *next_ns, when it isn't NULL,
  * gets when the next column is due (0: nothing moves). 1 presented, 0
  * nothing to or held (the last frame not taken yet: again when
  * ctui_wl_dpy_flush() says a callback came; no image free within 100
- * ms), -1 no image to present to (logged) */
+ * ms), -1 no swapchain or image to present to (logged) */
 int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns);
 
 #endif

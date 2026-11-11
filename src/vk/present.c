@@ -50,6 +50,13 @@ struct CTUI_VK_WIN {
   int ready[IMAGES]; /* presented since the swapchain was made */
   unsigned sw, sh;
   int stale; /* 1 suboptimal, 2 out of date: made again before the next */
+  /* sized (sizing()), the swapchain to make at the next present: its
+   * images, transform and alpha, the usages it may have */
+  int due;
+  uint32_t count;
+  VkSurfaceTransformFlagBitsKHR transform;
+  VkCompositeAlphaFlagBitsKHR alpha;
+  VkImageUsageFlags usages;
   int viewport;
   VkBufferImageCopy *regions;
 };
@@ -343,20 +350,20 @@ static int views_new(CTUI_VK_WIN *w) {
       w->direct = 0;
     }
   }
-  if (ctui_vk_set_direct(w->vk, w->direct) != 0) {
-    views_free(w);
-    w->direct = 0;
+  if (!w->direct) {
+    /* a view not made: the copy after all (the images can take it) */
     return ctui_vk_set_direct(w->vk, 0);
   }
-  if (w->direct) {
-    ctui_vk_set_images(w->vk, w->n, w->view);
-  }
+  ctui_vk_set_images(w->vk, w->n, w->view);
   return 0;
 }
 
-/* the swapchain at w x h (made, or made again): RGBA8 or BGRA8 UNORM
- * (the painter writes either), FIFO, as few images as allowed. 0, or -1 */
-static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
+/* the swapchain for w x h, sized but not made (make() at the next
+ * present: the driver's slow part, 3-13 ms on nvidia, so a caller can
+ * hand the grid out first): RGBA8 or BGRA8 UNORM (the painter writes
+ * either), FIFO, as few images as allowed, painted into where it can be
+ * (the painter told). 0, or -1 */
+static int sizing(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
   CTUI_VK_GPU *g = w->g;
   idle(w);
   VkSurfaceCapabilitiesKHR caps;
@@ -382,7 +389,10 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
     return -1;
   }
   w->bgra = w->fmt == VK_FORMAT_B8G8R8A8_UNORM;
-  w->direct = can_direct(w, &caps);
+  w->direct = can_direct(w, &caps) && ctui_vk_set_direct(w->vk, 1) == 0;
+  if (!w->direct && ctui_vk_set_direct(w->vk, 0) != 0) {
+    return -1;
+  }
   /* Wayland leaves the size to us (currentExtent 0xffffffff) */
   if (caps.currentExtent.width != UINT32_MAX) {
     pw = caps.currentExtent.width;
@@ -400,25 +410,38 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
   if (caps.maxImageCount && count > caps.maxImageCount) {
     count = caps.maxImageCount;
   }
-  count = count > IMAGES ? IMAGES : count;
+  w->count = count > IMAGES ? IMAGES : count;
+  w->transform = caps.currentTransform;
+  w->alpha = caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+                 ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+                 : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+  w->usages = caps.supportedUsageFlags;
+  w->sw = pw;
+  w->sh = ph;
+  w->due = 1;
+  return 0;
+}
+
+/* the swapchain sizing() sized, made (or made again). 0, or -1 */
+static int make(CTUI_VK_WIN *w) {
+  CTUI_VK_GPU *g = w->g;
   VkSwapchainKHR old = w->sc;
   views_free(w); /* the old images' */
   VkSwapchainCreateInfoKHR ci = {
       .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
       .surface = w->surf,
-      .minImageCount = count,
+      .minImageCount = w->count,
       .imageFormat = w->fmt,
       .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-      .imageExtent = {pw, ph},
+      .imageExtent = {w->sw, w->sh},
       .imageArrayLayers = 1,
-      .imageUsage = w->direct ? VK_IMAGE_USAGE_STORAGE_BIT
+      /* direct: the copy too where offered, should a view fail */
+      .imageUsage = w->direct ? VK_IMAGE_USAGE_STORAGE_BIT |
+                                    (w->usages & VK_IMAGE_USAGE_TRANSFER_DST_BIT)
                               : VK_IMAGE_USAGE_TRANSFER_DST_BIT,
       .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-      .preTransform = caps.currentTransform,
-      .compositeAlpha =
-          caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-              ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-              : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+      .preTransform = w->transform,
+      .compositeAlpha = w->alpha,
       .presentMode = VK_PRESENT_MODE_FIFO_KHR,
       .clipped = VK_TRUE,
       .oldSwapchain = old,
@@ -437,13 +460,12 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
     return -1;
   }
   memset(w->ready, 0, sizeof w->ready);
-  w->sw = pw;
-  w->sh = ph;
   w->stale = 0;
+  w->due = 0;
   ctui_logf(E_INF,
-            "[CTUI:VK] - swapchain %ux%u, %u images (%u at least), %s, %s @ "
+            "[CTUI:VK] - swapchain %ux%u, %u images (%u asked), %s, %s @ "
             "tick %d\n",
-            pw, ph, w->n, caps.minImageCount, w->bgra ? "BGRA" : "RGBA",
+            w->sw, w->sh, w->n, w->count, w->bgra ? "BGRA" : "RGBA",
             w->direct ? "painted into" : "copied into", ctui_tick_advance());
   return 0;
 }
@@ -451,7 +473,7 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
 int ctui_vk_win_resize(CTUI_VK_WIN *w, int *rows, int *cols) {
   int pw, ph;
   ctui_wl_size(w->wl, &pw, &ph);
-  if (swapchain(w, (unsigned)pw, (unsigned)ph) != 0 ||
+  if (sizing(w, (unsigned)pw, (unsigned)ph) != 0 ||
       ctui_vk_resize(w->vk, w->sw, w->sh, ctui_wl_scale120(w->wl), w->bgra,
                      rows, cols) != 0) {
     ctui_logf(E_ERR, "[CTUI:VK] - no swapchain or surface at %dx%d\n", pw, ph);
@@ -592,7 +614,7 @@ int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns) {
   if (next_ns) {
     *next_ns = next;
   }
-  if (!w->sc || !ctui_vk_pending(w->vk)) {
+  if ((!w->sc && !w->due) || !ctui_vk_pending(w->vk)) {
     return 0;
   }
   /* the last frame not shown yet: the compositor isn't showing the
@@ -609,9 +631,13 @@ int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns) {
     if (w->stale) {
       ctui_logf(E_INF, "[CTUI:VK] - the swapchain went stale (%s)\n",
                 w->stale == 2 ? "out of date" : "suboptimal");
-      if (swapchain(w, w->sw, w->sh) != 0) {
+      if (sizing(w, w->sw, w->sh) != 0) {
         return -1;
       }
+    }
+    if (w->due && make(w) != 0) {
+      ctui_logf(E_WRN, "[CTUI:VK] - no swapchain at %ux%u\n", w->sw, w->sh);
+      return -1;
     }
     w->slot = (w->slot + 1) % SLOTS;
     if (w->pending[w->slot]) {

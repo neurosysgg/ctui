@@ -237,6 +237,19 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/vk/present.c`: the swapchain made at the first present**
+  (2026-11-11, ctui-wm's popups on its panel host). `ctui_vk_win_new()`
+  and `ctui_vk_win_resize()` made the swapchain before sizing the
+  painter, so a host had the grid for its app only after the driver's
+  slowest step (nvidia: 3-13 ms a swapchain, its second image's buffer
+  alone ~11) -- and the app started drawing only then. Now `sizing()`
+  reads the surface (capabilities, format, size, direct or not: cheap)
+  and sizes the painter; `make()` creates the swapchain at the next
+  `ctui_vk_win_present()` (also when stale, as before). The grid goes out
+  ~5 ms after a popup's request instead of 10-20, the app draws while
+  the driver works. A direct swapchain asks for `TRANSFER_DST` too where
+  offered, so a view that fails falls back to the copy. present_test and
+  vk_test unchanged and passing.
 - [x] **`src/vk/`: painting straight into the swapchain's images**
   (2026-11-11, ctui-wm's panel host: VRAM). The painter wrote a storage
   buffer the size of the surface, copied into each image by the tiles
