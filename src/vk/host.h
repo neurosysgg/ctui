@@ -40,6 +40,10 @@ void ctui_host_attach(CTUI_HOST *host, CTUI_SCREEN *screen);
 /* CTUI_COLOR_DEFAULT's colours (0xRRGGBB), a terminal's own otherwise */
 void ctui_host_set_default(CTUI_HOST *host, uint32_t fg, uint32_t bg);
 
+/* the 16 colours CTUI_COLOR_* indexes take (0xRRGGBB, as a terminal's
+ * palette: ctui_vk_set_palette()), xterm's otherwise */
+void ctui_host_set_palette(CTUI_HOST *host, const uint32_t pal[16]);
+
 void ctui_host_title(CTUI_HOST *host, const char *title);
 
 /* after ctui_app_run(): the input and sinks given back, the device and

@@ -237,6 +237,12 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A window's palette** (2026-11-11, ctui-wm: ctui-top `-w`, its
+  first app in a window of its own after ctui-mus). `CTUI_HOST` took the
+  default colours (`ctui_host_set_default()`) but not the 16 that
+  `CTUI_COLOR_*` index, so a window painted xterm's while the app in a
+  kitty showed the theme's. `ctui_host_set_palette()` hands them to the
+  window's painter (`ctui_vk_set_palette()`).
 - [x] **Pointer shapes without a terminal; a seat's devices coming back**
   (2026-11-11, ctui-wm: hover cursors gone from its panel host's zones).
   `ctui_pointer_shape()` only ever wrote kitty's OSC 22, so an app drawn

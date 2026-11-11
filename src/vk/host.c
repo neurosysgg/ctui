@@ -208,6 +208,10 @@ void ctui_host_set_default(CTUI_HOST *host, uint32_t fg, uint32_t bg) {
   ctui_vk_set_default(ctui_vk_win_vk(host->win), fg, bg);
 }
 
+void ctui_host_set_palette(CTUI_HOST *host, const uint32_t pal[16]) {
+  ctui_vk_set_palette(ctui_vk_win_vk(host->win), pal);
+}
+
 void ctui_host_title(CTUI_HOST *host, const char *title) {
   ctui_wl_title(host->wl, title);
 }
