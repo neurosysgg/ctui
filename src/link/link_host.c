@@ -351,6 +351,22 @@ static int take(CTUI_LINK_HOST *h, long len, int fd) {
     }
     return 0;
   }
+  case CTUI_LINK_POINTER: {
+    /* a name, NUL-terminated, of what a CSS cursor's could be */
+    if (n < 2 || n > CTUI_LINK_POINTER_MAX || body[n - 1] != '\0') {
+      return -1;
+    }
+    for (size_t i = 0; i + 1 < n; i++) {
+      char c = body[i];
+      if (!((c >= 'a' && c <= 'z') || c == '-')) {
+        return -1;
+      }
+    }
+    if (h->s.pointer) {
+      h->s.pointer(h->s.ctx, body);
+    }
+    return 0;
+  }
   case CTUI_LINK_APP:
     if (h->s.app) {
       h->s.app(h->s.ctx, body, n);

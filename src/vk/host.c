@@ -32,6 +32,11 @@ struct CTUI_HOST {
 
 /* the loop's about to wait: the frame it drew goes out, the anim timer
  * set for the next column while something moves */
+/* the app's pointer shapes on the window (no terminal to take them) */
+static void pointer(void *ctx, const char *name) {
+  ctui_wl_pointer_shape(ctx, name);
+}
+
 static void on_wait(void *ctx, long timeout_ms) {
   (void)timeout_ms;
   CTUI_HOST *h = ctx;
@@ -112,6 +117,7 @@ void ctui_host_close(CTUI_HOST *h) {
   ctui_input_set_source(NULL);
   ctui_input_on_wait(NULL, NULL);
   ctui_gfx_set_sink(NULL, NULL);
+  ctui_pointer_set_sink(NULL, NULL);
   unsigned warnings = h->gpu ? ctui_vk_gpu_warnings(h->gpu) : 0;
   ctui_vk_win_free(h->win);
   ctui_vk_gpu_close(h->gpu);
@@ -176,6 +182,7 @@ CTUI_HOST *ctui_host_open(const char *title, const char *app_id, int w, int h,
   /* before any widget makes a CTUI_GFX_KITTY_IMAGE: it keeps the path it
    * was made on */
   ctui_gfx_set_sink(ctui_vk_gfx_sink(), ctui_vk_win_vk(host->win));
+  ctui_pointer_set_sink(pointer, host->wl);
   host->src =
       (CTUI_INPUT_SOURCE){.fd = host->ep, .next = src_next, .ctx = host};
   /* no terminal: what's written for one goes nowhere */

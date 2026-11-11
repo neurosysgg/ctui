@@ -99,6 +99,7 @@ struct CTUI_WL_DPY {
 
   /* which surface has the keyboard, which the pointer */
   CTUI_WL *kb_on, *ptr_on;
+  uint32_t ptr_serial; /* the pointer's last enter: a shape needs it */
   /* the pointer: where (buffer pixels of ptr_on, its cells), the buttons
    * held, the scroll not yet a whole notch */
   double px, py;
@@ -133,6 +134,7 @@ struct CTUI_WL {
   int cw, ch; /* a cell in buffer pixels */
   int cx0, cy0; /* the cells' origin in buffer pixels (a host's inset) */
   struct wl_callback *frame; /* asked for, not come yet (ctui_wl_frame) */
+  uint32_t shape; /* the pointer's over it (cursor-shape-v1's; 0: default) */
 };
 
 /* a bare surface on d (scale, viewport), no role yet; NULL when out of

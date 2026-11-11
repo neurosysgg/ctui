@@ -566,6 +566,12 @@ above into the loop described in "Life of a frame".
   `ctui_suspend()` / `ctui_shutdown()` put the default back.
   `ctui_pointer_current()` is the shape as last settled (`"default"`
   before any; tests read it).
+  `ctui_pointer_set_sink(fn, ctx)` sends the settled changes to `fn`
+  instead of the terminal (NULL: back to it), mouse reporting or not:
+  an app without a terminal hands them to whatever draws it -- src/link/
+  sets it (the host gets them as `CTUI_LINK_HOST_SINKS.pointer`), and so
+  does src/vk/'s window host, onto `ctui_wl_pointer_shape()` (the
+  compositor's cursor-shape-v1).
 - `ctui_focus_enable()` — opt into focus reports (`CTUI_FOCUS_EVENT`)
   when the terminal window gains/loses keyboard focus;
   `ctui_shutdown()` turns them back off.

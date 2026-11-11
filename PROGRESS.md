@@ -237,6 +237,27 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Pointer shapes without a terminal; a seat's devices coming back**
+  (2026-11-11, ctui-wm: hover cursors gone from its panel host's zones).
+  `ctui_pointer_shape()` only ever wrote kitty's OSC 22, so an app drawn
+  by a host (src/link/) or in src/vk/'s window lost its hand / I-beam /
+  resize cursors. Now `ctui_pointer_set_sink()` takes them instead of the
+  terminal; the link sets it and carries them (`CTUI_LINK_POINTER`, a
+  CSS name checked by the host; `CTUI_LINK_VERSION` 2), the host's
+  `CTUI_LINK_HOST_SINKS.pointer` gets them, and src/wl's
+  `ctui_wl_pointer_shape()` maps the CSS names onto cursor-shape-v1 per
+  surface (at once while the pointer's on it, else at its next enter).
+  Found on the way, in a headless sway with a virtual pointer: src/wl
+  asked for a `wl_pointer` / `wl_keyboard` when the seat gained one but
+  never let it go when the seat lost it -- the compositor makes those
+  inert, so after a mouse went and came back (a replug, a receiver
+  asleep) the surfaces never heard of the pointer again (no enter, no
+  clicks). They're released at the loss now (what they held going as a
+  leave) and asked for again when the device is back. event_test (the
+  sink), link_test (the message, five malformed ones refused); the
+  shapes and the device's return checked end to end in ctui-wm's
+  headless sway with `grim -c`.
+
 - [x] **`look/png_read.c`: pictures past an icon's limits**
   (2026-11-11, ctui-wm's screenshot popup on its panel host, which
   decodes the capture itself). The reader refuses anything past 2048 x

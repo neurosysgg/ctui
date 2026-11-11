@@ -281,6 +281,14 @@ static void motion_at(int row, int col) {
   ctui_handle_event(&ev);
 }
 
+static int g_heard;
+static char g_heard_name[32];
+static void heard_shape(void *ctx, const char *name) {
+  (void)ctx;
+  g_heard++;
+  snprintf(g_heard_name, sizeof g_heard_name, "%s", name);
+}
+
 static void test_pointer(void) {
   CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "default") == 0,
                    "the pointer starts as the default arrow");
@@ -302,6 +310,18 @@ static void test_pointer(void) {
   ctui_pointer_shape(NULL);
   CTUI_TEST_ASSERT(strcmp(ctui_pointer_current(), "default") == 0,
                    "NULL: the default");
+  /* a sink instead of the terminal (an app drawn by a host): every
+   * settled change, no mouse reporting needed */
+  ctui_pointer_set_sink(heard_shape, NULL);
+  motion_at(0, 1);
+  motion_at(0, 2);
+  motion_at(0, 6);
+  CTUI_TEST_ASSERT(g_heard == 2 && strcmp(g_heard_name, "text") == 0,
+                   "a sink hears each change once (%d, %s)", g_heard,
+                   g_heard_name);
+  ctui_pointer_set_sink(NULL, NULL);
+  motion_at(5, 5);
+  CTUI_TEST_ASSERT(g_heard == 2, "unset: it hears no more");
   ctui_event_unregister(g_left);
   ctui_event_unregister(g_right);
 }

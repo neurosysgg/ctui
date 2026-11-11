@@ -115,6 +115,14 @@ static void t_app(void *ctx, const void *msg, size_t n) {
   snprintf(app_msg, sizeof app_msg, "%.*s", (int)n, (const char *)msg);
 }
 
+static char shape[32];
+static int shapes;
+static void t_pointer(void *ctx, const char *name) {
+  (void)ctx;
+  snprintf(shape, sizeof shape, "%s", name);
+  shapes++;
+}
+
 static char app_got[64];
 static void a_app(void *ctx, const void *msg, size_t n) {
   (void)ctx;
@@ -149,7 +157,8 @@ int main(void) {
   CTUI_LINK_HOST_SINKS sinks = {.screen = &k_tsink,
                                 .gfx = &k_tgfx,
                                 .set_default = t_default,
-                                .app = t_app};
+                                .app = t_app,
+                                .pointer = t_pointer};
   CTUI_LINK_HOST *h = ctui_link_host_new(sv[1], &sinks);
   CTUI_TEST_ASSERT(h && ctui_link_host_fd(h) == sv[1], "the host's end");
   CTUI_TEST_ASSERT(ctui_link_host_grid(h, 4, 20, 9, 18) == 0,
@@ -256,7 +265,14 @@ int main(void) {
   }
   ctui_link_set_default(l, 0xc0c0c0, 0x000080);
   ctui_link_app(l, "size 5", 6);
+  /* no terminal: the shapes go over the link, each change once */
+  ctui_pointer_shape("pointer");
+  ctui_pointer_shape("pointer");
+  ctui_pointer_shape("ew-resize");
   ctui_link_host_read(h);
+  CTUI_TEST_ASSERT(shapes == 2 && !strcmp(shape, "ew-resize"),
+                   "the pointer's shapes to the host, a change each (%d, %s)",
+                   shapes, shape);
   CTUI_TEST_ASSERT(rgba_id == 77 && rgba_w == 2 && rgba_h == 1 &&
                        !memcmp(&rgba_first, px, 4),
                    "the host's graphics sink has it, its pixels too");
@@ -312,6 +328,33 @@ int main(void) {
                    "an app of another build (its cells' size): refused");
   ctui_link_host_free(h2);
   close(raw[0]);
+
+  /* a pointer shape that isn't a CSS name: refused */
+  static const char *const bad_shape[] = {"Pointer", "", "a;b",
+                                          "pointer-pointer-pointer-pointer-"
+                                          "x"};
+  int refused = 0;
+  for (int i = 0; i < 4; i++) {
+    socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, raw);
+    h2 = ctui_link_host_new(raw[1], &sinks);
+    ctui_link_send(raw[0], CTUI_LINK_HELLO, &hello, sizeof hello, NULL, 0, -1);
+    ctui_link_send(raw[0], CTUI_LINK_POINTER, bad_shape[i],
+                   strlen(bad_shape[i]) + 1, NULL, 0, -1);
+    refused += ctui_link_host_read(h2) == -1;
+    ctui_link_host_free(h2);
+    close(raw[0]);
+  }
+  socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, raw);
+  h2 = ctui_link_host_new(raw[1], &sinks);
+  ctui_link_send(raw[0], CTUI_LINK_HELLO, &hello, sizeof hello, NULL, 0, -1);
+  ctui_link_send(raw[0], CTUI_LINK_POINTER, "grab", 4, NULL, 0, -1);
+  refused += ctui_link_host_read(h2) == -1; /* no NUL */
+  ctui_link_host_free(h2);
+  close(raw[0]);
+  CTUI_TEST_ASSERT(refused == 5,
+                   "shapes not named as CSS names, unterminated or too long: "
+                   "refused (%d of 5)",
+                   refused);
 
   /* the host going ends the app's loop */
   ctui_link_host_free(h);

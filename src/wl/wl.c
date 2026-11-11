@@ -414,15 +414,59 @@ static int moved(CTUI_WL_DPY *d, wl_fixed_t x, wl_fixed_t y) {
   return changed;
 }
 
+/* cursor-shape-v1's shapes by their CSS names, in its enum's order from
+ * DEFAULT (1) */
+static const char *const SHAPES[] = {
+    "default",    "context-menu", "help",        "pointer",     "progress",
+    "wait",       "cell",         "crosshair",   "text",        "vertical-text",
+    "alias",      "copy",         "move",        "no-drop",     "not-allowed",
+    "grab",       "grabbing",     "e-resize",    "n-resize",    "ne-resize",
+    "nw-resize",  "s-resize",     "se-resize",   "sw-resize",   "w-resize",
+    "ew-resize",  "ns-resize",    "nesw-resize", "nwse-resize", "col-resize",
+    "row-resize", "all-scroll",   "zoom-in",     "zoom-out"};
+
+static uint32_t shape_of(const char *name) {
+  for (size_t i = 0; name && i < sizeof SHAPES / sizeof *SHAPES; i++) {
+    if (strcmp(name, SHAPES[i]) == 0) {
+      return (uint32_t)i + WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
+    }
+  }
+  return WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
+}
+
+/* wl's shape shown, the pointer being on it */
+static void shape_show(CTUI_WL_DPY *d, const CTUI_WL *wl) {
+  if (d->cursor) {
+    wp_cursor_shape_device_v1_set_shape(
+        d->cursor, d->ptr_serial,
+        wl->shape ? wl->shape : WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
+  }
+}
+
+void ctui_wl_pointer_shape(CTUI_WL *wl, const char *name) {
+  uint32_t s = shape_of(name);
+  if (s == wl->shape) {
+    return;
+  }
+  wl->shape = s;
+  if (wl->d->ptr_on == wl) {
+    shape_show(wl->d, wl);
+    wl_display_flush(wl->d->dpy);
+  }
+}
+
 static void ptr_enter(void *data, struct wl_pointer *p, uint32_t serial,
                       struct wl_surface *s, wl_fixed_t x, wl_fixed_t y) {
   (void)p;
   CTUI_WL_DPY *d = data;
-  if (d->cursor) {
+  d->ptr_serial = serial;
+  d->ptr_on = surface_of(s);
+  if (d->ptr_on) {
+    shape_show(d, d->ptr_on);
+  } else if (d->cursor) {
     wp_cursor_shape_device_v1_set_shape(
         d->cursor, serial, WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
   }
-  d->ptr_on = surface_of(s);
   moved(d, x, y);
   mouse(d, CTUI_MOUSE_MOTION, held_button(d));
 }
@@ -618,8 +662,36 @@ void ctui_wl_set_raw_key(CTUI_WL *wl, CTUI_WL_RAW_KEY fn, void *ctx) {
 
 /* --- the seat, the outputs, the registry --- */
 
+/* a device's objects let go when the seat loses it (a mouse unplugged,
+ * a receiver asleep): the compositor makes them inert, so when it comes
+ * back they're asked for again -- kept, the surfaces never heard of the
+ * pointer or the keyboard again (session 336 in ctui-wm: hover shapes
+ * gone after a virtual pointer came and went). What they held goes as
+ * a leave would take it */
 static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
   CTUI_WL_DPY *d = data;
+  if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->kb) {
+    kb_leave(d, d->kb, 0, NULL);
+    if (wl_keyboard_get_version(d->kb) >= WL_KEYBOARD_RELEASE_SINCE_VERSION) {
+      wl_keyboard_release(d->kb);
+    } else {
+      wl_keyboard_destroy(d->kb);
+    }
+    d->kb = NULL;
+  }
+  if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->ptr) {
+    ptr_leave(d, d->ptr, 0, NULL);
+    if (d->cursor) {
+      wp_cursor_shape_device_v1_destroy(d->cursor);
+      d->cursor = NULL;
+    }
+    if (wl_pointer_get_version(d->ptr) >= WL_POINTER_RELEASE_SINCE_VERSION) {
+      wl_pointer_release(d->ptr);
+    } else {
+      wl_pointer_destroy(d->ptr);
+    }
+    d->ptr = NULL;
+  }
   if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->kb) {
     d->kb = wl_seat_get_keyboard(seat);
     wl_keyboard_add_listener(d->kb, &k_kb, d);

@@ -40,6 +40,8 @@ static char g_pointer_sent[POINTER_NAME];
 static char g_pointer_shown[POINTER_NAME] = "default";
 static char g_pointer_claim[POINTER_NAME];
 static int g_pointer_claiming = 0;
+static CTUI_POINTER_FN g_pointer_fn;
+static void *g_pointer_ctx;
 
 volatile sig_atomic_t ctui_g_resize_pending = 0;
 int ctui_g_winch_pipe[2] = {-1, -1};
@@ -220,17 +222,23 @@ static void modes_off(void) {
 static void pointer_send(const char *name) {
   snprintf(g_pointer_shown, sizeof g_pointer_shown, "%s",
            name && *name ? name : "default");
-  if (!g_mouse_enabled || strcmp(g_pointer_sent, g_pointer_shown) == 0) {
+  if ((!g_mouse_enabled && !g_pointer_fn) ||
+      strcmp(g_pointer_sent, g_pointer_shown) == 0) {
     return;
   }
   snprintf(g_pointer_sent, sizeof g_pointer_sent, "%s", g_pointer_shown);
+  if (g_pointer_fn) {
+    g_pointer_fn(g_pointer_ctx, g_pointer_sent);
+    return;
+  }
   printf("\x1b]22;=%s\x1b\\", g_pointer_sent);
   fflush(stdout);
 }
 
 /* back to the default arrow before the terminal goes to someone else */
 static void pointer_reset(void) {
-  if (g_pointer_sent[0] && strcmp(g_pointer_sent, "default") != 0) {
+  if (!g_pointer_fn && g_pointer_sent[0] &&
+      strcmp(g_pointer_sent, "default") != 0) {
     printf("\x1b]22;=default\x1b\\");
   }
   g_pointer_sent[0] = '\0';
@@ -246,6 +254,12 @@ void ctui_pointer_shape(const char *name) {
 }
 
 const char *ctui_pointer_current(void) { return g_pointer_shown; }
+
+void ctui_pointer_set_sink(CTUI_POINTER_FN fn, void *ctx) {
+  g_pointer_fn = fn;
+  g_pointer_ctx = ctx;
+  g_pointer_sent[0] = '\0';
+}
 
 void ctui_pointer_begin(void) {
   g_pointer_claiming = 1;

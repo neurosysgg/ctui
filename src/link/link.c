@@ -53,6 +53,16 @@ static int send0(CTUI_LINK *l, uint32_t type, const void *fixed, size_t n) {
   return 0;
 }
 
+/* --- the pointer --- */
+
+static void pointer(void *ctx, const char *name) {
+  CTUI_LINK *l = ctx;
+  size_t n = strlen(name) + 1;
+  if (n <= CTUI_LINK_POINTER_MAX) {
+    ctui_link_send(l->fd, CTUI_LINK_POINTER, name, n, NULL, 0, -1);
+  }
+}
+
 /* --- frames --- */
 
 /* the host told about cluster ch before a frame names it */
@@ -521,6 +531,7 @@ CTUI_LINK *ctui_link_open(int fd, unsigned mode, int *rows, int *cols,
   *cols = l->cols;
   ctui_gfx_set_mode(mode);
   ctui_gfx_set_sink(&k_gfx, l);
+  ctui_pointer_set_sink(pointer, l);
   l->src = (CTUI_INPUT_SOURCE){.fd = fd, .next = src_next, .ctx = l};
   return l;
 }
@@ -538,6 +549,7 @@ void ctui_link_close(CTUI_LINK *l) {
   if (l->src.ctx) {
     ctui_input_set_source(NULL);
     ctui_gfx_set_sink(NULL, NULL);
+    ctui_pointer_set_sink(NULL, NULL);
   }
   if (l->screen) {
     ctui_screen_set_sink(l->screen, NULL, NULL);

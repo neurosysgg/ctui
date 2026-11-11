@@ -125,6 +125,12 @@ void ctui_wl_cell(CTUI_WL *wl, int cw, int ch);
 /* where the cells start, in buffer pixels (0, 0 until said): the
  * pointer's cells and pixels counted from there */
 void ctui_wl_cell_origin(CTUI_WL *wl, int x, int y);
+/* the pointer's shape over the surface, by its CSS cursor name
+ * (ctui_pointer_shape()'s: "pointer", "text", "ew-resize", ...; NULL,
+ * "" or one cursor-shape-v1 lacks: the default arrow): at once while
+ * the pointer's on it, else when it next comes. Nothing without the
+ * compositor's cursor-shape-v1 */
+void ctui_wl_pointer_shape(CTUI_WL *wl, const char *name);
 
 /* the display's timing: ask for the next commit's feedback (before the
  * present that commits), tagged with the host's time then

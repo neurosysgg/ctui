@@ -72,7 +72,10 @@ typedef struct {
   void (*set_default)(void *ctx, uint32_t fg, uint32_t bg);
   /* the app's own messages (NULL: dropped) */
   CTUI_LINK_APP_FN app;
-  void *ctx; /* set_default's and app's */
+  void *ctx; /* set_default's, app's and pointer's */
+  /* the pointer's shape over the app (a CSS cursor's name, as
+   * ctui_pointer_shape() takes it; NULL: ignored) */
+  void (*pointer)(void *ctx, const char *name);
 } CTUI_LINK_HOST_SINKS;
 
 /* the host's end on fd (made nonblocking, owned from here); the app's

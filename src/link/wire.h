@@ -12,7 +12,7 @@
 #include <stdint.h>
 
 #define CTUI_LINK_MAGIC 0x4b4c5443u /* "CTLK" */
-#define CTUI_LINK_VERSION 1u
+#define CTUI_LINK_VERSION 2u
 /* a FRAME's runs at most; more, and the whole grid is the frame */
 #define CTUI_LINK_RUNS 8192u
 /* the largest message, its fds aside */
@@ -36,6 +36,8 @@ enum {
   CTUI_LINK_G_FLUSH,   /* nothing */
   CTUI_LINK_CLUSTER,   /* CTUI_LINK_M_CLUSTER: a cluster cells will name,
                         * before the frame that first does */
+  CTUI_LINK_POINTER,   /* the pointer's shape: its name, NUL-terminated
+                        * (core/term.h's ctui_pointer_shape()) */
   /* host -> app */
   CTUI_LINK_GRID = 32, /* CTUI_LINK_M_GRID + an fd: the cells */
   CTUI_LINK_ACK,       /* nothing: the frame in flight was taken */
@@ -71,6 +73,9 @@ typedef struct {
   uint32_t index, n;
   uint32_t cps[CTUI_CLUSTER_MAX];
 } CTUI_LINK_M_CLUSTER;
+
+/* a pointer shape's name at most, its NUL included */
+#define CTUI_LINK_POINTER_MAX 32u
 
 /* every image call's fields, each using what its own needs */
 typedef struct {

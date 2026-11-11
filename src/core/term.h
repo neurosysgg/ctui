@@ -89,6 +89,12 @@ void ctui_kitty_keys_enable_events(void);
  * reset to the default at ctui_suspend() and ctui_shutdown(). Terminals
  * without the protocol ignore it. */
 void ctui_pointer_shape(const char *name);
+/* where the shapes go instead of the terminal (NULL: back to it): an app
+ * with no terminal (src/link/'s, a window's) hands them to whoever draws
+ * its surface. fn hears each settled change, mouse reporting or not; the
+ * next shape is told to it even if it's the last one the terminal had */
+typedef void (*CTUI_POINTER_FN)(void *ctx, const char *name);
+void ctui_pointer_set_sink(CTUI_POINTER_FN fn, void *ctx);
 /* the shape as last settled ("default" before any) */
 const char *ctui_pointer_current(void);
 
