@@ -237,6 +237,31 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`src/vk/` + `src/wl/`: presents paced by frame callbacks, a hidden
+  surface never blocks; 2 swapchain images** (2026-11-11, ctui-wm's
+  panel host live: a bar under a fullscreen video hung it). FIFO and an
+  acquire with no timeout: a surface the compositor doesn't show gets no
+  frame callbacks, so its queue never drained and the next present or
+  acquire waited for good -- a clock ticking on it blocked the one
+  thread serving every surface (the popups' first grids never came, the
+  supervisor's connects backed up into its watchdog). `src/wl`:
+  `ctui_wl_frame()` asks for a callback on the next commit,
+  `ctui_wl_frame_waiting()` says it hasn't come, `ctui_wl_frame_cancel()`
+  drops it (closing does too); `ctui_wl_dpy_flush()` / `ctui_wl_flush()`
+  return 1 when one came in since (a present reads the connection: a
+  loop presents again before it waits -- host.c's kick). A presenter
+  asks for one before each `vkQueuePresentKHR` (dropped when the present
+  failed: no commit, no answer) and holds its painter's changes (returns
+  0) while it's out; the acquire waits 100 ms at most (held again,
+  logged). Paced like that a third image only waits: the swapchain takes
+  the driver's minimum, 2 at least (nvidia and lavapipe: 2; was 3) --
+  an image of VRAM a surface. tests/vk/present_test.c +10: the existing
+  presents spaced by callbacks (a change before the last frame's taken
+  is held, the flush says when it's due), and test_hidden -- the suite's
+  sway makes a "cover" window fullscreen over a bar (sway disables the
+  top layer then): no callback, 8 more changes held in 2 ms, the
+  cover gone and the callback comes, the changes presented. The old
+  present.c hangs in it (timeout). ASan + UBSan clean.
 - [x] **`src/vk/`: a cell as wide as kitty's at every scale**
   (2026-11-11, ctui-wm's notes/kittyless.md: its panel host at a 1.5
   output). `ctui_ttf_cell()` took the advance rounded up; kitty takes

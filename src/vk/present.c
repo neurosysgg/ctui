@@ -9,6 +9,8 @@
 #define SLOTS CTUI_VK_SLOTS
 #define IMAGES CTUI_VK_IMAGES
 #define VALIDATION "VK_LAYER_KHRONOS_validation"
+/* the longest an acquire may wait (ns) */
+#define ACQUIRE_NS 100000000u
 
 struct CTUI_VK_GPU {
   VkInstance inst;
@@ -290,7 +292,7 @@ static void idle(CTUI_VK_WIN *w) {
 }
 
 /* the swapchain at w x h (made, or made again): RGBA8 or BGRA8 UNORM
- * (the painter writes either), FIFO. 0, or -1 */
+ * (the painter writes either), FIFO, as few images as allowed. 0, or -1 */
 static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
   CTUI_VK_GPU *g = w->g;
   idle(w);
@@ -326,7 +328,11 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
   ph = ph < caps.minImageExtent.height ? caps.minImageExtent.height : ph;
   pw = pw > caps.maxImageExtent.width ? caps.maxImageExtent.width : pw;
   ph = ph > caps.maxImageExtent.height ? caps.maxImageExtent.height : ph;
-  uint32_t count = caps.minImageCount + 1u < 3u ? 3u : caps.minImageCount + 1u;
+  /* as few images as the driver allows, 2 at least: one shown, one
+   * painted. Paced by the frame callbacks (ctui_vk_win_present()), a third
+   * would only ever wait -- and cost the VRAM of an image (a 4K bar's 0.6
+   * MB, a big panel's 11) */
+  uint32_t count = caps.minImageCount < 2u ? 2u : caps.minImageCount;
   if (caps.maxImageCount && count > caps.maxImageCount) {
     count = caps.maxImageCount;
   }
@@ -365,8 +371,11 @@ static int swapchain(CTUI_VK_WIN *w, unsigned pw, unsigned ph) {
   w->sw = pw;
   w->sh = ph;
   w->stale = 0;
-  ctui_logf(E_INF, "[CTUI:VK] - swapchain %ux%u, %u images, %s @ tick %d\n", pw,
-            ph, w->n, w->bgra ? "BGRA" : "RGBA", ctui_tick_advance());
+  ctui_logf(E_INF,
+            "[CTUI:VK] - swapchain %ux%u, %u images (%u at least), %s @ tick "
+            "%d\n",
+            pw, ph, w->n, caps.minImageCount, w->bgra ? "BGRA" : "RGBA",
+            ctui_tick_advance());
   return 0;
 }
 
@@ -516,6 +525,15 @@ int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns) {
   if (!w->sc || !ctui_vk_pending(w->vk)) {
     return 0;
   }
+  /* the last frame not shown yet: the compositor isn't showing the
+   * surface (a fullscreen window over it), or not yet. FIFO would queue
+   * this one behind it and the next acquire or present wait for a frame
+   * nobody sees -- every surface of the thread with it. Held back
+   * instead: the painter keeps its changes, the callback's flush says
+   * when (ctui_wl_dpy_flush()) */
+  if (ctui_wl_frame_waiting(w->wl)) {
+    return 0;
+  }
   uint32_t img = 0;
   for (int attempt = 0;; attempt++) {
     if (w->stale) {
@@ -531,11 +549,19 @@ int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns) {
       vkResetFences(g->dev, 1, &w->fence[w->slot]);
       w->pending[w->slot] = 0;
     }
-    VkResult r = vkAcquireNextImageKHR(
-        g->dev, w->sc, UINT64_MAX, w->acquired[w->slot], VK_NULL_HANDLE, &img);
+    /* bounded: paced by the frame callbacks an image is free by now, so
+     * a compositor holding them all mustn't hang the thread either */
+    VkResult r =
+        vkAcquireNextImageKHR(g->dev, w->sc, ACQUIRE_NS, w->acquired[w->slot],
+                              VK_NULL_HANDLE, &img);
     if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {
       w->stale = r == VK_SUBOPTIMAL_KHR;
       break;
+    }
+    if (r == VK_TIMEOUT || r == VK_NOT_READY) {
+      ctui_logf(E_WRN, "[CTUI:VK] - no image free within %d ms: frame held\n",
+                (int)(ACQUIRE_NS / 1000000u));
+      return 0;
     }
     w->stale = 2;
     if (r != VK_ERROR_OUT_OF_DATE_KHR || attempt) {
@@ -596,9 +622,14 @@ int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns) {
       .pSwapchains = &w->sc,
       .pImageIndices = &img,
   };
+  ctui_wl_frame(w->wl); /* on the commit the present makes */
   VkResult r = vkQueuePresentKHR(g->queue, &pi);
   if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
     w->stale = r == VK_ERROR_OUT_OF_DATE_KHR ? 2 : 1;
+  }
+  if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) {
+    /* no commit, so no callback: the next present asks again */
+    ctui_wl_frame_cancel(w->wl);
   }
   ctui_logf(E_DBG,
             "[CTUI:VK] - presented image %u: %u tiles, %u regions%s @ tick "

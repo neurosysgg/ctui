@@ -55,8 +55,11 @@ int ctui_wl_dpy_repeat_fd(CTUI_WL_DPY *d);
  * it's gone); a repeat's timer having fired, its keys queued */
 int ctui_wl_dpy_dispatch(CTUI_WL_DPY *d);
 void ctui_wl_dpy_repeat(CTUI_WL_DPY *d);
-/* the requests out, before waiting */
-void ctui_wl_dpy_flush(CTUI_WL_DPY *d);
+/* the requests out, before waiting: what's queued dispatched first (a
+ * present may have read the connection). 1 when a surface's frame
+ * callback came in since the last flush (ctui_wl_frame()): a frame held
+ * back is due, so present again before waiting */
+int ctui_wl_dpy_flush(CTUI_WL_DPY *d);
 
 /* the next input event queued, its data valid until the next call, and
  * the surface it's for in *on (if on isn't NULL): 1, or 0 for none. An
@@ -94,7 +97,7 @@ int ctui_wl_fd(CTUI_WL *wl);
 int ctui_wl_repeat_fd(CTUI_WL *wl);
 int ctui_wl_dispatch(CTUI_WL *wl);
 void ctui_wl_repeat(CTUI_WL *wl);
-void ctui_wl_flush(CTUI_WL *wl);
+int ctui_wl_flush(CTUI_WL *wl);
 int ctui_wl_next(CTUI_WL *wl, CTUI_EVENT *ev);
 int ctui_wl_queued(const CTUI_WL *wl);
 
@@ -136,6 +139,17 @@ typedef struct {
 } CTUI_WL_TIMING;
 void ctui_wl_feedback(CTUI_WL *wl, uint64_t tag_ns);
 const CTUI_WL_TIMING *ctui_wl_timing(const CTUI_WL *wl);
+
+/* the compositor's pacing: ask for a frame callback on the next commit
+ * (before the present that commits; one at a time), and whether it's
+ * still to come. A surface the compositor doesn't show -- under a
+ * fullscreen window, on a workspace not shown -- gets none until it's
+ * shown again: a presenter that waits for it (src/vk/present.c) never
+ * blocks on a frame nobody will see. Cancelled when the commit didn't
+ * happen (a present that failed), or nothing would ever answer it */
+void ctui_wl_frame(CTUI_WL *wl);
+void ctui_wl_frame_cancel(CTUI_WL *wl);
+int ctui_wl_frame_waiting(const CTUI_WL *wl);
 
 /* the compositor closed it (a window's close button, a layer's output
  * unplugged) */

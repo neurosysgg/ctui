@@ -46,14 +46,15 @@ static void on_wait(void *ctx, long timeout_ms) {
   if (timerfd_settime(h->anim, 0, &it, NULL) != 0) {
     ctui_logf(E_WRN, "[CTUI:HOST] - the animation timer couldn't be set\n");
   }
-  ctui_wl_flush(h->wl);
+  /* a held frame's callback come in: presented next round */
+  int due = ctui_wl_flush(h->wl);
   int pw, ph;
   /* a configure, or input, the present's own reading of the connection
    * left queued: wake the wait at once */
   if (ctui_wl_size(h->wl, &pw, &ph) || h->resized) {
     h->resized = 1;
   }
-  if (h->resized || ctui_wl_closed(h->wl) || ctui_wl_queued(h->wl)) {
+  if (due || h->resized || ctui_wl_closed(h->wl) || ctui_wl_queued(h->wl)) {
     uint64_t one = 1;
     if (write(h->kick, &one, sizeof one) < 0) {
       ctui_logf(E_WRN, "[CTUI:HOST] - the kick couldn't be written\n");

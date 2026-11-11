@@ -10,7 +10,10 @@
  * notes/kittyless.md), so a desktop's panels share one.
  *
  * A presenter presents only when its painter has something
- * (ctui_vk_pending()), FIFO: an idle surface costs nothing. Built from
+ * (ctui_vk_pending()), FIFO, and only once the compositor took its last
+ * frame (its frame callback, src/wl's ctui_wl_frame()): an idle surface
+ * costs nothing, and one the compositor doesn't show (under a fullscreen
+ * window) holds its frames instead of blocking the thread. Built from
  * ctui-mus's window host (host.h is that host now, on top of this).
  * Needs src/wl/ and Vulkan's Wayland surfaces. */
 
@@ -49,7 +52,9 @@ int ctui_vk_win_resize(CTUI_VK_WIN *w, int *rows, int *cols);
  * and presented; a stale swapchain made again first. Moving wipes are
  * where now_ns puts them (ctui_vk_at()); *next_ns, when it isn't NULL,
  * gets when the next column is due (0: nothing moves). 1 presented, 0
- * nothing to, -1 no image to present to (logged) */
+ * nothing to or held (the last frame not taken yet: again when
+ * ctui_wl_dpy_flush() says a callback came; no image free within 100
+ * ms), -1 no image to present to (logged) */
 int ctui_vk_win_present(CTUI_VK_WIN *w, uint64_t now_ns, uint64_t *next_ns);
 
 #endif

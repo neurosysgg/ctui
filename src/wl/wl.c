@@ -584,6 +584,33 @@ void ctui_wl_feedback(CTUI_WL *wl, uint64_t tag_ns) {
 
 const CTUI_WL_TIMING *ctui_wl_timing(const CTUI_WL *wl) { return &wl->timing; }
 
+/* the compositor wants the next frame: the surface's callback done */
+static void frame_done(void *data, struct wl_callback *cb, uint32_t ms) {
+  (void)ms;
+  CTUI_WL *wl = data;
+  wl_callback_destroy(cb);
+  wl->frame = NULL;
+  wl->d->frames_done = 1;
+}
+static const struct wl_callback_listener k_frame = {.done = frame_done};
+
+void ctui_wl_frame(CTUI_WL *wl) {
+  if (wl->frame) {
+    return;
+  }
+  wl->frame = wl_surface_frame(wl->surf);
+  wl_callback_add_listener(wl->frame, &k_frame, wl);
+}
+
+void ctui_wl_frame_cancel(CTUI_WL *wl) {
+  if (wl->frame) {
+    wl_callback_destroy(wl->frame);
+    wl->frame = NULL;
+  }
+}
+
+int ctui_wl_frame_waiting(const CTUI_WL *wl) { return wl->frame != NULL; }
+
 void ctui_wl_set_raw_key(CTUI_WL *wl, CTUI_WL_RAW_KEY fn, void *ctx) {
   wl->d->raw = fn;
   wl->d->raw_ctx = ctx;
@@ -887,9 +914,12 @@ int ctui_wl_dpy_dispatch(CTUI_WL_DPY *d) {
   return wl_display_dispatch_pending(d->dpy) < 0 ? -1 : 0;
 }
 
-void ctui_wl_dpy_flush(CTUI_WL_DPY *d) {
+int ctui_wl_dpy_flush(CTUI_WL_DPY *d) {
   wl_display_dispatch_pending(d->dpy);
   wl_display_flush(d->dpy);
+  int done = d->frames_done;
+  d->frames_done = 0;
+  return done;
 }
 
 /* --- a surface --- */
@@ -1051,6 +1081,7 @@ void ctui_wl_close(CTUI_WL *wl) {
       q->on = NULL;
     }
   }
+  ctui_wl_frame_cancel(wl);
   if (wl->role_free) {
     wl->role_free(wl);
   }
@@ -1085,7 +1116,7 @@ struct wl_surface *ctui_wl_surface(CTUI_WL *wl) { return wl->surf; }
 int ctui_wl_fd(CTUI_WL *wl) { return ctui_wl_dpy_fd(wl->d); }
 int ctui_wl_repeat_fd(CTUI_WL *wl) { return wl->d->repeat_fd; }
 int ctui_wl_dispatch(CTUI_WL *wl) { return ctui_wl_dpy_dispatch(wl->d); }
-void ctui_wl_flush(CTUI_WL *wl) { ctui_wl_dpy_flush(wl->d); }
+int ctui_wl_flush(CTUI_WL *wl) { return ctui_wl_dpy_flush(wl->d); }
 
 void ctui_wl_set_user(CTUI_WL *wl, void *user) { wl->user = user; }
 void *ctui_wl_user(const CTUI_WL *wl) { return wl->user; }

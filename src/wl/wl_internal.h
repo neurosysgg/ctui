@@ -84,6 +84,7 @@ struct CTUI_WL_DPY {
   void *raw_ctx;
   int focus_events; /* CTUI_FOCUS_EVENTs on the keyboard's enter / leave */
   int surfaces;     /* open on this connection */
+  int frames_done;  /* frame callbacks come in since the last flush */
 
   struct xkb_context *xkb;
   struct xkb_keymap *keymap;
@@ -131,6 +132,7 @@ struct CTUI_WL {
   int configured, closed;
   int cw, ch; /* a cell in buffer pixels */
   int cx0, cy0; /* the cells' origin in buffer pixels (a host's inset) */
+  struct wl_callback *frame; /* asked for, not come yet (ctui_wl_frame) */
 };
 
 /* a bare surface on d (scale, viewport), no role yet; NULL when out of
