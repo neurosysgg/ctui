@@ -23,6 +23,13 @@ int ctui_look_png_decode(const unsigned char *data, size_t len,
                          unsigned char **rgba, int *w, int *h);
 /* the same for a file */
 int ctui_look_png_load(const char *path, unsigned char **rgba, int *w, int *h);
+/* the same with the caller's limits, for a picture that isn't an icon (a
+ * screenshot): up to max_area px, its sides up to CTUI_LOOK_PNG_BIG_SIDE,
+ * a file up to max_file bytes. The RGBA is max_area * 4 bytes at most */
+#define CTUI_LOOK_PNG_BIG_SIDE 16384
+int ctui_look_png_load_max(const char *path, long long max_area,
+                           size_t max_file, unsigned char **rgba, int *w,
+                           int *h);
 /* only the size from the header: 0, or -1 if it isn't a PNG */
 int ctui_look_png_size(const char *path, int *w, int *h);
 

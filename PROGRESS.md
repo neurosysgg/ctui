@@ -237,6 +237,17 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **`look/png_read.c`: pictures past an icon's limits**
+  (2026-11-11, ctui-wm's screenshot popup on its panel host, which
+  decodes the capture itself). The reader refuses anything past 2048 x
+  2048 px or a 16 MB file -- right for icon themes, but a 4K screen's
+  capture is 8.3 M px. `ctui_look_png_load_max()` takes the caller's
+  area and file limits (sides up to 16384); `ctui_look_png_load()` and
+  `_decode()` keep the icon ones (png_test: a 2600 x 1700 picture
+  refused by load(), read back by load_max() at its exact limits, a
+  pixel or a byte past them refused). The read loop grows up to the
+  file limit and a byte past it, not by doubling past it.
+
 - [x] **`src/vk/`: see-through surfaces, the image arena shrinking**
   (2026-11-11, ctui-wm's layout editor and screenshot popup on its panel
   host, which kitty showed at `background_opacity`). The painter's

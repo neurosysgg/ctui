@@ -29,6 +29,9 @@ typedef struct {
   int plte_n;
   int trns; /* type 0/2: a colour that is clear */
   unsigned trns_v[3];
+  /* the largest side and area taken: png.h's, or load_max()'s */
+  uint32_t max_side;
+  uint64_t max_area;
 } INFO;
 
 static int valid_format(int type, int depth) {
@@ -175,8 +178,8 @@ static int read_ihdr(INFO *in, const unsigned char *d, uint32_t len) {
   in->depth = d[8];
   in->type = d[9];
   in->interlace = d[12];
-  if (!w || !h || w > CTUI_LOOK_PNG_MAX_SIDE || h > CTUI_LOOK_PNG_MAX_SIDE ||
-      (uint64_t)w * h > CTUI_LOOK_PNG_MAX_AREA ||
+  if (!w || !h || w > in->max_side || h > in->max_side ||
+      (uint64_t)w * h > in->max_area ||
       !valid_format(in->type, in->depth) || d[10] != 0 || d[11] != 0 ||
       in->interlace > 1) {
     return -1;
@@ -204,13 +207,15 @@ static void read_trns(INFO *in, const unsigned char *d, uint32_t len) {
   }
 }
 
-int ctui_look_png_decode(const unsigned char *data, size_t len,
-                       unsigned char **rgba, int *w, int *h) {
+static int decode(const unsigned char *data, size_t len, uint32_t max_side,
+                  uint64_t max_area, unsigned char **rgba, int *w, int *h) {
   *rgba = NULL;
   if (!data || len < 8 || memcmp(data, SIG, 8) != 0) {
     return -1;
   }
   INFO in = {0};
+  in.max_side = max_side;
+  in.max_area = max_area;
   int have_ihdr = 0, done = 0;
   unsigned char *z = NULL;
   size_t zlen = 0;
@@ -304,10 +309,17 @@ int ctui_look_png_decode(const unsigned char *data, size_t len,
   return 0;
 }
 
+int ctui_look_png_decode(const unsigned char *data, size_t len,
+                         unsigned char **rgba, int *w, int *h) {
+  return decode(data, len, CTUI_LOOK_PNG_MAX_SIDE, CTUI_LOOK_PNG_MAX_AREA,
+                rgba, w, h);
+}
+
 /* icons are small: a file past this isn't one */
 #define MAX_FILE (16 << 20)
 
-int ctui_look_png_load(const char *path, unsigned char **rgba, int *w, int *h) {
+static int load(const char *path, size_t max_file, uint32_t max_side,
+                uint64_t max_area, unsigned char **rgba, int *w, int *h) {
   *rgba = NULL;
   FILE *f = fopen(path, "rb");
   if (!f) {
@@ -317,8 +329,11 @@ int ctui_look_png_load(const char *path, unsigned char **rgba, int *w, int *h) {
   size_t len = 0, cap = 0;
   for (;;) {
     if (len == cap) {
-      cap = cap ? cap * 2 : 65536;
-      unsigned char *nb = cap <= MAX_FILE ? realloc(buf, cap) : NULL;
+      /* room for one byte past max_file: a file that big fails */
+      size_t next = cap ? cap * 2 : 65536;
+      next = next > max_file + 1 ? max_file + 1 : next;
+      unsigned char *nb = next > cap ? realloc(buf, next) : NULL;
+      cap = next;
       if (!nb) {
         free(buf);
         fclose(f);
@@ -333,9 +348,22 @@ int ctui_look_png_load(const char *path, unsigned char **rgba, int *w, int *h) {
     }
   }
   fclose(f);
-  int r = ctui_look_png_decode(buf, len, rgba, w, h);
+  int r = len <= max_file ? decode(buf, len, max_side, max_area, rgba, w, h)
+                          : -1;
   free(buf);
   return r;
+}
+
+int ctui_look_png_load(const char *path, unsigned char **rgba, int *w, int *h) {
+  return load(path, MAX_FILE, CTUI_LOOK_PNG_MAX_SIDE, CTUI_LOOK_PNG_MAX_AREA,
+              rgba, w, h);
+}
+
+int ctui_look_png_load_max(const char *path, long long max_area,
+                           size_t max_file, unsigned char **rgba, int *w,
+                           int *h) {
+  return load(path, max_file, CTUI_LOOK_PNG_BIG_SIDE,
+              max_area > 0 ? (uint64_t)max_area : 0, rgba, w, h);
 }
 
 int ctui_look_png_size(const char *path, int *w, int *h) {

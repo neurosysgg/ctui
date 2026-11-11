@@ -107,6 +107,47 @@ static void test_ours(void) {
   unlink(path);
 }
 
+/* past an icon's limits: a screenshot's size through load_max() */
+static void test_max(void) {
+  int bw = 2600, bh = 1700; /* 4.4 M px: past CTUI_LOOK_PNG_MAX_AREA */
+  size_t n = (size_t)bw * (size_t)bh * 4;
+  unsigned char *big = malloc(n);
+  for (size_t i = 0; big && i < n; i++) {
+    big[i] = (unsigned char)(i * 7 + i / 4093);
+  }
+  char path[] = "/tmp/png_test_max.XXXXXX";
+  int fd = mkstemp(path);
+  if (fd >= 0) {
+    close(fd);
+  }
+  struct stat st;
+  int made = big && ctui_look_png_write(path, big, bw, bh) == 0 &&
+             stat(path, &st) == 0;
+  size_t size = made ? (size_t)st.st_size : 0;
+  unsigned char *got = NULL;
+  int w = 0, h = 0;
+  int icon = made ? ctui_look_png_load(path, &got, &w, &h) : 0;
+  CTUI_TEST_ASSERT(made && icon != 0 && !got,
+                   "%dx%d px (a %zu-byte file): not an icon, refused", bw, bh,
+                   size);
+  int ok = made && ctui_look_png_load_max(path, (long long)bw * bh, size, &got,
+                                          &w, &h) == 0;
+  CTUI_TEST_ASSERT(ok && w == bw && h == bh && memcmp(got, big, n) == 0,
+                   "load_max(): read back the same at its exact limits");
+  free(got);
+  got = NULL;
+  CTUI_TEST_ASSERT(
+      made &&
+          ctui_look_png_load_max(path, (long long)bw * bh - 1, size, &got, &w,
+                                 &h) != 0 &&
+          ctui_look_png_load_max(path, (long long)bw * bh, size - 1, &got, &w,
+                                 &h) != 0 &&
+          !got,
+      "a pixel or a byte past its limits: refused");
+  free(big);
+  unlink(path);
+}
+
 static void test_broken(void) {
   size_t len = 0;
   unsigned char *good = slurp("tests/data/png/rgba8_dynamic.png", &len);
@@ -162,5 +203,6 @@ int main(void) {
   test_cases();
   test_ours();
   test_broken();
+  test_max();
   return ctui_test_summary();
 }
