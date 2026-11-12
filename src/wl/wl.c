@@ -169,9 +169,14 @@ int ctui_wl_key_event(uint32_t sym, uint32_t cp, unsigned mods,
     }
     ch = cp;
     /* the char says shift already, as a terminal's byte does; a control
-     * byte says ctrl (xkbcommon's Control transformation made it) */
-    mods &= ~(unsigned)CTUI_MOD_SHIFT;
-    if (ch < 0x20 || ch == 0x7f) {
+     * byte says ctrl (xkbcommon's Control transformation made it) -- but
+     * not shift, which stays the only thing telling ctrl+shift+C from
+     * ctrl+C (as core/input.c decodes kitty's CSI u) */
+    int control = ch < 0x20 || ch == 0x7f;
+    if (!control || !(mods & CTUI_MOD_CTRL)) {
+      mods &= ~(unsigned)CTUI_MOD_SHIFT;
+    }
+    if (control) {
       mods &= ~(unsigned)CTUI_MOD_CTRL;
     }
   }

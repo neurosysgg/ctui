@@ -41,6 +41,11 @@ static void test_keysyms(void) {
   k = key(XKB_KEY_a, 0x01, CTUI_MOD_CTRL);
   CTUI_TEST_ASSERT(k.type == CTUI_KEY_CHAR && k.ch == 0x01 && k.mods == 0,
                    "ctrl+a: its control byte, the ctrl in it");
+  k = key(XKB_KEY_C, 0x03, CTUI_MOD_CTRL | CTUI_MOD_SHIFT);
+  CTUI_TEST_ASSERT(k.type == CTUI_KEY_CHAR && k.ch == 0x03 &&
+                       k.mods == CTUI_MOD_SHIFT,
+                   "ctrl+shift+c: its control byte, shift kept (not "
+                   "ctrl+c), as kitty's CSI u decodes");
   k = key(XKB_KEY_x, 'x', CTUI_MOD_ALT);
   CTUI_TEST_ASSERT(k.ch == 'x' && k.mods == CTUI_MOD_ALT, "alt+x keeps alt");
   k = key(XKB_KEY_Right, 0, CTUI_MOD_CTRL);
@@ -91,6 +96,9 @@ static void test_keymap(void) {
   CTUI_TEST_ASSERT(k.ch == 'Q' && k.mods == 0, "shift: 'Q'");
   k = typed(km, KEY_C, 0, 1);
   CTUI_TEST_ASSERT(k.ch == 0x03 && k.mods == 0, "ctrl+c: 0x03");
+  k = typed(km, KEY_C, 1, 1);
+  CTUI_TEST_ASSERT(k.ch == 0x03 && k.mods == CTUI_MOD_SHIFT,
+                   "ctrl+shift+c through the keymap: 0x03 with shift");
   k = typed(km, KEY_BACKSPACE, 0, 0);
   CTUI_TEST_ASSERT(k.ch == 0x7f, "Backspace's key: 0x7f");
   k = typed(km, KEY_TAB, 1, 0);

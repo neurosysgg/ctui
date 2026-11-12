@@ -237,6 +237,12 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **ctrl+shift+letter in a window** (2026-11-12, ctui-wm: ctui-term
+  in a window, whose copy / paste / find are ctrl+shift chords).
+  `ctui_wl_key_event()` dropped shift from every character, so
+  ctrl+shift+C arrived as ctrl+C's control byte, the same event. A
+  control byte typed with shift now keeps `CTUI_MOD_SHIFT`, as
+  core/input.c already decodes kitty's CSI u for it.
 - [x] **A window's palette** (2026-11-11, ctui-wm: ctui-top `-w`, its
   first app in a window of its own after ctui-mus). `CTUI_HOST` took the
   default colours (`ctui_host_set_default()`) but not the 16 that
