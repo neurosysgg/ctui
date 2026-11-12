@@ -237,6 +237,12 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **ctui-term counts as kitty for graphics** (2026-11-12, ctui-wm:
+  ctui-top in ctui-term drew truecolour cells, not its pixel graphs).
+  `ctui_gfx_detect_caps()` takes `TERM_PROGRAM=ctui-term` as kitty:
+  ctui-wm's terminal keeps kitty's pictures in libghostty-vt and its
+  host draws them (placements, placeholders, animation, every medium).
+  tests/gfx_sink_test.c's test_detect.
 - [x] **A super modifier** (2026-11-12, ctui-wm: ctui-term's zone keys,
   super+A / super+1-9 / super+ctrl+1-9, had no way to be told apart).
   `CTUI_MOD_SUPER` (1 << 3) in key and mouse events: a window's from

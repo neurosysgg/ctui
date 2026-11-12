@@ -118,8 +118,8 @@ just the type and the `CTUI_COLOR_*` basic-color enum.
 ## `gfx.h` — graphics capability negotiation
 
 - `ctui_gfx_detect_caps()` — env-sniffs (`TERM`/`COLORTERM`/
-  `KITTY_WINDOW_ID`) into a `CTUI_GFX_MODE` bitmask; `CTUI_GFX_ANSI16`
-  is always set.
+  `KITTY_WINDOW_ID`, `TERM_PROGRAM=ctui-term` as kitty) into a
+  `CTUI_GFX_MODE` bitmask; `CTUI_GFX_ANSI16` is always set.
 - `ctui_gfx_kitty_display(row, col, cell_cols, cell_rows, rgba, width,
   height, image_id)` / `ctui_gfx_kitty_delete(image_id)` — transmit/
   remove a Kitty pixel-graphics image directly to stdout, bypassing

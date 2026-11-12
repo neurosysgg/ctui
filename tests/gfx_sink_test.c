@@ -241,8 +241,25 @@ static void test_drawn(void) {
   rmdir(dir);
 }
 
+/* the tiers from the environment: ctui-term (ctui-wm's terminal) as
+ * kitty, by TERM_PROGRAM */
+static void test_detect(void) {
+  unsetenv("KITTY_WINDOW_ID");
+  setenv("TERM", "xterm-256color", 1);
+  unsetenv("COLORTERM");
+  unsetenv("TERM_PROGRAM");
+  unsigned plain = ctui_gfx_detect_caps();
+  setenv("TERM_PROGRAM", "ctui-term", 1);
+  unsigned term = ctui_gfx_detect_caps();
+  CTUI_TEST_ASSERT(!(plain & CTUI_GFX_KITTY) && (term & CTUI_GFX_KITTY) &&
+                       (term & CTUI_GFX_TRUECOLOR),
+                   "TERM_PROGRAM=ctui-term: kitty's graphics, truecolour");
+  unsetenv("TERM_PROGRAM");
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
+  test_detect();
   ctui_gfx_set_sink(&k_sink, NULL);
   ctui_gfx_set_mode(CTUI_GFX_KITTY);
   g_img = ctui_gfx_kitty_image_new(6);

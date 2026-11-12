@@ -43,7 +43,11 @@ unsigned int ctui_gfx_detect_caps(void) {
     caps |= CTUI_GFX_TRUECOLOR | CTUI_GFX_ANSI256;
   }
 
-  if (kitty_window || (term && strcmp(term, "xterm-kitty") == 0)) {
+  /* ctui-wm's ctui-term speaks kitty's graphics protocol too (its
+   * libghostty-vt keeps the pictures, its host draws them) */
+  const char *program = getenv("TERM_PROGRAM");
+  int ctui_term = program && strcmp(program, "ctui-term") == 0;
+  if (kitty_window || ctui_term || (term && strcmp(term, "xterm-kitty") == 0)) {
     /* kitty implies both text tiers below it */
     caps |= CTUI_GFX_KITTY | CTUI_GFX_TRUECOLOR | CTUI_GFX_ANSI256;
   }
