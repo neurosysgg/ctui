@@ -37,6 +37,10 @@ static unsigned mods_now(const CTUI_WL_DPY *d) {
                                    XKB_STATE_MODS_EFFECTIVE) > 0) {
     m |= CTUI_MOD_ALT;
   }
+  if (xkb_state_mod_name_is_active(d->state, XKB_MOD_NAME_LOGO,
+                                   XKB_STATE_MODS_EFFECTIVE) > 0) {
+    m |= CTUI_MOD_SUPER;
+  }
   return m;
 }
 

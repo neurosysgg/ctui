@@ -73,6 +73,18 @@ static void test_keynames(void) {
           key_is("ctrl++", CTUI_KEY_CHAR, '+', CTUI_MOD_CTRL),
       "modifiers as the terminal sends them (ctrl+letter its "
       "control byte, shift+tab BACKTAB)");
+  CTUI_TEST_ASSERT(
+      key_is("super+a", CTUI_KEY_CHAR, 'a', CTUI_MOD_SUPER) &&
+          key_is("super+ctrl+1", CTUI_KEY_CHAR, '1',
+                 CTUI_MOD_SUPER | CTUI_MOD_CTRL) &&
+          key_is("super+ctrl+r", CTUI_KEY_CHAR, 0x12, CTUI_MOD_SUPER) &&
+          key_is("super+shift+g", CTUI_KEY_CHAR, 'G', CTUI_MOD_SUPER) &&
+          key_is("shift+a", CTUI_KEY_CHAR, 'A', 0) &&
+          key_is("shift+1", CTUI_KEY_CHAR, '1', CTUI_MOD_SHIFT) &&
+          key_is("ctrl+shift+alt+h", CTUI_KEY_CHAR, 0x08,
+                 CTUI_MOD_SHIFT | CTUI_MOD_ALT),
+      "super; shift+letter its capital (as typed), shift kept on "
+      "anything else and beside ctrl");
   CTUI_TEST_ASSERT(key_refused("") && key_refused("ctrl+") &&
                        key_refused("hyper+a") && key_refused("ab") &&
                        key_refused("f13") && key_refused("f0") &&

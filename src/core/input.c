@@ -307,7 +307,7 @@ static int resolve_csi(CTUI_EVENT *ev, CTUI_KEYPRESS_EVENT_DATA *kp,
       event = strtol(end + 1, NULL, 10);
     }
   }
-  unsigned int mods = (unsigned int)(p2 - 1) & 7u;
+  unsigned int mods = (unsigned int)(p2 - 1) & 15u; /* shift alt ctrl super */
   int r = resolve_csi_final(ev, kp, c, p1, shifted, mods);
   if (ev->type == CTUI_KEYPRESS_EVENT) {
     if (event == 3) {

@@ -61,6 +61,15 @@ static void test_keys(void) {
   CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_RIGHT &&
                        kp->mods == CTUI_MOD_CTRL,
                    "CSI 1;5C is ctrl+RIGHT (modifier param 5 = 1 + ctrl)");
+  feed("\x1b[97;9u\x1b[1;13A");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_CHAR && kp->ch == 'a' &&
+                       kp->mods == CTUI_MOD_SUPER,
+                   "CSI 97;9u is super+a (9 = 1 + super's 8)");
+  kp = next_key(&ev);
+  CTUI_TEST_ASSERT(kp && kp->type == CTUI_KEY_UP &&
+                       kp->mods == (CTUI_MOD_SUPER | CTUI_MOD_CTRL),
+                   "CSI 1;13A is ctrl+super+UP");
 
   feed("\x1b[3~");
   kp = next_key(&ev);

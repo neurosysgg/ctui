@@ -47,6 +47,10 @@ enum {
   CTUI_MOD_SHIFT = 1 << 0,
   CTUI_MOD_ALT = 1 << 1,
   CTUI_MOD_CTRL = 1 << 2,
+  /* the logo key: in a window (src/wl), and from a terminal that reports
+   * it (kitty's CSI u and modifier params: bit 8; a compositor usually
+   * keeps most super chords for itself) */
+  CTUI_MOD_SUPER = 1 << 3,
 };
 
 typedef struct {

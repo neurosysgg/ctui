@@ -237,6 +237,15 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A super modifier** (2026-11-12, ctui-wm: ctui-term's zone keys,
+  super+A / super+1-9 / super+ctrl+1-9, had no way to be told apart).
+  `CTUI_MOD_SUPER` (1 << 3) in key and mouse events: a window's from
+  xkb's Logo modifier (src/wl), a terminal's from bit 8 of kitty's CSI u
+  and the modifier params (input.c masked them to 3 bits), `super+` in
+  `ctui_key_parse()` and the nodes' key verbs. On the way the parser's
+  shift+letter became its capital without the SHIFT bit ("shift+g":
+  'G'), as every input path gives it -- "super+shift+g" could never
+  match before. tests/input_test.c, tests/ui_test.c.
 - [x] **Bold and italic faces in src/vk/** (2026-11-12, ctui-wm:
   ctui-term's bold looked smeared next to kitty's). `ctui_vk_set_face()`
   gives the painter a TrueType face for bold, italic or both (the

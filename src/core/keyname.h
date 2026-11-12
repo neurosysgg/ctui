@@ -9,7 +9,8 @@
  * into the CTUI_KEYPRESS_EVENT_DATA the terminal's bytes for that key give
  * (core/input.c), so a handler can't tell the difference:
  *
- *   MODS+KEY     mods: ctrl, alt, shift, joined by '+' ("ctrl+alt+x")
+ *   MODS+KEY     mods: ctrl, alt, shift, super, joined by '+'
+ *                ("ctrl+alt+x")
  *   KEY          a name, as ctui_keytype_name() says it (up, down, left,
  *                right, enter, esc, tab, backtab, home, end, pgup, pgdn,
  *                insert, delete, f1-f12), backspace, space; or one
@@ -17,7 +18,8 @@
  *
  * Names and modifiers in any case; a character as written. As the
  * terminal sends them: ctrl+letter (and ctrl+@ .. ctrl+_) is its control
- * byte without the CTRL bit (ctrl+f: ch 0x06), shift+tab is BACKTAB,
+ * byte without the CTRL bit (ctrl+f: ch 0x06), shift+letter its capital
+ * without the SHIFT bit ("shift+g": 'G'), shift+tab is BACKTAB,
  * backspace is CHAR 0x7f, space CHAR ' '. */
 
 /* 0 with *out filled (repeat, base 0), -1 for text that isn't a key */

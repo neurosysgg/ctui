@@ -291,6 +291,8 @@ static int verb_mods(const char *s, size_t len, const char **verb, size_t *vlen,
       *mods |= CTUI_MOD_ALT;
     } else if (m == 5 && strncasecmp(s, "shift", 5) == 0) {
       *mods |= CTUI_MOD_SHIFT;
+    } else if (m == 5 && strncasecmp(s, "super", 5) == 0) {
+      *mods |= CTUI_MOD_SUPER;
     } else {
       return -1;
     }

@@ -74,6 +74,8 @@ int ctui_key_parse(const char *s, size_t n, CTUI_KEYPRESS_EVENT_DATA *out) {
       k.mods |= CTUI_MOD_ALT;
     } else if (is(s, len, "shift")) {
       k.mods |= CTUI_MOD_SHIFT;
+    } else if (is(s, len, "super")) {
+      k.mods |= CTUI_MOD_SUPER;
     } else {
       return -1;
     }
@@ -107,6 +109,11 @@ int ctui_key_parse(const char *s, size_t n, CTUI_KEYPRESS_EVENT_DATA *out) {
       ((k.ch >= 'a' && k.ch <= 'z') || (k.ch >= '@' && k.ch <= '_'))) {
     k.ch &= 0x1f;
     k.mods &= ~(unsigned)CTUI_MOD_CTRL;
+  } else if (k.type == CTUI_KEY_CHAR && (k.mods & CTUI_MOD_SHIFT) &&
+             k.ch >= 'a' && k.ch <= 'z') {
+    /* the capital says shift, as the terminal's byte does */
+    k.ch -= 'a' - 'A';
+    k.mods &= ~(unsigned)CTUI_MOD_SHIFT;
   }
   *out = k;
   return 0;

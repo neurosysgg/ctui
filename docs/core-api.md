@@ -348,7 +348,8 @@ addEventListener()-style: widgets register interest in one
 - `CTUI_KEYPRESS_EVENT_DATA` — `type` (arrows, ENTER/ESC/TAB, HOME/END/
   PGUP/PGDN/INSERT/DELETE/BACKTAB, F1-F12 (`CTUI_KEY_F1 + n - 1`), CHAR, or NONE for an unrecognised
   sequence), `ch` (a codepoint for CHAR) and `mods`
-  (`CTUI_MOD_SHIFT/ALT/CTRL`, where the terminal reports them; on
+  (`CTUI_MOD_SHIFT/ALT/CTRL/SUPER`, where the terminal reports them --
+  super in a window, and from kitty's CSI u / modifier params; on
   Enter/Tab/Backspace only after `ctui_kitty_keys_enable()`), `repeat`
   (a held key's repeat) and `base` (its US-layout place, when it differs),
   both only after `ctui_kitty_keys_enable_events()` -- in a window
