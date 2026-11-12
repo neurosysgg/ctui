@@ -164,6 +164,21 @@ int ctui_wl_key_event(uint32_t sym, uint32_t cp, unsigned mods,
       type = (CTUI_KEYTYPE)(CTUI_KEY_F1 + (int)(sym - XKB_KEY_F1));
       break;
     }
+    if (!cp && (mods & CTUI_MOD_CTRL)) {
+      /* xkbcommon's Control made ctrl+@ (shift+2) a NUL and gives it as
+       * none: the terminal's byte, as kitty's CSI u decodes it (its
+       * control byte, the char saying shift, the byte ctrl); else the
+       * key's own char with ctrl (ctrl+space, CSI u's) */
+      uint32_t c = xkb_keysym_to_utf32(sym);
+      if (c >= '@' && c <= '_') {
+        memset(out, 0, sizeof *out);
+        out->type = CTUI_KEY_CHAR;
+        out->ch = c & 0x1f;
+        out->mods = mods & ~(unsigned)(CTUI_MOD_CTRL | CTUI_MOD_SHIFT);
+        return 1;
+      }
+      cp = c;
+    }
     if (!cp) {
       return 0;
     }
@@ -187,12 +202,20 @@ int ctui_wl_key_event(uint32_t sym, uint32_t cp, unsigned mods,
   return 1;
 }
 
+uint32_t ctui_wl_key_base(struct xkb_keymap *km, uint32_t code, uint32_t ch) {
+  const xkb_keysym_t *syms = NULL;
+  int n = km ? xkb_keymap_key_get_syms_by_level(km, code, 0, 0, &syms) : 0;
+  uint32_t b = n == 1 ? xkb_keysym_to_utf32(syms[0]) : 0;
+  return b >= 0x20 && b != 0x7f && b != ch ? b : 0;
+}
+
 static int key_event(const CTUI_WL_DPY *d, xkb_keysym_t sym, uint32_t cp,
-                     CTUI_WL_QEV *q) {
+                     xkb_keycode_t code, CTUI_WL_QEV *q) {
   memset(q, 0, sizeof *q);
   if (!ctui_wl_key_event(sym, cp, mods_now(d), &q->d.key)) {
     return 0;
   }
+  q->d.key.base = ctui_wl_key_base(d->keymap, code, q->d.key.ch);
   q->ev.type = CTUI_KEYPRESS_EVENT;
   q->ev.scope = CTUI_EVENT_SCOPE_GLOBAL;
   q->ev.ev_source = "input";
@@ -312,7 +335,7 @@ static void kb_key(void *data, struct wl_keyboard *kb, uint32_t serial,
     }
   }
   CTUI_WL_QEV q;
-  if (!key_event(d, sym, cp, &q)) {
+  if (!key_event(d, sym, cp, code, &q)) {
     return;
   }
   push(d, &q);

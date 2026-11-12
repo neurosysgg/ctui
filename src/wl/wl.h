@@ -168,5 +168,11 @@ void ctui_wl_title(CTUI_WL *wl, const char *title);
  * 1, or 0 for a key that makes none (a modifier alone) */
 int ctui_wl_key_event(uint32_t sym, uint32_t cp, unsigned mods,
                       CTUI_KEYPRESS_EVENT_DATA *out);
+/* the event's base (CTUI_KEYPRESS_EVENT_DATA's, kitty's base layout key)
+ * for the key code (xkb's) in keymap km: its unshifted char in the
+ * keymap's first layout -- on a US keymap the US place -- when that
+ * differs from ch; 0 else (no char, a control) */
+struct xkb_keymap;
+uint32_t ctui_wl_key_base(struct xkb_keymap *km, uint32_t code, uint32_t ch);
 
 #endif

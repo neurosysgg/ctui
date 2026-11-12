@@ -55,6 +55,15 @@ static void test_keysyms(void) {
   CTUI_TEST_ASSERT(k.type == CTUI_KEY_F5, "F5");
   k = key(XKB_KEY_Shift_L, 0, CTUI_MOD_SHIFT);
   CTUI_TEST_ASSERT(k.type == CTUI_KEY_NONE, "a modifier alone: no event");
+  k = key(XKB_KEY_at, 0, CTUI_MOD_CTRL | CTUI_MOD_SHIFT | CTUI_MOD_ALT);
+  CTUI_TEST_ASSERT(k.type == CTUI_KEY_CHAR && k.ch == 0 &&
+                       k.mods == CTUI_MOD_ALT,
+                   "ctrl+shift+alt+2: '@' Control made NUL, its control "
+                   "byte with alt (as kitty's CSI u decodes), not dropped");
+  k = key(XKB_KEY_space, 0, CTUI_MOD_CTRL);
+  CTUI_TEST_ASSERT(k.type == CTUI_KEY_CHAR && k.ch == ' ' &&
+                       k.mods == CTUI_MOD_CTRL,
+                   "ctrl+space: ' ' with ctrl, as CSI u's");
   k = key(XKB_KEY_eacute, 0xe9, 0);
   CTUI_TEST_ASSERT(k.type == CTUI_KEY_CHAR && k.ch == 0xe9, "é");
 }
@@ -105,6 +114,15 @@ static void test_keymap(void) {
   CTUI_TEST_ASSERT(k.type == CTUI_KEY_BACKTAB, "shift+Tab's key: BACKTAB");
   k = typed(km, KEY_ESC, 0, 0);
   CTUI_TEST_ASSERT(k.type == CTUI_KEY_ESC, "Esc's key: ESC");
+  k = typed(km, KEY_2, 1, 1);
+  CTUI_TEST_ASSERT(k.type == CTUI_KEY_CHAR && k.ch == 0 && k.mods == 0,
+                   "ctrl+shift+2 through the keymap: NUL, not dropped");
+  CTUI_TEST_ASSERT(ctui_wl_key_base(km, KEY_2 + 8, k.ch) == '2' &&
+                       ctui_wl_key_base(km, KEY_Q + 8, 'Q') == 'q' &&
+                       ctui_wl_key_base(km, KEY_Q + 8, 'q') == 0 &&
+                       ctui_wl_key_base(km, KEY_ESC + 8, 0x1b) == 0,
+                   "base: the key's unshifted char where it differs (2 "
+                   "under ctrl+shift+2, q under Q), none for q or Esc");
   k = typed(km, KEY_LEFTSHIFT, 1, 0);
   CTUI_TEST_ASSERT(k.type == CTUI_KEY_NONE, "Shift's key alone: nothing");
   xkb_keymap_unref(km);

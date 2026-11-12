@@ -62,7 +62,9 @@ typedef struct {
   /* where the key sits on a US PC-101 layout, as its codepoint there
    * (kitty's base layout key: a German QWERTZ "y" has base 'z'), when that
    * differs from ch; 0 else, and outside ctui_kitty_keys_enable_events() --
-   * a keyboard played by position rather than by letter */
+   * a keyboard played by position rather than by letter. In a window
+   * (src/wl) always: the key's unshifted char in the keymap's first
+   * layout (ctui_wl_key_base()) */
   uint32_t base;
 } CTUI_KEYPRESS_EVENT_DATA;
 

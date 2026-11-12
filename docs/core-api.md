@@ -351,7 +351,9 @@ addEventListener()-style: widgets register interest in one
   (`CTUI_MOD_SHIFT/ALT/CTRL`, where the terminal reports them; on
   Enter/Tab/Backspace only after `ctui_kitty_keys_enable()`), `repeat`
   (a held key's repeat) and `base` (its US-layout place, when it differs),
-  both only after `ctui_kitty_keys_enable_events()`.
+  both only after `ctui_kitty_keys_enable_events()` -- in a window
+  (src/wl) `base` always, the key's unshifted character in the keymap's
+  first layout.
 - `CTUI_MOUSE_EVENT_DATA` — `action` (press/release/motion/scroll),
   `button` (0 left, 1 middle, 2 right, `CTUI_MOUSE_BUTTON_BACK` /
   `_FORWARD` for a mouse's side buttons, 5-6 beyond), absolute

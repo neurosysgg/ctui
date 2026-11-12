@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **ctrl+@ in a window, and a window's base keys** (2026-11-12,
+  ctui-wm: ctui-term's ctrl+shift+alt+2, "layout stack", never arrived).
+  xkbcommon's Control turns shift+2's '@' into NUL and gives it as no
+  character, so `ctui_wl_key_event()` dropped the key. With ctrl held a
+  key whose character Control emptied now takes the keysym's own: '@'
+  .. '_' become their control byte (ctrl+@ a NUL, ctrl and shift in
+  it), anything else keeps ctrl (ctrl+space ' '), as core/input.c
+  decodes kitty's CSI u. And a window's keys carry `base` as kitty's
+  do: the key's unshifted character in the keymap's first layout
+  (`ctui_wl_key_base()`), so the NUL still says it was the 2 key.
 - [x] **ctrl+shift+letter in a window** (2026-11-12, ctui-wm: ctui-term
   in a window, whose copy / paste / find are ctrl+shift chords).
   `ctui_wl_key_event()` dropped shift from every character, so
