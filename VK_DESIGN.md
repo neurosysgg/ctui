@@ -429,8 +429,10 @@ everything moves smoothly, the playbar most of all).
 - **A glyph cache, not a fixed atlas**: a slot drawn the first time a
   cell shows its codepoint, only new slots go up, the atlas on the card
   doubling when full. Coverage bytes, the shader blending fg over bg
-  by them; bold a 1 px smear still (kitty uses the Bold face: a second
-  file, if the difference shows).
+  by them; bold a 1 px smear where no bold face was given, else that
+  face (`ctui_vk_set_face()`, 2026-11-12: the difference showed in
+  ctui-wm's terminal; italic and bold italic the same way), the face
+  part of a slot's key.
 - **Box drawing and blocks** (U+2500-259F): the font's box mapped onto
   the cell exactly, so lines meet the next cell's (kitty draws these
   itself; this is the font's own shapes, stretched).

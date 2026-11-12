@@ -237,6 +237,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Bold and italic faces in src/vk/** (2026-11-12, ctui-wm:
+  ctui-term's bold looked smeared next to kitty's). `ctui_vk_set_face()`
+  gives the painter a TrueType face for bold, italic or both (the
+  caller's bytes, one copy for every `CTUI_VK`), drawn by the same
+  rasterizer at the regular font's cell. The glyph cache keys a slot by
+  its face too; a cell drawn from a bold face goes to the card without
+  `CTUI_ATTR_BOLD`, so the shader's 1 px smear only applies where there
+  is none, and a glyph the face lacks (the regular font's, the
+  provider's) is smeared on the host instead. Bold italic falls back to
+  bold, then italic; italic without a face stays upright. ctui-wm's
+  ctui-host finds the faces of kitty.conf's family through fontconfig.
+  tests/vk/vk_test.c's test_faces.
 - [x] **ctrl+@ in a window, and a window's base keys** (2026-11-12,
   ctui-wm: ctui-term's ctrl+shift+alt+2, "layout stack", never arrived).
   xkbcommon's Control turns shift+2's '@' into NUL and gives it as no

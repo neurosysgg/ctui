@@ -88,6 +88,13 @@ typedef struct {
 #define GMAP_FIRST 1024u
 /* a map key's flag: the glyph drawn across two cells */
 #define GKEY_WIDE 0x80000000u
+/* a map key's face (FACE_INDEX): the glyph drawn from that styled face
+ * (ctui_vk_set_face()) */
+#define GKEY_STYLE_SHIFT 29
+#define GKEY_STYLE (3u << GKEY_STYLE_SHIFT)
+/* CTUI_ATTR_BOLD | CTUI_ATTR_ITALIC as a face's index into faces[] */
+#define FACE_INDEX(a) \
+  ((((a) & CTUI_ATTR_BOLD) ? 1u : 0u) | (((a) & CTUI_ATTR_ITALIC) ? 2u : 0u))
 
 /* the glyph map's entry: key 0 empty, else a codepoint (| GKEY_WIDE) and
  * its slot (CTUI_VK_GLYPH_BOX: no font has it) */
@@ -134,6 +141,10 @@ struct CTUI_VK {
   /* the font (CTUI_FONT's file, else the one built in) and its size */
   CTUI_TTF ttf;
   uint8_t *ttf_file;
+  /* the styled faces (ctui_vk_set_face()), by FACE_INDEX; [0] unused:
+   * the regular one is ttf. Their bytes are the caller's */
+  CTUI_TTF faces[4];
+  unsigned char has_face[4];
   float em;
   int base;
   /* the glyph cache: the codepoints drawn so far (gmap, open addressing
@@ -889,6 +900,42 @@ void ctui_vk_set_glyph_fn(CTUI_VK *vk, CTUI_VK_GLYPH_FN fn, void *ctx) {
   free(old);
 }
 
+int ctui_vk_set_face(CTUI_VK *vk, unsigned attrs, const uint8_t *data, size_t size) {
+  unsigned i = FACE_INDEX(attrs);
+  if (i == 0u) {
+    return -1;
+  }
+  int rc = 0;
+  vk->has_face[i] = 0;
+  if (data && ctui_ttf_load(&vk->faces[i], data, size) != 0) {
+    ctui_logf(E_WRN, "[CTUI:VK] - a %s%s face that isn't TrueType: not used\n",
+              (i & 1u) ? "bold" : "", (i & 2u) ? " italic" : "");
+    data = NULL;
+    rc = -1;
+  }
+  vk->has_face[i] = data != NULL;
+  /* the styled glyphs drawn so far drawn again: the map without them */
+  if (!vk->gmap) {
+    return rc;
+  }
+  GENT *old = vk->gmap;
+  unsigned cap = vk->gmap_cap;
+  vk->gmap = calloc(cap, sizeof *vk->gmap);
+  if (!vk->gmap) {
+    vk->gmap = old;
+    return rc;
+  }
+  vk->gmap_n = 0;
+  for (unsigned k = 0; k < cap; k++) {
+    if (old[k].key && !(old[k].key & GKEY_STYLE)) {
+      *gmap_find(vk, old[k].key) = old[k];
+      vk->gmap_n++;
+    }
+  }
+  free(old);
+  return rc;
+}
+
 /* cov (cells * gw x gh) into the slots from slot on, a cell each */
 static void slots_fill(CTUI_VK *vk, unsigned slot, unsigned cells) {
   unsigned stride = cells * vk->gw;
@@ -904,16 +951,36 @@ static void slots_fill(CTUI_VK *vk, unsigned slot, unsigned cells) {
   }
 }
 
-/* cp drawn into cov (cells * gw x gh): the font's glyph, else the
- * provider's. 0, or -1 when neither has it */
-static int glyph_draw(CTUI_VK *vk, uint32_t cp, unsigned cells) {
+/* a bold glyph from a face without one: smeared a pixel right, as the
+ * painter does where there's no bold face at all */
+static void smear(uint8_t *cov, int w, int h) {
+  for (int y = 0; y < h; y++) {
+    uint8_t *row = cov + (size_t)y * (size_t)w;
+    for (int x = w - 1; x > 0; x--) {
+      row[x] = row[x] > row[x - 1] ? row[x] : row[x - 1];
+    }
+  }
+}
+
+/* cp drawn into cov (cells * gw x gh): face's glyph (FACE_INDEX), else
+ * the regular font's (smeared for a bold face), else the provider's
+ * (smeared too). 0, or -1 when none has it */
+static int glyph_draw(CTUI_VK *vk, uint32_t cp, unsigned cells, unsigned face) {
   int cw = (int)(cells * vk->gw);
-  uint16_t g = ctui_ttf_glyph(&vk->ttf, cp);
+  const CTUI_TTF *f = &vk->ttf;
+  uint16_t g = 0;
+  if (face && (g = ctui_ttf_glyph(&vk->faces[face], cp)) != 0) {
+    f = &vk->faces[face];
+  } else {
+    g = ctui_ttf_glyph(&vk->ttf, cp);
+  }
   if (g) {
-    if (ctui_ttf_draw(&vk->ttf, g, vk->em, cw, (int)vk->gh, vk->base,
+    if (ctui_ttf_draw(f, g, vk->em, cw, (int)vk->gh, vk->base,
                       cells == 1 && stretched(cp), vk->cov)) {
       ctui_logf(E_WRN, "[CTUI:VK] - glyph 0x%x's outline unreadable: blank\n",
                 (unsigned)cp);
+    } else if ((face & 1u) && f == &vk->ttf) {
+      smear(vk->cov, cw, (int)vk->gh);
     }
     return 0;
   }
@@ -921,17 +988,31 @@ static int glyph_draw(CTUI_VK *vk, uint32_t cp, unsigned cells) {
     memset(vk->cov, 0, (size_t)cw * vk->gh);
     if (vk->glyph_fn(vk->glyph_ctx, cp, (int)cells, (int)vk->gw, (int)vk->gh,
                      vk->base, vk->em, vk->cov) == 0) {
+      if (face & 1u) {
+        smear(vk->cov, cw, (int)vk->gh);
+      }
       return 0;
     }
   }
   return -1;
 }
 
+/* the face a cell's attrs draw from (FACE_INDEX): bold / italic as asked
+ * where that face was given, bold italic falling back to bold, then
+ * italic; 0 the regular font */
+static unsigned face_of(const CTUI_VK *vk, unsigned attr) {
+  unsigned want = FACE_INDEX(attr);
+  if (want == 3u && !vk->has_face[3]) {
+    want = vk->has_face[1] ? 1u : 2u;
+  }
+  return vk->has_face[want] ? want : 0u;
+}
+
 /* ch's slot in the cache (a wide glyph's left half: its right is the next
- * slot), drawn into it the first time. A cluster is its first codepoint
- * (one font, no shaping) at the cluster's width; what no font has is the
- * box, logged once */
-static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch, int *wide) {
+ * slot) in face (FACE_INDEX), drawn into it the first time. A cluster is
+ * its first codepoint (one font, no shaping) at the cluster's width; what
+ * no font has is the box, logged once */
+static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch, unsigned face, int *wide) {
   *wide = 0;
   if (ch == 0 || ch == ' ' || ch == CTUI_CELL_CONT) {
     return 0;
@@ -949,13 +1030,13 @@ static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch, int *wide) {
     return CTUI_VK_GLYPH_BOX;
   }
   unsigned cells = ctui_cell_width(ch) == 2 ? 2u : 1u;
-  uint32_t key = cp | (cells == 2 ? GKEY_WIDE : 0u);
+  uint32_t key = cp | (cells == 2 ? GKEY_WIDE : 0u) | face << GKEY_STYLE_SHIFT;
   const GENT *e = gmap_find(vk, key);
   if (e->key) {
     *wide = e->slot != CTUI_VK_GLYPH_BOX && cells == 2;
     return e->slot;
   }
-  if (vk->nslots + cells >= CTUI_VK_GLYPH_BOX || glyph_draw(vk, cp, cells)) {
+  if (vk->nslots + cells >= CTUI_VK_GLYPH_BOX || glyph_draw(vk, cp, cells, face)) {
     ctui_logf(E_WRN, "[CTUI:VK] - no glyph for 0x%x, drawn as a box\n",
               (unsigned)cp);
     (void)gmap_put(vk, key, CTUI_VK_GLYPH_BOX);
@@ -1024,11 +1105,15 @@ void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
     return;
   }
   int wide;
-  uint32_t slot = glyph_slot(vk, c->ch, &wide);
+  unsigned face = face_of(vk, c->attr);
+  uint32_t slot = glyph_slot(vk, c->ch, face, &wide);
   if (wide) {
     flags |= CTUI_VK_WIDE;
   }
-  out[0] = slot | (c->attr | flags) << 16;
+  /* a bold face drew it bold (or smeared it already): the painter's
+   * smear only without one */
+  unsigned attr = (face & 1u) ? (c->attr & ~(unsigned)CTUI_ATTR_BOLD) : c->attr;
+  out[0] = slot | (attr | flags) << 16;
   out[1] = fg;
   out[2] = bg;
 }

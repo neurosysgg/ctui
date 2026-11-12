@@ -117,6 +117,18 @@ typedef int (*CTUI_VK_GLYPH_FN)(void *ctx, uint32_t cp, int cells, int gw,
  * before the first frame; it stays across resizes */
 void ctui_vk_set_glyph_fn(CTUI_VK *vk, CTUI_VK_GLYPH_FN fn, void *ctx);
 
+/* a styled face: the TrueType font cells with attrs (CTUI_ATTR_BOLD,
+ * CTUI_ATTR_ITALIC or both) are drawn in, at the regular font's cell
+ * (its glyphs centred in it, as a fallback's are). data is the caller's,
+ * outliving vk (one copy can serve every CTUI_VK); NULL drops the face.
+ * Without one, bold is the regular glyph smeared a pixel right and
+ * italic is upright; bold italic falls back to bold, then italic. A
+ * glyph the face lacks comes from the regular font, then the provider
+ * (smeared for bold). Glyphs already drawn in that style are drawn again
+ * from their cells' next change. 0 (set, or dropped), or -1 (attrs 0,
+ * or not a TrueType font: logged, the face dropped) */
+int ctui_vk_set_face(CTUI_VK *vk, unsigned attrs, const uint8_t *data, size_t size);
+
 /* for ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk) */
 const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void);
 

@@ -10,6 +10,7 @@
 #include "ctui.h"
 #include "ctui_test.h"
 #include "look/png.h"
+#include "vk/fonts/JetBrainsMono-Regular.ttf.h"
 #include "vk/ttf.h"
 #include "vk/vk.h"
 
@@ -1097,6 +1098,80 @@ static void test_glyphs(void) {
   ctui_vk_free(vk);
 }
 
+/* the slot's coverage summed: how much ink a glyph has */
+static unsigned ink(const uint32_t *slots, unsigned sw, unsigned gw, unsigned gh, unsigned slot) {
+  unsigned sum = 0;
+  for (unsigned y = 0; y < gh; y++) {
+    for (unsigned x = 0; x < gw; x++) {
+      sum += coverage(slots, sw, gw, slot, x, y);
+    }
+  }
+  return sum;
+}
+
+/* styled faces: bold from its own face (the painter's smear off), bold
+ * italic falling back to it, a face dropped back to the smear; without a
+ * face for what the cell asks, the regular glyph */
+static void test_faces(void) {
+  CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
+  int rows = 0, cols = 0;
+  if (!vk || ctui_vk_resize(vk, W, H, 120, 0, &rows, &cols) != 0) {
+    CTUI_TEST_ASSERT(0, "a backend for the faces");
+    ctui_vk_free(vk);
+    return;
+  }
+  CTUI_CELL reg = {.ch = 'B', .fg = CTUI_COLOR_WHITE};
+  CTUI_CELL bold = reg, ital = reg, both = reg;
+  bold.attr = CTUI_ATTR_BOLD;
+  ital.attr = CTUI_ATTR_ITALIC;
+  both.attr = CTUI_ATTR_BOLD | CTUI_ATTR_ITALIC;
+  uint32_t r[CTUI_VK_CELL_WORDS], b[CTUI_VK_CELL_WORDS], i[CTUI_VK_CELL_WORDS],
+      bi[CTUI_VK_CELL_WORDS];
+  ctui_vk_cell(vk, &reg, r);
+  ctui_vk_cell(vk, &bold, b);
+  ctui_vk_cell(vk, &ital, i);
+  CTUI_TEST_ASSERT((b[0] & 0xffffu) == (r[0] & 0xffffu) && (b[0] >> 16 & CTUI_ATTR_BOLD) &&
+                       (i[0] & 0xffffu) == (r[0] & 0xffffu),
+                   "no faces: bold and italic the regular glyph, bold left to the painter");
+  CTUI_TEST_ASSERT(ctui_vk_set_face(vk, 0, ctui_vk_font_ttf, ctui_vk_font_ttf_len) == -1 &&
+                       ctui_vk_set_face(vk, CTUI_ATTR_BOLD, (const uint8_t *)"not a font", 10) == -1,
+                   "no regular face, no face from what isn't TrueType");
+  /* the regular font's bytes as the bold face: its own slot, unsmeared */
+  CTUI_TEST_ASSERT(ctui_vk_set_face(vk, CTUI_ATTR_BOLD, ctui_vk_font_ttf, ctui_vk_font_ttf_len) == 0,
+                   "a bold face");
+  ctui_vk_cell(vk, &bold, b);
+  ctui_vk_cell(vk, &both, bi);
+  ctui_vk_cell(vk, &ital, i);
+  unsigned gw, gh, sw;
+  const uint32_t *slots;
+  ctui_vk_glyphs(vk, &gw, &gh, &slots, &sw);
+  unsigned rs = r[0] & 0xffffu, bs = b[0] & 0xffffu;
+  CTUI_TEST_ASSERT(bs != rs && !(b[0] >> 16 & CTUI_ATTR_BOLD) &&
+                       ink(slots, sw, gw, gh, bs) == ink(slots, sw, gw, gh, rs) &&
+                       (bi[0] & 0xffffu) == bs && (bi[0] >> 16 & CTUI_ATTR_ITALIC) &&
+                       (i[0] & 0xffffu) == rs,
+                   "bold from its face, the smear off; bold italic the bold face's; italic "
+                   "still the regular glyph");
+  /* a glyph the face lacks (the provider's): drawn for bold on the host */
+  ctui_vk_set_glyph_fn(vk, provide, NULL);
+  CTUI_CELL zh = {.ch = 0x1d400, .fg = CTUI_COLOR_WHITE};
+  uint32_t z[CTUI_VK_CELL_WORDS], zb[CTUI_VK_CELL_WORDS];
+  ctui_vk_cell(vk, &zh, z);
+  zh.attr = CTUI_ATTR_BOLD;
+  ctui_vk_cell(vk, &zh, zb);
+  ctui_vk_glyphs(vk, &gw, &gh, &slots, &sw);
+  CTUI_TEST_ASSERT((zb[0] & 0xffffu) != (z[0] & 0xffffu) && !(zb[0] >> 16 & CTUI_ATTR_BOLD) &&
+                       ink(slots, sw, gw, gh, zb[0] & 0xffffu) ==
+                           ink(slots, sw, gw, gh, z[0] & 0xffffu),
+                   "the provider's glyph in bold: a slot of its own, the painter's smear off "
+                   "(its flat coverage unchanged)");
+  CTUI_TEST_ASSERT(ctui_vk_set_face(vk, CTUI_ATTR_BOLD, NULL, 0) == 0, "the bold face dropped");
+  ctui_vk_cell(vk, &bold, b);
+  CTUI_TEST_ASSERT((b[0] & 0xffffu) == rs && (b[0] >> 16 & CTUI_ATTR_BOLD),
+                   "dropped: bold the regular glyph and the painter's smear again");
+  ctui_vk_free(vk);
+}
+
 /* kitty's padding and theme: the cells from an inset's top left, the
  * inset the default background, a palette for the basic and low 256
  * indices; an image placed at a cell goes with it */
@@ -1637,6 +1712,7 @@ static void test_vk(void) {
   test_placed(vk, &app, screen);
   test_wipe(vk, &app, screen);
   test_glyphs();
+  test_faces();
   test_pad();
   test_opacity();
 
