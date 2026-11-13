@@ -599,6 +599,16 @@ above into the loop described in "Life of a frame".
   what the app would write to a terminal (the host's
   `CTUI_LINK_HOST_SINKS.osc`), `ctui_link_host_osc()` an answer, a
   `CTUI_OSC_EVENT` in the app's loop.
+- Drawn by a host instead of a terminal: `link/hostwin.h`. Before
+  `ctui_init()`, `ctui_hostwin_term()` takes the ctui-term pane the app
+  runs in (`$CTUI_TERM_LINK`), `ctui_hostwin_open(title, app_id, w, h,
+  ...)` asks the desktop's ctui-host for a window of its own
+  (`$CTUI_WM_HOST_SOCKET`, else `ctui-wm/ctui-host.sock` in the runtime
+  dir); either gives the grid for `ctui_screen_create()` and needs no
+  `ctui_init()`, then `ctui_hostwin_attach(w, screen)` before
+  `ctui_app_run()` and `ctui_hostwin_close()` after. NULL: no such host,
+  the app takes its terminal as before. Kitty's image calls go to the
+  host's GPU (the kitty tier), stdout is /dev/null meanwhile.
 - `ctui_focus_enable()` — opt into focus reports (`CTUI_FOCUS_EVENT`)
   when the terminal window gains/loses keyboard focus;
   `ctui_shutdown()` turns them back off.

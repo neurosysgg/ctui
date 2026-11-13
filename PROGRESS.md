@@ -237,6 +237,19 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **An app drawn by a host: `link/hostwin.h`** (2026-11-13, promoted
+  from ctui-wm's `src/app/hostwin`: ctui-daw, which links only ctui, is
+  its second user -- kitty measured at 10-12.5 % of a core under it
+  playing, ctui-wm's notes/kittyless.md "z8 step 3"). `ctui_hostwin_open()`
+  asks ctui-host for an xdg window (one SOCK_SEQPACKET message, "window
+  app/PID.N" and its title / app id / size lines, the link's other end
+  beside it), `ctui_hostwin_term()` takes a ctui-term pane's link,
+  `_adopt()` one someone else asked for; then attach, close, a title,
+  OSCs, stepping aside for a program on the pane's pty. The message
+  builds and sends here (no ctui-wm header); ctui-wm's base/hostmsg.c
+  parses it and its hostwin_test holds the two together. Tests: the
+  message, a forked fake host over a real link (grid, cell, title, its
+  end), a pane's link refused, OSCs (16).
 - [x] **Underline styles and colours in the cell** (2026-11-13, ctui-wm's
   call: for every app, and a terminal of its own -- ctui-term -- that
   shows what programs ask). `CTUI_CELL` grew from 16 to 20 bytes: the
