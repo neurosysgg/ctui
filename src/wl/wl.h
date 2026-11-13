@@ -175,4 +175,68 @@ int ctui_wl_key_event(uint32_t sym, uint32_t cp, unsigned mods,
 struct xkb_keymap;
 uint32_t ctui_wl_key_base(struct xkb_keymap *km, uint32_t code, uint32_t ch);
 
+/* --- drag and drop (dnd.c: wl_data_device) --- */
+
+/* the actions a drag offers / a drop takes (wl_data_device_manager's
+ * bits, kitty's OSC 72 numbers too) */
+#define CTUI_WL_DND_COPY 1u
+#define CTUI_WL_DND_MOVE 2u
+#define CTUI_WL_DND_ASK 4u
+
+enum {
+  /* a drag over one of the connection's surfaces */
+  CTUI_WL_DND_ENTER = 1, /* mimes: what it offers */
+  CTUI_WL_DND_MOTION,
+  CTUI_WL_DND_LEAVE, /* gone without a drop: the offer with it */
+  CTUI_WL_DND_DROP,  /* mimes again; ctui_wl_dnd_receive() what's wanted,
+                      * then ctui_wl_dnd_finish() */
+  /* the drag this connection started (ctui_wl_dnd_start()) */
+  CTUI_WL_DND_S_TARGET,    /* a surface would take mimes ("": none) */
+  CTUI_WL_DND_S_ACTION,    /* actions: the one it would do */
+  CTUI_WL_DND_S_DROPPED,   /* let go over a taker: data asked for soon */
+  CTUI_WL_DND_S_FINISHED,  /* the taker's done with it */
+  CTUI_WL_DND_S_CANCELLED, /* let go over nothing, refused, or replaced */
+};
+
+typedef struct {
+  int kind;
+  /* a drop's: the surface it's over (NULL once that one closed); a drag
+   * of ours: the surface it started on */
+  CTUI_WL *on;
+  /* where, as the pointer's: buffer pixels from the cells' origin, the
+   * cell (ENTER, MOTION, DROP) */
+  double px, py;
+  int row, col;
+  unsigned actions;  /* ENTER, MOTION: the source's; S_ACTION: the chosen */
+  const char *mimes; /* space-separated (ENTER, DROP, S_TARGET), else "" */
+} CTUI_WL_DND_EVENT;
+
+typedef struct {
+  /* as they come, from inside ctui_wl_dpy_dispatch() */
+  void (*event)(void *ctx, const CTUI_WL_DND_EVENT *e);
+  /* our drag's data asked for: mime's bytes written into fd, which is the
+   * callee's to close (nonblocking: a pipe whose reader may be slow) */
+  void (*send)(void *ctx, CTUI_WL *on, const char *mime, int fd);
+} CTUI_WL_DND_OPS;
+
+/* drag and drop on d from here, ops told (ctx theirs): 0, or -1 when the
+ * compositor has no wl_data_device_manager (or no seat) */
+int ctui_wl_dnd_init(CTUI_WL_DPY *d, const CTUI_WL_DND_OPS *ops, void *ctx);
+/* the drag over us: mime taken with action (a CTUI_WL_DND_* bit), or
+ * refused (mime NULL or "", action 0) -- the compositor shows the source
+ * which. Nothing once it left */
+void ctui_wl_dnd_accept(CTUI_WL_DPY *d, const char *mime, unsigned action);
+/* the dropped data as mime: an fd to read it from to its end
+ * (nonblocking, the caller's), -1 when there's no drop (or no pipe) */
+int ctui_wl_dnd_receive(CTUI_WL_DPY *d, const char *mime);
+/* the drop dealt with: action the one done (0: refused); the offer goes */
+void ctui_wl_dnd_finish(CTUI_WL_DPY *d, unsigned action);
+/* a drag of ours from wl, offering mimes (space-separated) for actions,
+ * while the left button that went down on it is still held: 0, or -1
+ * (no drag and drop, no button held, out of memory). Events follow as
+ * CTUI_WL_DND_S_*; a drag of ours before it is cancelled */
+int ctui_wl_dnd_start(CTUI_WL *wl, const char *mimes, unsigned actions);
+/* our drag stopped (no event follows); nothing when there's none */
+void ctui_wl_dnd_cancel(CTUI_WL_DPY *d);
+
 #endif

@@ -54,7 +54,10 @@ struct CTUI_LINK {
   int n_pix;
   CTUI_LINK_APP_FN app;
   void *app_ctx;
-  char *buf; /* a message in */
+  CTUI_LINK_DND_FN dnd;
+  void *dnd_ctx;
+  int dnd_can; /* the host sent DND_CAN (since its last RESET) */
+  char *buf;   /* a message in */
   /* what a host that lost it all (CTUI_LINK_RESET) is sent again: the
    * live images' calls (REC), the default colours, the pointer's shape */
   REC *recs;
@@ -485,6 +488,7 @@ static const CTUI_GFX_SINK k_gfx = {
  * first frame (take_grid), the frame in flight forgotten (its ack won't
  * come) */
 static void take_reset(CTUI_LINK *l) {
+  l->dnd_can = 0; /* a new host says again whether it does */
   if (l->told) {
     memset(l->told, 0, l->n_told);
   }
@@ -611,6 +615,22 @@ static int take(CTUI_LINK *l, long len, int fd) {
       l->app(l->app_ctx, body, blen);
     }
     break;
+  case CTUI_LINK_DND_TELL: {
+    CTUI_LINK_DND m;
+    const char *mimes = ctui_link_dnd_parse(body, blen, &m);
+    if (!mimes) {
+      r = -1;
+      break;
+    }
+    if (m.kind == CTUI_LINK_DND_CAN) {
+      l->dnd_can = 1;
+    }
+    if (l->dnd) {
+      l->dnd(l->dnd_ctx, &m, mimes, fd);
+      fd = -1; /* the callee's */
+    }
+    break;
+  }
   default:
     ctui_logf(E_WRN, "[CTUI:LINK] - a message the app doesn't know (%u)\n",
               h->type);
@@ -771,4 +791,20 @@ int ctui_link_app(CTUI_LINK *l, const void *msg, size_t n) {
 void ctui_link_on_app(CTUI_LINK *l, CTUI_LINK_APP_FN fn, void *ctx) {
   l->app = fn;
   l->app_ctx = ctx;
+}
+
+void ctui_link_on_dnd(CTUI_LINK *l, CTUI_LINK_DND_FN fn, void *ctx) {
+  l->dnd = fn;
+  l->dnd_ctx = ctx;
+}
+
+int ctui_link_dnd_can(const CTUI_LINK *l) { return l && l->dnd_can; }
+
+int ctui_link_dnd(CTUI_LINK *l, const CTUI_LINK_DND *m, const char *mimes) {
+  size_t n = mimes ? strlen(mimes) + 1 : 1;
+  if (!l || !l->dnd_can || n > CTUI_LINK_DND_MIMES) {
+    return -1;
+  }
+  return ctui_link_send(l->fd, CTUI_LINK_DND_ASK, m, sizeof *m,
+                        mimes ? mimes : "", n, -1);
 }

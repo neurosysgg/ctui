@@ -107,16 +107,16 @@ wl-gen/%-client-protocol.h: %.xml
 wl-gen/%-protocol.c: %.xml
 	@mkdir -p wl-gen
 	wayland-scanner private-code $< $@
-test-wl_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/wl.h src/wl/wl_internal.h $(WL_GEN_H) $(WL_GEN_C) tests/wl/wl_test.c tools/ctui_test.h
-	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) src/wl/wl.c $(WL_GEN_C) tests/wl/wl_test.c $(LDLIBS) $(shell pkg-config --libs wayland-client xkbcommon)
+test-wl_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/dnd.c src/wl/wl.h src/wl/wl_internal.h $(WL_GEN_H) $(WL_GEN_C) tests/wl/wl_test.c tools/ctui_test.h
+	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) src/wl/wl.c src/wl/dnd.c $(WL_GEN_C) tests/wl/wl_test.c $(LDLIBS) $(shell pkg-config --libs wayland-client xkbcommon)
 
-test-wl_layer_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/wl.h src/wl/wl_internal.h src/wl/layer.c src/wl/layer.h $(WL_GEN_H) $(WL_GEN_C) $(WL_LAYER_GEN_H) $(WL_LAYER_GEN_C) tests/wl/layer_test.c tools/ctui_test.h
-	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) src/wl/wl.c src/wl/layer.c $(WL_GEN_C) $(WL_LAYER_GEN_C) tests/wl/layer_test.c $(LDLIBS) $(shell pkg-config --libs wayland-client xkbcommon)
+test-wl_layer_test: $(CORE_SRC) $(CORE_HDR) src/wl/wl.c src/wl/dnd.c src/wl/wl.h src/wl/wl_internal.h src/wl/layer.c src/wl/layer.h $(WL_GEN_H) $(WL_GEN_C) $(WL_LAYER_GEN_H) $(WL_LAYER_GEN_C) tests/wl/layer_test.c tools/ctui_test.h
+	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) src/wl/wl.c src/wl/layer.c src/wl/dnd.c $(WL_GEN_C) $(WL_LAYER_GEN_C) tests/wl/layer_test.c $(LDLIBS) $(shell pkg-config --libs wayland-client xkbcommon)
 
 # the presenters (src/vk/present.c, host.c) on layer surfaces and a
 # window, in a headless sway on lavapipe (skipped without either)
-test-present_test: $(CORE_SRC) $(CORE_HDR) $(VK_SRC) $(VK_WL_SRC) $(wildcard src/vk/*.h) $(VK_SPV) $(VK_FONT) src/wl/wl.c src/wl/layer.c $(wildcard src/wl/*.h) $(WL_GEN_H) $(WL_GEN_C) $(WL_LAYER_GEN_H) $(WL_LAYER_GEN_C) tests/vk/present_test.c tools/ctui_test.h
-	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) $(VK_SRC) $(VK_WL_SRC) src/wl/wl.c src/wl/layer.c $(WL_GEN_C) $(WL_LAYER_GEN_C) tests/vk/present_test.c $(LDLIBS) $(VK_LIBS) $(shell pkg-config --libs wayland-client xkbcommon)
+test-present_test: $(CORE_SRC) $(CORE_HDR) $(VK_SRC) $(VK_WL_SRC) $(wildcard src/vk/*.h) $(VK_SPV) $(VK_FONT) src/wl/wl.c src/wl/layer.c src/wl/dnd.c $(wildcard src/wl/*.h) $(WL_GEN_H) $(WL_GEN_C) $(WL_LAYER_GEN_H) $(WL_LAYER_GEN_C) tests/vk/present_test.c tools/ctui_test.h
+	$(CC) $(CFLAGS) -Itools -Iwl-gen -o $@ $(CORE_SRC) $(VK_SRC) $(VK_WL_SRC) src/wl/wl.c src/wl/layer.c src/wl/dnd.c $(WL_GEN_C) $(WL_LAYER_GEN_C) tests/vk/present_test.c $(LDLIBS) $(VK_LIBS) $(shell pkg-config --libs wayland-client xkbcommon)
 
 # replays recorded apps' output through flush: bytes, time, the same cells
 flushbench: $(CORE_SRC) $(CORE_HDR) tools/harness/vt.c tools/harness/vt.h tools/flushbench.c

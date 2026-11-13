@@ -57,6 +57,63 @@ int ctui_link_app(CTUI_LINK *l, const void *msg, size_t n);
 typedef void (*CTUI_LINK_APP_FN)(void *ctx, const void *msg, size_t n);
 void ctui_link_on_app(CTUI_LINK *l, CTUI_LINK_APP_FN fn, void *ctx);
 
+/* --- drag and drop (the host's surface's, ctui's wl/wl.h dnd) --- */
+
+enum {
+  /* host -> app */
+  CTUI_LINK_DND_CAN = 1, /* the host does drag and drop: after its first
+                          * grid, and after a RESET's */
+  CTUI_LINK_DND_ENTER,   /* a drag came over the app: mimes it offers */
+  CTUI_LINK_DND_MOTION,
+  CTUI_LINK_DND_LEAVE,    /* it went without a drop */
+  CTUI_LINK_DND_DROP,     /* dropped: mimes; RECEIVE what's wanted, FINISH */
+  CTUI_LINK_DND_DATA,     /* RECEIVE's answer: the fd to read mimes' data
+                           * from to its end (none: refused) */
+  CTUI_LINK_DND_SEND,     /* the app's drag wants mimes' data written into
+                           * the fd (closed when done) */
+  CTUI_LINK_DND_S_TARGET, /* the app's drag: a taker would want mimes */
+  CTUI_LINK_DND_S_ACTION, /* action: what it would do */
+  CTUI_LINK_DND_S_DROPPED,
+  CTUI_LINK_DND_S_FINISHED,
+  CTUI_LINK_DND_S_CANCELLED, /* let go over nothing, refused, or a START
+                              * that couldn't (the button already up) */
+  CTUI_LINK_DND_S_STARTED,   /* START's drag is on */
+  /* app -> host */
+  CTUI_LINK_DND_ACCEPT = 32, /* the drag over it: mimes the one taken ("":
+                              * refused), action */
+  CTUI_LINK_DND_RECEIVE,     /* the drop's data as mimes (one type): DATA
+                              * answers with tag */
+  CTUI_LINK_DND_FINISH,      /* the drop dealt with, action done (0: not) */
+  CTUI_LINK_DND_START,       /* a drag of the app's: mimes offered, actions,
+                              * while the left button's held */
+  CTUI_LINK_DND_CANCEL,      /* the app's drag stopped */
+};
+
+typedef struct {
+  uint32_t kind;    /* CTUI_LINK_DND_* */
+  uint32_t actions; /* the source's (ENTER, MOTION, DROP), the drag's
+                     * (START), the chosen (S_ACTION) */
+  uint32_t action;  /* ACCEPT's, FINISH's (wl.h's CTUI_WL_DND_* bits) */
+  int32_t row, col; /* ENTER, MOTION, DROP: the cell under it */
+  int32_t px, py;   /* and the pixel, from the cells' origin */
+  uint32_t tag;     /* RECEIVE's, echoed in its DATA */
+} CTUI_LINK_DND;
+
+/* the mimes a DND message carries at most, its NUL included */
+#define CTUI_LINK_DND_MIMES 4096u
+
+/* the host's drag and drop messages as they come: mimes ("" for none),
+ * fd (DATA's, SEND's: the callee's to close; -1 else). NULL: dropped */
+typedef void (*CTUI_LINK_DND_FN)(void *ctx, const CTUI_LINK_DND *m,
+                                 const char *mimes, int fd);
+void ctui_link_on_dnd(CTUI_LINK *l, CTUI_LINK_DND_FN fn, void *ctx);
+/* 1 once the host said it does drag and drop (CTUI_LINK_DND_CAN) */
+int ctui_link_dnd_can(const CTUI_LINK *l);
+/* one of the app's (ACCEPT .. CANCEL) to the host, mimes NULL for none:
+ * 0, or -1 (a host that doesn't do it -- an older build would drop the
+ * link --, mimes too long, or the host's gone) */
+int ctui_link_dnd(CTUI_LINK *l, const CTUI_LINK_DND *m, const char *mimes);
+
 /* --- the host's end --- */
 
 typedef struct CTUI_LINK_HOST CTUI_LINK_HOST;
@@ -76,6 +133,9 @@ typedef struct {
   /* the pointer's shape over the app (a CSS cursor's name, as
    * ctui_pointer_shape() takes it; NULL: ignored) */
   void (*pointer)(void *ctx, const char *name);
+  /* the app's drag and drop messages (CTUI_LINK_DND_ACCEPT ..; mimes ""
+   * for none; NULL: ignored) */
+  void (*dnd)(void *ctx, const CTUI_LINK_DND *m, const char *mimes);
 } CTUI_LINK_HOST_SINKS;
 
 /* the host's end on fd (made nonblocking, owned from here); the app's
@@ -113,5 +173,10 @@ int ctui_link_host_read(CTUI_LINK_HOST *h);
 int ctui_link_host_event(CTUI_LINK_HOST *h, const CTUI_EVENT *ev);
 /* a message of the app's own to it: 0, or -1 */
 int ctui_link_host_app(CTUI_LINK_HOST *h, const void *msg, size_t n);
+/* a drag and drop message to it (CTUI_LINK_DND_CAN .. S_STARTED),
+ * mimes NULL for none, fd beside it (-1: none; the caller's still): 0,
+ * or -1 */
+int ctui_link_host_dnd(CTUI_LINK_HOST *h, const CTUI_LINK_DND *m,
+                       const char *mimes, int fd);
 
 #endif

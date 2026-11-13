@@ -8,6 +8,7 @@
  * apps it starts), so the structs go as they are; HELLO checks that. */
 
 #include "ctui.h"
+#include "link.h"
 
 #include <stdint.h>
 
@@ -38,6 +39,9 @@ enum {
                         * before the frame that first does */
   CTUI_LINK_POINTER,   /* the pointer's shape: its name, NUL-terminated
                         * (core/term.h's ctui_pointer_shape()) */
+  CTUI_LINK_DND_ASK,   /* CTUI_LINK_DND + its mimes, NUL-terminated: only
+                        * to a host that sent DND_CAN (an older one drops
+                        * a link over a type it doesn't know) */
   /* host -> app */
   CTUI_LINK_GRID = 32, /* CTUI_LINK_M_GRID + an fd: the cells */
   CTUI_LINK_ACK,       /* nothing: the frame in flight was taken */
@@ -48,6 +52,8 @@ enum {
                         * pointer, live images and clusters --, its next
                         * frame (after the GRID that follows) the whole
                         * screen. An app of an older build ignores it */
+  CTUI_LINK_DND_TELL,  /* CTUI_LINK_DND + its mimes, NUL-terminated (+ an
+                        * fd: DATA's, SEND's) */
   /* either way: the app's own, bytes the link only carries */
   CTUI_LINK_APP = 64,
 };
@@ -109,6 +115,10 @@ typedef struct {
     CTUI_FOCUS_EVENT_DATA focus;
   } d;
 } CTUI_LINK_M_EVENT;
+
+/* a DND message's body (len bytes): its fields into *m, its mimes (in
+ * body, NUL-terminated); NULL when it's broken */
+const char *ctui_link_dnd_parse(const void *body, size_t len, CTUI_LINK_DND *m);
 
 /* a message out, with fd (-1: none) beside it: 0, or -1 (the peer's gone,
  * or a nonblocking socket full) */

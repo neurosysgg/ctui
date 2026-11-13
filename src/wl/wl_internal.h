@@ -33,7 +33,7 @@ struct xkb_compose_state;
 #define CTUI_WL_QUEUE 256u
 /* outputs, and globals wl.c doesn't bind itself (layer.c's) */
 #define CTUI_WL_OUTPUTS 16
-#define CTUI_WL_EXTRA 32
+#define CTUI_WL_EXTRA 64
 
 typedef struct {
   CTUI_EVENT ev;
@@ -79,6 +79,10 @@ struct CTUI_WL_DPY {
   /* layer.c's zwlr_layer_shell_v1, bound on its first surface */
   void *layer_shell;
   void (*layer_shell_free)(void *shell);
+  /* dnd.c's drag and drop, made by ctui_wl_dnd_init() */
+  void *dnd;
+  void (*dnd_free)(CTUI_WL_DPY *d);
+  void (*dnd_surface_gone)(CTUI_WL_DPY *d, CTUI_WL *wl);
 
   CTUI_WL_RAW_KEY raw;
   void *raw_ctx;
@@ -100,6 +104,8 @@ struct CTUI_WL_DPY {
   /* which surface has the keyboard, which the pointer */
   CTUI_WL *kb_on, *ptr_on;
   uint32_t ptr_serial; /* the pointer's last enter: a shape needs it */
+  /* the left button's press while it's held (0: up): a drag starts on it */
+  uint32_t press_serial;
   /* the pointer: where (buffer pixels of ptr_on, its cells), the buttons
    * held, the scroll not yet a whole notch */
   double px, py;

@@ -123,6 +123,39 @@ static void test_open(void) {
   ctui_wl_close(wl);
 }
 
+/* drag and drop's device bound on demand; nothing to drag without a button
+ * held, nothing to read without a drop (a real drag needs a pointer: the
+ * suite has none -- ctui-wm's headless river with its vptr does it) */
+static void dnd_event(void *ctx, const CTUI_WL_DND_EVENT *e) {
+  (void)e;
+  (*(int *)ctx)++;
+}
+
+static void test_dnd(void) {
+  char err[160] = "";
+  CTUI_WL_DPY *d = ctui_wl_connect(err, sizeof err);
+  if (!d) {
+    return;
+  }
+  int events = 0;
+  CTUI_WL_DND_OPS ops = {.event = dnd_event};
+  CTUI_TEST_ASSERT(ctui_wl_dnd_init(d, &ops, &events) == 0 &&
+                       ctui_wl_dnd_init(d, &ops, &events) == 0,
+                   "sway's data device bound (twice: the same one)");
+  CTUI_WL *bar = ctui_wl_layer(d, &k_bar, err, sizeof err);
+  CTUI_TEST_ASSERT(bar && ctui_wl_dnd_start(bar, "text/plain", 1) == -1,
+                   "no button held on it: no drag");
+  CTUI_TEST_ASSERT(ctui_wl_dnd_receive(d, "text/plain") == -1,
+                   "no drop: nothing to receive");
+  ctui_wl_dnd_accept(d, "text/plain", 1);
+  ctui_wl_dnd_finish(d, 1);
+  ctui_wl_dnd_cancel(d);
+  CTUI_TEST_ASSERT(ctui_wl_dpy_dispatch(d) == 0 && events == 0,
+                   "the calls without a drag: nothing sent, no error");
+  ctui_wl_close(bar);
+  ctui_wl_disconnect(d);
+}
+
 int main(void) {
   ctui_log_init(E_ALL);
   if (!headless_available()) {
@@ -136,6 +169,7 @@ int main(void) {
   if (up == 0) {
     test_surfaces();
     test_open();
+    test_dnd();
   }
   headless_stop();
   return ctui_test_summary();

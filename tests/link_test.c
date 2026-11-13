@@ -129,6 +129,30 @@ static void t_pointer(void *ctx, const char *name) {
   shapes++;
 }
 
+/* drag and drop: what each end last heard */
+static CTUI_LINK_DND h_dnd, a_dnd;
+static char h_mimes[128], a_mimes[128], a_data[32];
+static int h_dnds, a_dnds;
+static void t_dnd(void *ctx, const CTUI_LINK_DND *m, const char *mimes) {
+  (void)ctx;
+  h_dnd = *m;
+  snprintf(h_mimes, sizeof h_mimes, "%s", mimes);
+  h_dnds++;
+}
+static void a_dnd_fn(void *ctx, const CTUI_LINK_DND *m, const char *mimes,
+                     int fd) {
+  (void)ctx;
+  a_dnd = *m;
+  snprintf(a_mimes, sizeof a_mimes, "%s", mimes);
+  a_dnds++;
+  a_data[0] = '\0';
+  if (fd >= 0) {
+    ssize_t n = read(fd, a_data, sizeof a_data - 1);
+    a_data[n > 0 ? n : 0] = '\0';
+    close(fd);
+  }
+}
+
 static char app_got[64];
 static void a_app(void *ctx, const void *msg, size_t n) {
   (void)ctx;
@@ -164,7 +188,8 @@ int main(void) {
                                 .gfx = &k_tgfx,
                                 .set_default = t_default,
                                 .app = t_app,
-                                .pointer = t_pointer};
+                                .pointer = t_pointer,
+                                .dnd = t_dnd};
   CTUI_LINK_HOST *h = ctui_link_host_new(sv[1], &sinks);
   CTUI_TEST_ASSERT(h && ctui_link_host_fd(h) == sv[1], "the host's end");
   CTUI_TEST_ASSERT(ctui_link_host_grid(h, 4, 20, 9, 18) == 0,
@@ -295,6 +320,63 @@ int main(void) {
   CTUI_TEST_ASSERT(!strcmp(app_got, "close"), "the host's message: %s",
                    app_got);
 
+  /* drag and drop: nothing to a host that hasn't said it does it */
+  ctui_link_on_dnd(l, a_dnd_fn, NULL);
+  CTUI_LINK_DND acc = {.kind = CTUI_LINK_DND_ACCEPT, .action = 1};
+  CTUI_TEST_ASSERT(!ctui_link_dnd_can(l) &&
+                       ctui_link_dnd(l, &acc, "text/uri-list") == -1,
+                   "no DND_CAN yet: the app's drag and drop not sent");
+  CTUI_LINK_DND can = {.kind = CTUI_LINK_DND_CAN};
+  ctui_link_host_dnd(h, &can, NULL, -1);
+  CTUI_LINK_DND enter = {.kind = CTUI_LINK_DND_ENTER,
+                         .actions = 3,
+                         .row = 2,
+                         .col = 5,
+                         .px = 47,
+                         .py = 40};
+  ctui_link_host_dnd(h, &enter, "text/uri-list text/plain", -1);
+  app_step(&ev);
+  CTUI_TEST_ASSERT(ctui_link_dnd_can(l) && a_dnds == 2 &&
+                       a_dnd.kind == CTUI_LINK_DND_ENTER && a_dnd.col == 5 &&
+                       a_dnd.px == 47 &&
+                       !strcmp(a_mimes, "text/uri-list text/plain"),
+                   "the host can: a drag's enter with its types (%s)", a_mimes);
+  CTUI_TEST_ASSERT(ctui_link_dnd(l, &acc, "text/uri-list") == 0 &&
+                       ctui_link_host_read(h) == 0 && h_dnds == 1 &&
+                       h_dnd.kind == CTUI_LINK_DND_ACCEPT &&
+                       h_dnd.action == 1 && !strcmp(h_mimes, "text/uri-list"),
+                   "the app's accept to the host's sink");
+  int pp[2];
+  CTUI_TEST_ASSERT(pipe(pp) == 0 && write(pp[1], "file:///a\r\n", 11) == 11,
+                   "a pipe for the data");
+  close(pp[1]);
+  CTUI_LINK_DND data = {.kind = CTUI_LINK_DND_DATA, .tag = 7};
+  ctui_link_host_dnd(h, &data, "text/uri-list", pp[0]);
+  close(pp[0]);
+  app_step(&ev);
+  CTUI_TEST_ASSERT(a_dnd.kind == CTUI_LINK_DND_DATA && a_dnd.tag == 7 &&
+                       !strcmp(a_data, "file:///a\r\n"),
+                   "the dropped data's fd handed to the app (%s)", a_data);
+  char longer[CTUI_LINK_DND_MIMES + 8];
+  memset(longer, 'x', sizeof longer - 1);
+  longer[sizeof longer - 1] = '\0';
+  CTUI_TEST_ASSERT(ctui_link_dnd(l, &acc, longer) == -1,
+                   "types past the limit: not sent");
+  /* a broken one (its types unterminated) breaks the link; a type the host
+   * doesn't know is skipped */
+  socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, pp);
+  CTUI_LINK_HOST *h3 = ctui_link_host_new(pp[1], &sinks);
+  CTUI_LINK_M_HELLO hi = {CTUI_LINK_MAGIC, CTUI_LINK_VERSION,
+                          sizeof(CTUI_CELL)};
+  ctui_link_send(pp[0], CTUI_LINK_HELLO, &hi, sizeof hi, NULL, 0, -1);
+  ctui_link_send(pp[0], 63, "?", 1, NULL, 0, -1);
+  int skipped = ctui_link_host_read(h3) == 0;
+  ctui_link_send(pp[0], CTUI_LINK_DND_ASK, &acc, sizeof acc, "ab", 2, -1);
+  CTUI_TEST_ASSERT(skipped && ctui_link_host_read(h3) == -1,
+                   "an unknown type skipped, a DND without its NUL refused");
+  ctui_link_host_free(h3);
+  close(pp[0]);
+
   /* a frame of an older grid: dropped, acked */
   int fr = frames;
   CTUI_LINK_M_FRAME old = {.gen = 1, .runs = 0};
@@ -392,6 +474,8 @@ int main(void) {
                    "a new host on the same socket: reset, a grid");
   t = app_step(&ev); /* the reset taken on the way */
   CTUI_TEST_ASSERT(t == CTUI_RESIZE_EVENT, "the grid: a resize");
+  CTUI_TEST_ASSERT(!ctui_link_dnd_can(l),
+                   "after a reset the new host says again if it does dnd");
   memset(got, 0, sizeof got);
   ctui_screen_flush(s); /* nothing changed in the app */
   CTUI_TEST_ASSERT(ctui_link_host_read(h) == 0 && got_rows == 6 &&

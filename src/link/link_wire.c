@@ -99,3 +99,18 @@ int ctui_link_memfd(const void *p, size_t n) {
   }
   return fd;
 }
+
+const char *ctui_link_dnd_parse(const void *body, size_t len,
+                                CTUI_LINK_DND *m) {
+  if (len < sizeof *m + 1 || len - sizeof *m > CTUI_LINK_DND_MIMES) {
+    return NULL;
+  }
+  memcpy(m, body, sizeof *m);
+  const char *mimes = (const char *)body + sizeof *m;
+  /* one string filling the rest exactly */
+  if (mimes[len - sizeof *m - 1] != '\0' ||
+      strlen(mimes) != len - sizeof *m - 1) {
+    return NULL;
+  }
+  return mimes;
+}

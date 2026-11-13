@@ -406,11 +406,25 @@ static int take(CTUI_LINK_HOST *h, long len, int fd) {
       h->s.app(h->s.ctx, body, n);
     }
     return 0;
+  case CTUI_LINK_DND_ASK: {
+    CTUI_LINK_DND m;
+    const char *mimes = ctui_link_dnd_parse(body, n, &m);
+    if (!mimes) {
+      return -1;
+    }
+    if (h->s.dnd) {
+      h->s.dnd(h->s.ctx, &m, mimes);
+    }
+    return 0;
+  }
   default:
     if (hd->type >= CTUI_LINK_G_DISPLAY && hd->type <= CTUI_LINK_G_FLUSH) {
       return gfx(h, hd->type, body, n, fd);
     }
-    return -1;
+    /* a newer app's: skipped, the link kept (its HELLO matched) */
+    ctui_logf(E_WRN, "[CTUI:LINK] - a message the host doesn't know (%u)\n",
+              hd->type);
+    return 0;
   }
 }
 
@@ -466,6 +480,16 @@ int ctui_link_host_event(CTUI_LINK_HOST *h, const CTUI_EVENT *ev) {
     return -1;
   }
   return 0;
+}
+
+int ctui_link_host_dnd(CTUI_LINK_HOST *h, const CTUI_LINK_DND *m,
+                       const char *mimes, int fd) {
+  size_t n = mimes ? strlen(mimes) + 1 : 1;
+  if (n > CTUI_LINK_DND_MIMES) {
+    return -1;
+  }
+  return ctui_link_send(h->fd, CTUI_LINK_DND_TELL, m, sizeof *m,
+                        mimes ? mimes : "", n, fd);
 }
 
 int ctui_link_host_app(CTUI_LINK_HOST *h, const void *msg, size_t n) {

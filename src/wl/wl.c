@@ -508,6 +508,7 @@ static void ptr_leave(void *data, struct wl_pointer *p, uint32_t serial,
   (void)p, (void)serial, (void)s;
   CTUI_WL_DPY *d = data;
   d->held = 0;
+  d->press_serial = 0;
   d->ptr_on = NULL;
 }
 
@@ -522,9 +523,12 @@ static void ptr_motion(void *data, struct wl_pointer *p, uint32_t time,
 
 static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial,
                        uint32_t time, uint32_t button, uint32_t state) {
-  (void)p, (void)serial, (void)time;
+  (void)p, (void)time;
   CTUI_WL_DPY *d = data;
   int b;
+  if (button == BTN_LEFT) {
+    d->press_serial = state == WL_POINTER_BUTTON_STATE_PRESSED ? serial : 0;
+  }
   switch (button) {
   case BTN_LEFT:
     b = 0;
@@ -953,6 +957,9 @@ void ctui_wl_disconnect(CTUI_WL_DPY *d) {
   if (d->layer_shell) {
     d->layer_shell_free(d->layer_shell);
   }
+  if (d->dnd) {
+    d->dnd_free(d);
+  }
   if (d->cursor) {
     wp_cursor_shape_device_v1_destroy(d->cursor);
   }
@@ -1178,6 +1185,10 @@ void ctui_wl_close(CTUI_WL *wl) {
   if (d->ptr_on == wl) {
     d->ptr_on = NULL;
     d->held = 0;
+    d->press_serial = 0;
+  }
+  if (d->dnd_surface_gone) {
+    d->dnd_surface_gone(d, wl);
   }
   for (unsigned i = 0; i < d->count; i++) {
     CTUI_WL_QEV *q = &d->queue[(d->head + i) % CTUI_WL_QUEUE];

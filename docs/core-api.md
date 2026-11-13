@@ -575,6 +575,19 @@ above into the loop described in "Life of a frame".
   sets it (the host gets them as `CTUI_LINK_HOST_SINKS.pointer`), and so
   does src/vk/'s window host, onto `ctui_wl_pointer_shape()` (the
   compositor's cursor-shape-v1).
+- Drag and drop without a terminal: src/wl/dnd.c (`ctui_wl_dnd_init()`,
+  wl.h's "drag and drop" part) is the compositor's wl_data_device -- a
+  drag over a surface as `CTUI_WL_DND_*` events answered by
+  `ctui_wl_dnd_accept()` / `_receive()` (a pipe) / `_finish()`, a drag of
+  the app's own by `ctui_wl_dnd_start()` while the left button's held,
+  its data written into the fds `ops->send` gets. src/link/ carries it
+  to a linked app (`CTUI_LINK_DND`, the types beside it, the data's fd
+  through the socket): `ctui_link_on_dnd()` hears the host's,
+  `ctui_link_dnd()` sends the app's once `ctui_link_dnd_can()` (the
+  host said it does); the host's end through
+  `CTUI_LINK_HOST_SINKS.dnd` and `ctui_link_host_dnd()`. What it means
+  to the app's own programs is the app's (ctui-wm's ctui-term turns it
+  into kitty's OSC 72).
 - `ctui_focus_enable()` — opt into focus reports (`CTUI_FOCUS_EVENT`)
   when the terminal window gains/loses keyboard focus;
   `ctui_shutdown()` turns them back off.

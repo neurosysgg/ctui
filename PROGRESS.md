@@ -237,6 +237,37 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Drag and drop: Wayland's, and over a link** (2026-11-13, ctui-wm:
+  ctui-term speaking kitty's OSC 72 to its panes from ctui-host's
+  surface). src/wl/dnd.c is wl_data_device on a connection:
+  `ctui_wl_dnd_init(d, ops, ctx)` binds the manager from the globals
+  wl.c leaves unbound (so a consumer that doesn't list dnd.c -- ctui-mus
+  -- links as before; wl.c only keeps the left button's press serial
+  and calls dnd.c's hooks through pointers). A drag over a surface comes
+  as `CTUI_WL_DND_ENTER` / MOTION / LEAVE / DROP events (the offer's
+  types space-separated, where in buffer pixels and cells as the
+  pointer's), answered by `ctui_wl_dnd_accept()` (a type and an action,
+  set_actions on v3), `ctui_wl_dnd_receive()` (a nonblocking pipe's read
+  end) and `ctui_wl_dnd_finish()` (wl_data_offer.finish only when a type
+  was taken and the compositor chose an action: else it's a protocol
+  error, so the offer only goes); the leave after a drop keeps the offer
+  until the finish. A drag of the app's own: `ctui_wl_dnd_start(wl,
+  types, actions)` while the left button that went down on wl is held
+  (-1 else), its events `CTUI_WL_DND_S_*` and the data asked for as an
+  fd to write into (`ops->send`, nonblocking). The link carries the
+  same both ways: `CTUI_LINK_DND` (kind, actions, action, cell, pixel,
+  tag) plus its types, an fd beside it for the drop's data
+  (`CTUI_LINK_DND_DATA`, RECEIVE's answer) or the drag's
+  (`CTUI_LINK_DND_SEND`); `ctui_link_on_dnd()` / `ctui_link_dnd()` at
+  the app's end, `CTUI_LINK_HOST_SINKS.dnd` / `ctui_link_host_dnd()` at
+  the host's. The app sends only after the host said `CTUI_LINK_DND_CAN`
+  (after its first grid and after a RESET's), since a host of an older
+  build dropped the link over a type it didn't know; and the host's end
+  now skips an unknown type (logged) instead. link_test: CAN, an enter's
+  types, an accept, a drop's pipe handed over, the limits, a broken
+  message; layer_test: sway's device bound, nothing without a button or
+  a drop; clean under ASan + UBSan. A real drag (vptr in a headless sway)
+  is checked from ctui-wm.
 - [x] **A link's host losing it all: reset** (2026-11-13, ctui-wm:
   ctui-host re-exec'ing to a new build, a terminal zone kept while its
   monitor's unplugged). A host's end could only start with an app's
