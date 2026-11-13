@@ -269,6 +269,52 @@ static void test_flush_attrs(void) {
   ctui_screen_free(s);
 }
 
+/* styled underlines (4:N) and their colour (58 / 59) where the terminal
+ * draws them; plain underlines where it doesn't */
+static void test_flush_underlines(void) {
+  ctui_term_set_ul_styles(1);
+  CTUI_SCREEN *s = ctui_screen_create(1, 4);
+  char out[256];
+  capture_flush(s, out, sizeof out);
+  s->cells[0] = (CTUI_CELL){.ch = 'a',
+                            .attr = CTUI_ATTR_UL(CTUI_UL_CURLY),
+                            .ul_mode = CTUI_COLOR_MODE_RGB,
+                            .ul_r = 255};
+  s->cells[1] = (CTUI_CELL){.ch = 'b',
+                            .attr = CTUI_ATTR_UL(CTUI_UL_DOTTED),
+                            .ul_mode = CTUI_COLOR_MODE_RGB,
+                            .ul_r = 255};
+  s->cells[2] = (CTUI_CELL){.ch = 'c', .attr = CTUI_ATTR_UNDERLINE};
+  s->cells[3] = (CTUI_CELL){.ch = 'd',
+                            .attr = CTUI_ATTR_UL(CTUI_UL_DOUBLE),
+                            .ul_mode = CTUI_COLOR_MODE_256,
+                            .ul_r = 196};
+  size_t n = capture_flush(s, out, sizeof out);
+  const char *want = "\x1b[1;1H\x1b[0;4:3;58;2;255;0;0;39;49ma"
+                     "\x1b[4:4mb\x1b[4;59mc\x1b[4:2;58;5;196md\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "curly in red, restyled dotted (its colour kept), plain in "
+                   "the text's colour (59), double in 196 (got %s)",
+                   out + 1);
+
+  ctui_term_set_ul_styles(0);
+  ctui_screen_clear(s);
+  capture_flush(s, out, sizeof out);
+  s->cells[0] = (CTUI_CELL){.ch = 'a',
+                            .attr = CTUI_ATTR_UL(CTUI_UL_CURLY),
+                            .ul_mode = CTUI_COLOR_MODE_RGB,
+                            .ul_r = 255};
+  s->cells[1] = (CTUI_CELL){.ch = 'b', .attr = CTUI_ATTR_UL(CTUI_UL_DASHED)};
+  n = capture_flush(s, out, sizeof out);
+  want = "\x1b[1;1H\x1b[0;4;39;49mab\x1b[0m";
+  CTUI_TEST_ASSERT(n == strlen(want) && strcmp(out, want) == 0,
+                   "a terminal without them: plain underlines, no colour, "
+                   "a style change alone writes nothing (got %s)",
+                   out + 1);
+  ctui_screen_free(s);
+  ctui_term_set_ul_styles(-1);
+}
+
 /* the bytes saved beside the plain encoding: moves, refills, REP, the
  * wrap, SGR deltas */
 static void test_flush_fewer_bytes(void) {
@@ -355,14 +401,13 @@ static void test_flush_unused_fields(void) {
       c->fg_r = 7, c->fg_g = 8, c->bg_r = 9, c->bg_b = 10;
       break;
     }
-    /* the padding, if the fields leave any (kitty_col took the last) */
-    for (size_t b = offsetof(CTUI_CELL, attr) + 1; b < sizeof *c; b++) {
-      ((unsigned char *)c)[b] ^= 0x5a;
-    }
+    /* the underline's colour, unused without its ul_mode (the cell has
+     * no padding: cell.h asserts it) */
+    c->ul_r ^= 0x5a, c->ul_g ^= 0x5a, c->ul_b ^= 0x5a;
   }
   size_t n = capture_flush(s, out, sizeof out);
   CTUI_TEST_ASSERT(n == 0, "cells differing only in fields their mode "
-                           "doesn't use, and the padding, write nothing");
+                           "doesn't use write nothing");
   s->cells[7].fg_g ^= 1; /* RGB_FG: used */
   s->cells[5].fg ^= 1;   /* 256: used */
   n = capture_flush(s, out, sizeof out);
@@ -431,6 +476,7 @@ int main(void) {
   test_flush_diff_and_color_cache();
   test_flush_256_and_rgb();
   test_flush_attrs();
+  test_flush_underlines();
   test_flush_fewer_bytes();
   test_flush_unused_fields();
   test_resize_forces_redraw();

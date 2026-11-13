@@ -237,6 +237,31 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **Underline styles and colours in the cell** (2026-11-13, ctui-wm's
+  call: for every app, and a terminal of its own -- ctui-term -- that
+  shows what programs ask). `CTUI_CELL` grew from 16 to 20 bytes: the
+  underline's style in `attr`'s three free bits (`CTUI_ATTR_UL()`,
+  `CTUI_UL_SINGLE` 0 so a plain underline is unchanged; double, curly,
+  dotted, dashed) and `ul_mode` + `ul_r/g/b`, its own colour, read as
+  fg is. No padding (a static assert), so the byte compares stay right.
+  The flush: `4:N` (re-sent when only the style changes), `58;5;N` /
+  `58;2;R;G;B`, `59` back to the text's colour (also at a frame's first
+  escape when the terminal may hold one), only where the terminal is
+  known to draw them -- kitty's caps, ghostty, WezTerm, foot, alacritty,
+  ctui-term (`ctui_term_set_ul_styles()` for tests) --, else plain `4`
+  and nothing more (some would read 4:3 as underline then italic). The
+  painter: a 4th word a cell (`CTUI_VK_CELL_WORDS` 4: the colour |
+  `CTUI_VK_UL_OWN`), the five shapes by one integer rule in vk.c's
+  `ctui_vk_underline()` and cells.comp alike (curly a triangle wave a
+  cell wide, its height gh/14, joined pixel to pixel; dotted, dashed by
+  the pixel across cells so patterns run on). The pty harness reads
+  `4:N` (sub-parameters marked: 4:3 isn't 4;3), 58 and 59, prints styles
+  as `U~` / `U=` / `U.` / `U-` and `_COLOUR`, and keeps 32 SGR
+  parameters (16 cut a full one). The link's HELLO carries the cell's
+  size: a host and its apps must be of this build together. Tests: the
+  escapes both ways (screen_test), the harness round trip with every
+  style and colour, vk_test's reference painting four styles (one in its
+  own colour).
 - [x] **OSC over a link** (2026-11-13, ctui-wm: ctui apps drawing a
   ctui-term pane over a link, whose drag and drop and clipboard copies
   are OSCs). `ctui_link_osc(l, code, text, n)` sends what the app would

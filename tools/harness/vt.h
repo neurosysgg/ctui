@@ -48,7 +48,9 @@ char *ctui_vt_text(CTUI_VT *vt);
  * row that isn't all plain, "ROW: COL STYLE COL STYLE ..." with a column
  * wherever the style changes (from plain at 0). STYLE is FG/BG then
  * "+BDIUS" for bold, dim, italic, underline, strike: a colour is d
- * (default), k r g y b m c w (basic), @N (256) or #rrggbb. A blank cell's
+ * (default), k r g y b m c w (basic), @N (256) or #rrggbb. U is followed
+ * by its style when not single (= double, ~ curly, . dotted, - dashed),
+ * the attributes by _COLOUR when the underline has its own. A blank cell's
  * fg and its B/D/I can't be seen and are left out. Malloc'd ("" when all
  * is plain), the caller frees; NULL out of memory. */
 char *ctui_vt_styles(CTUI_VT *vt);

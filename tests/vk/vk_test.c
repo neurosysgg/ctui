@@ -455,6 +455,8 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
       unsigned cov = 0;
       int bg_default = 1;
       uint32_t ph = 0;
+      unsigned ul = 0;
+      uint32_t ulc = 0;
       if (cx < (unsigned)s->cols && cy < (unsigned)s->rows) {
         uint32_t c[CTUI_VK_CELL_WORDS] = {0}, l[CTUI_VK_CELL_WORDS];
         /* the row's placeholders resolved left to right, as the frame */
@@ -484,8 +486,16 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
             cov = l > cov ? l : cov;
           }
         }
-        if (((a & CTUI_ATTR_UNDERLINE) && gy == gh - 1 - gh / 16) ||
-            ((a & CTUI_ATTR_STRIKE) && gy == gh / 2)) {
+        if (a & CTUI_ATTR_UNDERLINE) {
+          unsigned u = ctui_vk_underline(a >> 5 & 7u, lx, gy, gw, gh);
+          if (c[3] & CTUI_VK_UL_OWN) {
+            ul = u;
+            ulc = c[3] & 0xffffffu;
+          } else {
+            cov = u > cov ? u : cov;
+          }
+        }
+        if ((a & CTUI_ATTR_STRIKE) && gy == gh / 2) {
           cov = 255;
         }
         if (a & CTUI_ATTR_DIM) {
@@ -508,6 +518,8 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
       }
       rgb = blend(rgb, fg, cov);
       al = over_a(al, cov);
+      rgb = blend(rgb, ulc, ul);
+      al = over_a(al, ul);
       rgb = over(rgb, ph);
       al = over_a(al, ph & 0xffu);
       for (; p < g_npl; p++) {
@@ -558,6 +570,20 @@ static void render_text(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
                      .bg = 236,
                      .attr = CTUI_ATTR_UNDERLINE};
   ctui_widget_puts_cell(self, comp, 2, 0, "under 256", (size_t)-1, &under);
+  /* the underline's styles, one in a colour of its own */
+  CTUI_CELL curly = {.attr = CTUI_ATTR_UL(CTUI_UL_CURLY),
+                     .ul_mode = CTUI_COLOR_MODE_RGB,
+                     .ul_r = 0xff,
+                     .ul_g = 0x30};
+  ctui_widget_puts_cell(self, comp, 6, 0, "curly", (size_t)-1, &curly);
+  CTUI_CELL dbl = {.attr = CTUI_ATTR_UL(CTUI_UL_DOUBLE)};
+  ctui_widget_puts_cell(self, comp, 6, 6, "dbl", (size_t)-1, &dbl);
+  CTUI_CELL dot = {.attr = CTUI_ATTR_UL(CTUI_UL_DOTTED),
+                   .ul_mode = CTUI_COLOR_MODE_256,
+                   .ul_r = 39};
+  ctui_widget_puts_cell(self, comp, 6, 10, "dot", (size_t)-1, &dot);
+  CTUI_CELL dash = {.attr = CTUI_ATTR_UL(CTUI_UL_DASHED)};
+  ctui_widget_puts_cell(self, comp, 6, 14, "dash", (size_t)-1, &dash);
   CTUI_CELL dim = {.color_mode = CTUI_COLOR_MODE_RGB,
                    .fg_r = 0xf0, .fg_g = 0x80, .fg_b = 0x10,
                    .bg_r = 0x10, .bg_g = 0x20, .bg_b = 0x30,

@@ -79,7 +79,15 @@ it.
 read (`RGB_FG`: a 24-bit fg over a basic `bg`); `attr` holds
 `CTUI_ATTR_BOLD/DIM/ITALIC/UNDERLINE/STRIKE` bits (0 = plain, what every
 zero-filled cell is), sent by the flush as SGR in the same escape as the
-colours; `kitty_row` and `kitty_col` are the
+colours. An underline has a style in `attr`'s top three bits
+(`CTUI_ATTR_UL(CTUI_UL_DOUBLE/CURLY/DOTTED/DASHED)`, single 0) and may
+have a colour of its own (`ul_mode` read as `color_mode` reads fg: 0 the
+text's, 256 `ul_r` the index, RGB `ul_r/g/b`): the flush writes them as
+`4:N` and `58` / `59` where the terminal draws them (kitty, ghostty,
+WezTerm, foot, alacritty, ctui-term; `ctui_term_set_ul_styles()`), plain
+`4` elsewhere; src/vk/ paints all five. The cell is 20 bytes with no
+padding (asserted), so cells compare as bytes; `kitty_row` and
+`kitty_col` are the
 image row and column of a Kitty placeholder cell (see `widget.h`) —
 independent of `CTUI_GFX_MODE` (`gfx.h`), which is what the *terminal
 session* negotiated, not how one cell is encoded. No functions here,

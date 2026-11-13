@@ -179,6 +179,17 @@ static void test_styles(void) {
   CTUI_TEST_ASSERT(st && *st == '\0', "all plain: nothing");
   free(st);
   ctui_vt_free(vt);
+  vt = fed(1, 8,
+           "\x1b[4:3;58;2;255;0;0ma\x1b[4:2;59mb\x1b[4:0mc"
+           "\x1b[4;3md\x1b[0m");
+  st = ctui_vt_styles(vt);
+  CTUI_TEST_ASSERT(st && !strcmp(st, "0: 0 d/d+U~_#ff0000 1 d/d+U= 2 d/d 3 "
+                                     "d/d+IU 4 d/d\n"),
+                   "4:3 curly, its colour (58), 4:2 double in the text's "
+                   "(59), 4:0 none; 4;3 underline and italic (%s)",
+                   st ? st : "");
+  free(st);
+  ctui_vt_free(vt);
 }
 
 static void test_shm_probe(void) {
@@ -231,6 +242,14 @@ static int same_cell(const CTUI_CELL *a, const CTUI_CELL *b) {
   if (a->attr != b->attr || a->color_mode != b->color_mode) {
     return 0;
   }
+  /* an underline's own colour (the pen's 58 stays on cells without one) */
+  if ((a->attr & CTUI_ATTR_UNDERLINE) &&
+      (a->ul_mode != b->ul_mode ||
+       (a->ul_mode && (a->ul_r != b->ul_r ||
+                       (a->ul_mode == CTUI_COLOR_MODE_RGB &&
+                        (a->ul_g != b->ul_g || a->ul_b != b->ul_b)))))) {
+    return 0;
+  }
   switch (a->color_mode) {
   case CTUI_COLOR_MODE_RGB:
     return a->fg_r == b->fg_r && a->fg_g == b->fg_g && a->fg_b == b->fg_b &&
@@ -274,6 +293,20 @@ static void paint(CTUI_SCREEN *s, unsigned seed) {
     cell->fg_r = (unsigned char)rand(), cell->fg_g = (unsigned char)rand();
     cell->fg_b = (unsigned char)rand(), cell->bg_r = (unsigned char)rand();
     cell->bg_g = (unsigned char)rand(), cell->bg_b = (unsigned char)rand();
+    /* underlines of every style, in the text's colour or their own */
+    if (cell->attr & CTUI_ATTR_UNDERLINE) {
+      cell->attr |= CTUI_ATTR_UL(rand() % 5);
+      cell->ul_mode = (unsigned char)(rand() % 3 == 0   ? CTUI_COLOR_MODE_BASIC
+                                      : rand() % 2 == 0 ? CTUI_COLOR_MODE_256
+                                                        : CTUI_COLOR_MODE_RGB);
+      cell->ul_r = (unsigned char)rand(), cell->ul_g = (unsigned char)rand();
+      cell->ul_b = (unsigned char)rand();
+      if (cell->ul_mode == CTUI_COLOR_MODE_256) {
+        cell->ul_g = cell->ul_b = 0;
+      }
+    } else {
+      cell->ul_mode = 0;
+    }
     if (ctui_cell_width(cell->ch) == 2) {
       uint32_t cont = cell[1].ch;
       cell[1] = *cell;
@@ -485,6 +518,7 @@ static void test_flush_vs_reference(void) {
 }
 
 static void test_roundtrip(void) {
+  ctui_term_set_ul_styles(1); /* 4:N and 58 written, read back */
   CTUI_SCREEN *s = ctui_screen_create(12, 50);
   CTUI_VT *vt = ctui_vt_new(12, 50);
   int frames_same = 1;
@@ -501,7 +535,14 @@ static void test_roundtrip(void) {
       for (int c = 0; c < s->cols; c++) {
         if (!same_cell(ctui_vt_cell(vt, r, c), &s->cells[r * s->cols + c])) {
           if (frames_same) {
-            printf("    frame %u differs at %d,%d\n", frame, r, c);
+            const CTUI_CELL *a = ctui_vt_cell(vt, r, c),
+                            *b = &s->cells[r * s->cols + c];
+            printf("    frame %u differs at %d,%d: read attr %02x ul %d "
+                   "%d,%d,%d mode %d; drawn attr %02x ul %d %d,%d,%d mode "
+                   "%d\n",
+                   frame, r, c, a->attr, a->ul_mode, a->ul_r, a->ul_g, a->ul_b,
+                   a->color_mode, b->attr, b->ul_mode, b->ul_r, b->ul_g,
+                   b->ul_b, b->color_mode);
           }
           frames_same = 0;
         }
@@ -510,10 +551,12 @@ static void test_roundtrip(void) {
   }
   CTUI_TEST_ASSERT(frames_same,
                    "six frames of ctui_screen_flush() (wide glyphs, "
-                   "clusters, every colour mode and attribute, whole and "
-                   "diffed) read back as the cells drawn");
+                   "clusters, every colour mode and attribute, underlines' "
+                   "styles and colours, whole and diffed) read back as the "
+                   "cells drawn");
   ctui_vt_free(vt);
   ctui_screen_free(s);
+  ctui_term_set_ul_styles(-1);
 }
 
 static char *slurp(const char *path, size_t *n) {

@@ -42,6 +42,11 @@ void ctui_mouse_enable(int track_motion);
  * logged, where the cell size in pixels is unknown (no ws_xpixel). Off
  * again with the mouse at ctui_shutdown(). */
 void ctui_mouse_pixels_enable(void);
+/* styled and coloured underlines (core/cell.h's CTUI_ATTR_UL(), ul_mode)
+ * written as SGR 4:N / 58 (on) or as plain underlines (off). By default
+ * on for kitty and the terminals known to draw them (ghostty, WezTerm,
+ * foot, alacritty, ctui-term), from the environment; tests set it */
+void ctui_term_set_ul_styles(int on);
 
 /* the cell size in pixels from the terminal (TIOCGWINSZ): 0, or -1 when
  * it doesn't say */

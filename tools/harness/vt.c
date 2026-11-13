@@ -14,7 +14,7 @@ typedef struct {
   unsigned char kind, v, r, g, b;
 } VT_COLOR;
 
-#define VT_PARAMS 16
+#define VT_PARAMS 32 /* an SGR with every attribute, 58, 38 and 48: 26 */
 #define VT_TEXT 256
 #define VT_STR 64
 
@@ -27,12 +27,14 @@ struct CTUI_VT {
   int wrap;
   VT_COLOR fg, bg;
   unsigned char attr;
+  VT_COLOR ul; /* the underline's own colour (58); COL_BASIC: none */
   /* the last glyph placed, for REP; width 0: none yet */
   uint32_t last_ch;
   int last_w;
 
   int state;
   int params[VT_PARAMS], nparams;
+  char sub[VT_PARAMS]; /* params[i] came after a ':' (4:3's 3) */
   char priv, inter;
 
   /* printable bytes not placed yet: a cluster is only known whole once
@@ -84,6 +86,12 @@ static void color_rgb(const VT_COLOR *col, int fg, unsigned char out[3]) {
 static void pen_to_cell(const CTUI_VT *vt, CTUI_CELL *cell) {
   const VT_COLOR *fg = &vt->fg, *bg = &vt->bg;
   cell->attr = vt->attr;
+  cell->ul_mode = vt->ul.kind == COL_RGB   ? CTUI_COLOR_MODE_RGB
+                  : vt->ul.kind == COL_256 ? CTUI_COLOR_MODE_256
+                                           : CTUI_COLOR_MODE_BASIC;
+  cell->ul_r = vt->ul.kind == COL_256 ? vt->ul.v : vt->ul.r;
+  cell->ul_g = vt->ul.kind == COL_RGB ? vt->ul.g : 0;
+  cell->ul_b = vt->ul.kind == COL_RGB ? vt->ul.b : 0;
   cell->fg_r = cell->fg_g = cell->fg_b = 0;
   cell->bg_r = cell->bg_g = cell->bg_b = 0;
   cell->fg = cell->bg = 0;
@@ -298,14 +306,25 @@ static void sgr_color(const CTUI_VT *vt, int *i, VT_COLOR *col) {
 static void sgr(CTUI_VT *vt) {
   static const VT_COLOR def = {COL_BASIC, CTUI_COLOR_DEFAULT, 0, 0, 0};
   if (vt->nparams == 0) {
-    vt->fg = vt->bg = def;
+    vt->fg = vt->bg = vt->ul = def;
     vt->attr = 0;
     return;
   }
   for (int i = 0; i < vt->nparams; i++) {
     int p = vt->params[i];
+    if (p == 4 && i + 1 < vt->nparams && vt->sub[i + 1]) {
+      /* 4:N: 0 none, 1 single, 2 double, 3 curly, 4 dotted, 5 dashed */
+      int st = vt->params[++i];
+      vt->attr &= (unsigned char)~CTUI_ATTR_UL_MASK;
+      if (st == 0) {
+        vt->attr &= (unsigned char)~CTUI_ATTR_UNDERLINE;
+      } else {
+        vt->attr |= CTUI_ATTR_UL(st <= 5 ? st - 1 : 0);
+      }
+      continue;
+    }
     if (p == 0) {
-      vt->fg = vt->bg = def;
+      vt->fg = vt->bg = vt->ul = def;
       vt->attr = 0;
     } else if (p == 1) {
       vt->attr |= CTUI_ATTR_BOLD;
@@ -314,7 +333,8 @@ static void sgr(CTUI_VT *vt) {
     } else if (p == 3) {
       vt->attr |= CTUI_ATTR_ITALIC;
     } else if (p == 4) {
-      vt->attr |= CTUI_ATTR_UNDERLINE;
+      vt->attr = (unsigned char)((vt->attr & ~CTUI_ATTR_UL_MASK) |
+                                 CTUI_ATTR_UNDERLINE);
     } else if (p == 9) {
       vt->attr |= CTUI_ATTR_STRIKE;
     } else if (p == 22) {
@@ -322,7 +342,7 @@ static void sgr(CTUI_VT *vt) {
     } else if (p == 23) {
       vt->attr &= (unsigned char)~CTUI_ATTR_ITALIC;
     } else if (p == 24) {
-      vt->attr &= (unsigned char)~CTUI_ATTR_UNDERLINE;
+      vt->attr &= (unsigned char)~(CTUI_ATTR_UNDERLINE | CTUI_ATTR_UL_MASK);
     } else if (p == 29) {
       vt->attr &= (unsigned char)~CTUI_ATTR_STRIKE;
     } else if (p >= 30 && p <= 37) {
@@ -341,6 +361,10 @@ static void sgr(CTUI_VT *vt) {
       sgr_color(vt, &i, &vt->fg);
     } else if (p == 48) {
       sgr_color(vt, &i, &vt->bg);
+    } else if (p == 58) {
+      sgr_color(vt, &i, &vt->ul);
+    } else if (p == 59) {
+      vt->ul = def;
     }
   }
 }
@@ -492,18 +516,22 @@ static void byte(CTUI_VT *vt, unsigned char b) {
       if (vt->nparams == 0) {
         vt->nparams = 1;
         vt->params[0] = 0;
+        vt->sub[0] = 0;
       }
       int *p = &vt->params[vt->nparams - 1];
       if (*p < 100000) {
         *p = *p * 10 + (b - '0');
       }
     } else if (b == ';' || b == ':') {
-      /* sub-parameters (38:2::r:g:b) read as parameters: ctui sends ';' */
+      /* sub-parameters (38:2::r:g:b) read as parameters, marked (4:3's
+       * style tells apart from 4;3, underline and italic) */
       if (vt->nparams == 0) {
         vt->nparams = 1;
         vt->params[0] = 0;
+        vt->sub[0] = 0;
       }
       if (vt->nparams < VT_PARAMS) {
+        vt->sub[vt->nparams] = b == ':';
         vt->params[vt->nparams++] = 0;
       }
     } else if (b >= 0x3c && b <= 0x3f) {
@@ -677,7 +705,7 @@ static int color_name(char *out, int mode_rgb, int mode_256, unsigned char v,
   return sprintf(out, "%c", v <= CTUI_COLOR_WHITE ? "dkrgybmcw"[v] : '?');
 }
 
-/* a cell's STYLE (ctui_vt_styles()) into out (32 bytes) */
+/* a cell's STYLE (ctui_vt_styles()) into out (48 bytes) */
 static void style_of(const CTUI_CELL *cell, char *out) {
   int blank = cell->ch == ' ';
   int m = cell->color_mode;
@@ -699,8 +727,18 @@ static void style_of(const CTUI_CELL *cell, char *out) {
     for (int i = 0; i < 5; i++) {
       if (attr & (1 << i)) {
         out[n++] = "BDIUS"[i];
+        if ((1 << i) == CTUI_ATTR_UNDERLINE && CTUI_ATTR_UL_STYLE(attr)) {
+          /* its style: = double, ~ curly, . dotted, - dashed */
+          out[n++] = "_=~.-"[CTUI_ATTR_UL_STYLE(attr) % 5];
+        }
       }
     }
+  }
+  if ((attr & CTUI_ATTR_UNDERLINE) && cell->ul_mode) {
+    out[n++] = '_'; /* its colour */
+    n += color_name(out + n, cell->ul_mode == CTUI_COLOR_MODE_RGB,
+                    cell->ul_mode == CTUI_COLOR_MODE_256, cell->ul_r,
+                    cell->ul_r, cell->ul_g, cell->ul_b);
   }
   out[n] = '\0';
 }
@@ -709,8 +747,9 @@ char *ctui_vt_styles(CTUI_VT *vt) {
   if (vt->state == ST_GROUND) {
     flush_text(vt, 0);
   }
-  /* a row at worst: a change every cell, "COL #rrggbb/#rrggbb+BDIUS " */
-  size_t row_max = 16 + (size_t)vt->cols * 32;
+  /* a row at worst: a change every cell, "COL #rrggbb/#rrggbb+BDIU~S_#rrggbb"
+   * (style_of()'s 48 at most) */
+  size_t row_max = 16 + (size_t)vt->cols * 56;
   char *out = malloc(row_max * (size_t)vt->rows + 1);
   if (out == NULL) {
     return NULL;
@@ -718,7 +757,7 @@ char *ctui_vt_styles(CTUI_VT *vt) {
   size_t len = 0;
   for (int r = 0; r < vt->rows; r++) {
     const CTUI_CELL *row = row_at(vt, r);
-    char last[32] = "d/d", cur[32];
+    char last[48] = "d/d", cur[48];
     size_t start = len;
     len += (size_t)sprintf(out + len, "%d:", r);
     int any = 0;

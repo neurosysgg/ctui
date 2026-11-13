@@ -56,6 +56,8 @@ layout(push_constant) uniform Push {
 // CTUI_ATTR_* (core/cell.h)
 const uint BOLD = 1u, DIM = 2u, UNDERLINE = 8u, STRIKE = 16u;
 const uint FG_DEFAULT = 1u << 8, BG_DEFAULT = 1u << 9, PLACEHOLDER = 1u << 10;
+const uint UL_OWN = 1u << 24; // CTUI_VK_UL_OWN: the underline's own colour
+const uint UL_DOUBLE = 1u, UL_CURLY = 2u, UL_DOTTED = 3u, UL_DASHED = 4u;
 const uint BOX = 0xffffu;
 const uint NO_WIPE = 0xffffffffu;
 const uint TAB = 12u;
@@ -169,6 +171,36 @@ uint over(uint dst, uint t) {
   return o;
 }
 
+// curly's wave at pixel lx (src/vk/vk.c's wave(), line for line)
+uint wave(uint lx) {
+  uint amp = max(gh / 14u, 1u);
+  uint per = max(gw, 4u);
+  uint u = lx % per, tri = u < per / 2u ? u : per - u;
+  return tri * 4u * amp / per;
+}
+
+// an underline of style at pixel lx of the cells, row gy of the cell:
+// 255 drawn (src/vk/vk.c's ctui_vk_underline(), line for line)
+uint underline(uint style, uint lx, uint gy) {
+  uint base = gh - 1u - gh / 16u;
+  if (style == UL_DOUBLE)
+    return gy == base || (base >= 2u && gy == base - 2u) ? 255u : 0u;
+  if (style == UL_CURLY) {
+    uint a = wave(lx), b = wave(lx + 1u);
+    uint lo = min(a, b), hi = max(a, b);
+    return gy + hi >= base && gy + lo <= base ? 255u : 0u;
+  }
+  if (style == UL_DOTTED) {
+    uint d = max((gh + 10u) / 20u, 1u);
+    return gy == base && (lx / d) % 2u == 0u ? 255u : 0u;
+  }
+  if (style == UL_DASHED) {
+    uint d = max(gw / 3u, 2u);
+    return gy == base && (lx / d) % 3u != 2u ? 255u : 0u;
+  }
+  return gy == base ? 255u : 0u;
+}
+
 uint word(uint rgb, uint al) {
   uint r = rgb >> 16 & 0xffu, g = rgb >> 8 & 0xffu, b = rgb & 0xffu;
   return (bgra != 0u ? b | r << 16 : r | b << 16) | g << 8 | al << 24;
@@ -188,8 +220,9 @@ void main() {
   bool bg_default = true;
   uint ph = 0u; // a placeholder cell's image, where the glyph would be
   uint fg = def_fg;
+  uint ul = 0u, ulc = 0u; // an underline with its own colour, and that
   if (cx < cols && cy < rows) {
-    uint i = (cy * cols + cx) * 3u;
+    uint i = (cy * cols + cx) * 4u;
     uint g = cell[i] & 0xffffu, a = cell[i] >> 16;
     fg = (a & FG_DEFAULT) != 0u ? def_fg : cell[i + 1u];
     uint bg = (a & BG_DEFAULT) != 0u ? def_bg : cell[i + 2u];
@@ -209,8 +242,15 @@ void main() {
       if ((a & BOLD) != 0u && gx > 0u)
         cov = max(cov, coverage(g, gx - 1u, gy));
     }
-    if ((a & UNDERLINE) != 0u && gy == gh - 1u - gh / 16u)
-      cov = 255u;
+    if ((a & UNDERLINE) != 0u) {
+      uint u = underline(a >> 5 & 7u, x - pad_x, gy);
+      if ((cell[i + 3u] & UL_OWN) != 0u) {
+        ul = u;
+        ulc = cell[i + 3u] & 0xffffffu;
+      } else {
+        cov = max(cov, u);
+      }
+    }
     if ((a & STRIKE) != 0u && gy == gh / 2u)
       cov = 255u;
     if ((a & DIM) != 0u)
@@ -232,6 +272,8 @@ void main() {
     }
   rgb = blend(rgb, fg, cov);
   al = over_a(al, cov);
+  rgb = blend(rgb, ulc, ul);
+  al = over_a(al, ul);
   rgb = over(rgb, ph);
   al = over_a(al, ph & 0xffu);
   for (; p < nplace; p++) {

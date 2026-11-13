@@ -38,11 +38,14 @@
 #define CTUI_VK_IMAGES 8u
 
 /* a cell on the card: CTUI_VK_CELL_WORDS words, the glyph's slot in the
- * atlas | attrs << 16 (CTUI_ATTR_*, and the two flags below), then the
- * foreground and background as 0xRRGGBB. A CTUI_COLOR_DEFAULT colour is
- * a flag, not a colour: the painter takes ctui_vk_set_default()'s, so
- * changing those repaints without the cells going up again */
-#define CTUI_VK_CELL_WORDS 3u
+ * atlas | attrs << 16 (CTUI_ATTR_*, the underline's style in their top
+ * bits, and the flags below), then the foreground and background as
+ * 0xRRGGBB, then the underline's own colour (0xRRGGBB | CTUI_VK_UL_OWN;
+ * 0: the text's). A CTUI_COLOR_DEFAULT colour is a flag, not a colour:
+ * the painter takes ctui_vk_set_default()'s, so changing those repaints
+ * without the cells going up again */
+#define CTUI_VK_CELL_WORDS 4u
+#define CTUI_VK_UL_OWN (1u << 24)
 #define CTUI_VK_FG_DEFAULT (1u << 8)
 #define CTUI_VK_BG_DEFAULT (1u << 9)
 /* a kitty placeholder cell (CTUI_GFX_KITTY_PLACEHOLDER): its slot is the
@@ -57,6 +60,13 @@
 #define CTUI_VK_GLYPH_BOX 0xffffu
 
 typedef struct CTUI_VK CTUI_VK;
+
+/* an underline of style (CTUI_UL_*) at pixel lx of the cells (from their
+ * origin: a pattern runs on across cells) and row gy of a gw x gh cell:
+ * 255 where it's drawn, 0 where not. The painter's rule (cells.comp has
+ * the same lines), for a test's reference */
+unsigned ctui_vk_underline(unsigned style, unsigned lx, unsigned gy,
+                           unsigned gw, unsigned gh);
 
 /* the backend on the caller's device (any with a compute queue); NULL
  * when its pipeline can't be made (logged) */

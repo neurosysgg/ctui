@@ -155,10 +155,21 @@ static int ansi_bg_code(unsigned char c) {
 /* whichever fields matter for a cell's color_mode -- BASIC and 256 both
  * key off plain fg/bg (just different index spaces), RGB off fg_r../bg_r..,
  * RGB_FG off fg_r.. and plain bg */
+/* the underline's own colour the same (core/cell.h's ul_mode) */
+static int ul_same(const CTUI_CELL *a, const CTUI_CELL *b) {
+  if (a->ul_mode != b->ul_mode) {
+    return 0;
+  }
+  return a->ul_mode == CTUI_COLOR_MODE_256 ? a->ul_r == b->ul_r
+         : a->ul_mode == CTUI_COLOR_MODE_RGB
+             ? a->ul_r == b->ul_r && a->ul_g == b->ul_g && a->ul_b == b->ul_b
+             : 1;
+}
+
 static int ctui_compare_ctuicell(const CTUI_CELL *lhs, const CTUI_CELL *rhs) {
   if (lhs->ch != rhs->ch || lhs->color_mode != rhs->color_mode ||
       lhs->kitty_row != rhs->kitty_row || lhs->kitty_col != rhs->kitty_col ||
-      lhs->attr != rhs->attr) {
+      lhs->attr != rhs->attr || !ul_same(lhs, rhs)) {
     return 0;
   }
   if (lhs->color_mode == CTUI_COLOR_MODE_RGB_FG) {
@@ -183,7 +194,8 @@ static int same_cell(const CTUI_CELL *a, const CTUI_CELL *b) {
  * last cell actually emitted this flush (to decide whether a fresh SGR
  * escape is needed), not the previous frame's shadow buffer */
 static int color_changed(const CTUI_CELL *cur, const CTUI_CELL *last) {
-  if (cur->color_mode != last->color_mode || cur->attr != last->attr) {
+  if (cur->color_mode != last->color_mode || cur->attr != last->attr ||
+      !ul_same(cur, last)) {
     return 1;
   }
   if (cur->color_mode == CTUI_COLOR_MODE_RGB_FG) {
@@ -321,17 +333,53 @@ static int bg_same(const CTUI_CELL *a, const CTUI_CELL *b) {
   return a->bg == b->bg;
 }
 
-/* "1;2;..." for the CTUI_ATTR_* bits in attr */
+/* the terminal draws styled and coloured underlines (SGR 4:N, 58):
+ * kitty and the terminals known to (others would take 4:3 as underline
+ * then italic). -1: not asked yet; ctui_term_set_ul_styles() overrides */
+static int g_ul_styles = -1;
+
+void ctui_term_set_ul_styles(int on) { g_ul_styles = on; }
+
+static int ul_styles(void) {
+  if (g_ul_styles < 0) {
+    const char *term = getenv("TERM"), *prog = getenv("TERM_PROGRAM");
+    g_ul_styles =
+        (ctui_gfx_detect_caps() & CTUI_GFX_KITTY) ||
+        (prog && (!strcmp(prog, "ghostty") || !strcmp(prog, "WezTerm") ||
+                  !strcmp(prog, "ctui-term"))) ||
+        (term && (!strncmp(term, "foot", 4) || !strcmp(term, "xterm-ghostty") ||
+                  !strcmp(term, "wezterm") || !strcmp(term, "alacritty")));
+  }
+  return g_ul_styles;
+}
+
+/* "1;2;..." for the CTUI_ATTR_* bits in attr; an underline of a style
+ * ("4:3", curly) when the terminal takes them */
 static char *put_attrs(char *p, unsigned attr) {
   static const char sgr[] = {'1', '2', '3', '4', '9'};
   for (int i = 0; i < 5; i++) {
     if (attr & (1u << i)) {
       p[0] = sgr[i];
-      p[1] = ';';
-      p += 2;
+      p += 1;
+      if ((1u << i) == CTUI_ATTR_UNDERLINE && CTUI_ATTR_UL_STYLE(attr)) {
+        p[0] = ':';
+        p[1] = (char)('1' + CTUI_ATTR_UL_STYLE(attr));
+        p += 2;
+      }
+      *p++ = ';';
     }
   }
   return p;
+}
+
+/* the underline's own colour (58), as a cell's fg would go */
+static char *put_ul(char *p, const CTUI_CELL *cell) {
+  if (cell->ul_mode == CTUI_COLOR_MODE_256) {
+    p = PUT_LIT(p, "58;5;");
+    return put_uint(p, cell->ul_r);
+  }
+  p = PUT_LIT(p, "58;2;");
+  return put_rgb(p, cell->ul_r, cell->ul_g, cell->ul_b);
 }
 
 /* the SGR escape taking the terminal from last's colours and attributes
@@ -346,21 +394,29 @@ static char *emit_color(char *p, const CTUI_CELL *cell, const CTUI_CELL *last,
   char *start = p;
   int fg = !known || !fg_same(cell, last);
   int bg = !known || !bg_same(cell, last);
-  unsigned gone = known ? (unsigned)(last->attr & ~cell->attr) : 0;
+  /* a terminal without styled underlines: plain ones, no colour of their
+   * own (the cells keep theirs: a sink draws them) */
+  int styled = ul_styles();
+  unsigned keep = styled ? 0xffu : ~CTUI_ATTR_UL_MASK & 0xffu;
+  unsigned cattr = cell->attr & keep, lattr = last->attr & keep;
+  unsigned gone = known ? (unsigned)(lattr & ~cattr) : 0;
+  int reset = 0;
   p = PUT_LIT(p, "\x1b[");
   if (!known) {
-    if (cell->attr) {
-      p = put_attrs(PUT_LIT(p, "0;"), cell->attr);
+    if (cattr) {
+      p = put_attrs(PUT_LIT(p, "0;"), cattr);
+      reset = 1;
     }
-  } else if (cell->attr == last->attr) {
+  } else if (cattr == lattr) {
     /* the usual case: colours alone */
   } else if (gone && fg && bg) {
-    p = put_attrs(PUT_LIT(p, "0;"), cell->attr);
+    p = put_attrs(PUT_LIT(p, "0;"), cattr);
+    reset = 1;
   } else {
-    unsigned add = (unsigned)(cell->attr & ~last->attr);
+    unsigned add = (unsigned)(cattr & ~lattr);
     if (gone & (CTUI_ATTR_BOLD | CTUI_ATTR_DIM)) {
       p = PUT_LIT(p, "22;");
-      add |= cell->attr & (CTUI_ATTR_BOLD | CTUI_ATTR_DIM);
+      add |= cattr & (CTUI_ATTR_BOLD | CTUI_ATTR_DIM);
     }
     if (gone & CTUI_ATTR_ITALIC) {
       p = PUT_LIT(p, "23;");
@@ -371,7 +427,22 @@ static char *emit_color(char *p, const CTUI_CELL *cell, const CTUI_CELL *last,
     if (gone & CTUI_ATTR_STRIKE) {
       p = PUT_LIT(p, "29;");
     }
+    if ((cattr & lattr & CTUI_ATTR_UNDERLINE) &&
+        CTUI_ATTR_UL_STYLE(cattr) != CTUI_ATTR_UL_STYLE(lattr)) {
+      add |= cattr & (CTUI_ATTR_UNDERLINE | CTUI_ATTR_UL_MASK); /* restyled */
+    }
     p = put_attrs(p, add);
+  }
+  if (styled) {
+    /* the underline's colour: set, or back to the text's (59) where the
+     * terminal may still have one -- a reset clears it */
+    if (cell->ul_mode && (!known || reset || !ul_same(cell, last))) {
+      p = put_ul(p, cell);
+      *p++ = ';';
+    } else if (!cell->ul_mode && !reset &&
+               (known ? last->ul_mode != 0 : (cattr & CTUI_ATTR_UNDERLINE))) {
+      p = PUT_LIT(p, "59;");
+    }
   }
   if (fg) {
     p = put_fg(p, cell);

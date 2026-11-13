@@ -730,7 +730,7 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
   for (size_t i = 0; i < ncells; i++) {
     uint32_t *r = vk->rec + i * CTUI_VK_CELL_WORDS;
     r[0] = ' ' | (CTUI_VK_FG_DEFAULT | CTUI_VK_BG_DEFAULT) << 16;
-    r[1] = r[2] = 0;
+    r[1] = r[2] = r[3] = 0;
   }
   memset(vk->dirty, 1, ncells);
   all_tiles(vk);
@@ -1062,6 +1062,53 @@ static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch, unsigned face, int *wide) {
   return slot;
 }
 
+/* curly's wave at pixel lx: how far above the line, 0 .. 2 * amp, a
+ * triangle a cell wide */
+static unsigned wave(unsigned lx, unsigned gw, unsigned gh) {
+  unsigned amp = gh / 14u > 1u ? gh / 14u : 1u;
+  unsigned per = gw > 4u ? gw : 4u;
+  unsigned u = lx % per, tri = u < per / 2u ? u : per - u;
+  return tri * 4u * amp / per;
+}
+
+unsigned ctui_vk_underline(unsigned style, unsigned lx, unsigned gy,
+                           unsigned gw, unsigned gh) {
+  unsigned base = gh - 1u - gh / 16u;
+  switch (style) {
+  case CTUI_UL_DOUBLE:
+    return gy == base || (base >= 2u && gy == base - 2u) ? 255u : 0u;
+  case CTUI_UL_CURLY: {
+    /* the wave from this pixel to the next, so a steep one stays joined */
+    unsigned a = wave(lx, gw, gh), b = wave(lx + 1u, gw, gh);
+    unsigned lo = a < b ? a : b, hi = a < b ? b : a;
+    return gy + hi >= base && gy + lo <= base ? 255u : 0u;
+  }
+  case CTUI_UL_DOTTED: {
+    unsigned d = (gh + 10u) / 20u > 1u ? (gh + 10u) / 20u : 1u;
+    return gy == base && (lx / d) % 2u == 0u ? 255u : 0u;
+  }
+  case CTUI_UL_DASHED: {
+    unsigned d = gw / 3u > 2u ? gw / 3u : 2u;
+    return gy == base && (lx / d) % 3u != 2u ? 255u : 0u;
+  }
+  default:
+    return gy == base ? 255u : 0u;
+  }
+}
+
+/* a cell's underline colour word (CTUI_VK_UL_OWN | rgb, 0: the text's) */
+static uint32_t ul_word(CTUI_VK *vk, const CTUI_CELL *c) {
+  switch (c->ul_mode) {
+  case CTUI_COLOR_MODE_RGB:
+    return CTUI_VK_UL_OWN | (uint32_t)c->ul_r << 16 | (uint32_t)c->ul_g << 8 |
+           c->ul_b;
+  case CTUI_COLOR_MODE_256:
+    return CTUI_VK_UL_OWN | rgb256(vk, c->ul_r);
+  default:
+    return 0;
+  }
+}
+
 void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
   uint32_t flags = 0, fg = 0, bg = 0;
   switch (c->color_mode) {
@@ -1102,6 +1149,7 @@ void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
              (flags | CTUI_VK_PLACEHOLDER) << 16;
     out[1] = fg;
     out[2] = bg;
+    out[3] = 0;
     return;
   }
   int wide;
@@ -1116,6 +1164,7 @@ void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
   out[0] = slot | (attr | flags) << 16;
   out[1] = fg;
   out[2] = bg;
+  out[3] = attr & CTUI_ATTR_UNDERLINE ? ul_word(vk, c) : 0;
 }
 
 void ctui_vk_cont(uint32_t *w, const uint32_t *left) {

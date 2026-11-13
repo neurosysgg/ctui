@@ -41,8 +41,15 @@ typedef struct {
    * columns on from it); 0 = follows from the left */
   unsigned char kitty_col;
 
-  /* CTUI_ATTR_* bits; 0 = plain text (every zero-filled cell) */
+  /* CTUI_ATTR_* bits; 0 = plain text (every zero-filled cell). Its top
+   * three bits are the underline's style (CTUI_ATTR_UL()) */
   unsigned char attr;
+
+  /* the underline's own colour, read as color_mode reads fg: BASIC (0,
+   * every zero-filled cell) = none, the text's colour; 256: ul_r the
+   * index; RGB: ul_r/g/b. Only drawn under CTUI_ATTR_UNDERLINE */
+  unsigned char ul_mode;
+  unsigned char ul_r, ul_g, ul_b;
 } CTUI_CELL;
 
 /* a cell's text attributes, sent as SGR with its colours; they combine */
@@ -53,6 +60,28 @@ enum {
   CTUI_ATTR_UNDERLINE = 1 << 3,
   CTUI_ATTR_STRIKE = 1 << 4,
 };
+
+/* no padding: cells compare (and go over a link) as bytes */
+_Static_assert(sizeof(CTUI_CELL) == 20, "CTUI_CELL has no padding");
+
+/* the underline's style, in attr's top three bits beside
+ * CTUI_ATTR_UNDERLINE (which still says whether there is one): SINGLE is
+ * 0, so a plain underline is what it always was. A terminal without
+ * styled underlines draws them all single (core/screen.c) */
+enum {
+  CTUI_UL_SINGLE = 0,
+  CTUI_UL_DOUBLE,
+  CTUI_UL_CURLY,
+  CTUI_UL_DOTTED,
+  CTUI_UL_DASHED,
+};
+#define CTUI_ATTR_UL_SHIFT 5
+#define CTUI_ATTR_UL_MASK (7u << CTUI_ATTR_UL_SHIFT)
+/* attr bits for an underline of style s (CTUI_UL_*), UNDERLINE included */
+#define CTUI_ATTR_UL(s)                                                        \
+  ((unsigned char)(CTUI_ATTR_UNDERLINE | ((unsigned)(s) << CTUI_ATTR_UL_SHIFT)))
+/* an attr's underline style (CTUI_UL_*; meaningful with UNDERLINE set) */
+#define CTUI_ATTR_UL_STYLE(a) (((unsigned)(a) >> CTUI_ATTR_UL_SHIFT) & 7u)
 
 /* basic ANSI colors */
 enum {
