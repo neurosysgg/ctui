@@ -55,8 +55,11 @@ static void t_delete(void *ctx, unsigned id) {
   (void)ctx;
   deleted = id;
 }
+static unsigned files, file_id, n_puts, put_id, put_pid, unputs;
 static void t_file(void *ctx, unsigned id, const char *p, int c, int r) {
-  (void)ctx, (void)id, (void)p, (void)c, (void)r;
+  (void)ctx, (void)p, (void)c, (void)r;
+  files++;
+  file_id = id;
 }
 static void t_rgba(void *ctx, unsigned id, const unsigned char *rgba, int w,
                    int h, int c, int r) {
@@ -78,11 +81,14 @@ static void t_wipe(void *ctx, unsigned id, unsigned l, unsigned m, double x,
 }
 static void t_put(void *ctx, unsigned id, unsigned pid, int row, int col, int c,
                   int r, int z) {
-  (void)ctx, (void)id, (void)pid, (void)row, (void)col, (void)c, (void)r;
-  (void)z;
+  (void)ctx, (void)row, (void)col, (void)c, (void)r, (void)z;
+  n_puts++;
+  put_id = id;
+  put_pid = pid;
 }
 static void t_unput(void *ctx, unsigned id, unsigned pid) {
   (void)ctx, (void)id, (void)pid;
+  unputs++;
 }
 static void t_flush(void *ctx) {
   (void)ctx;
@@ -355,6 +361,60 @@ int main(void) {
                    "shapes not named as CSS names, unterminated or too long: "
                    "refused (%d of 5)",
                    refused);
+
+  /* a host that lost it all (re-exec'd, its socket handed on): the app
+   * sends it all again, its next frame the whole screen */
+  ctui_gfx_kitty_place_file(90, "/tmp/x.png", 2, 1);
+  ctui_gfx_kitty_place_file(91, "/tmp/gone.png", 2, 1);
+  ctui_gfx_kitty_delete(91);
+  ctui_gfx_kitty_put(77, 5, 0, 0, 1, 1, -1);
+  ctui_gfx_kitty_put(77, 6, 0, 0, 1, 1, -1);
+  ctui_gfx_kitty_unput(77, 6);
+  ctui_pointer_shape("grab");
+  ctui_link_host_read(h);
+  /* no sinks for now: frames acked into nothing */
+  ctui_link_host_set_sinks(h, NULL);
+  fr = frames;
+  ctui_screen_puts(s, 4, 0, "away", 7, 0);
+  ctui_screen_flush(s);
+  app_step(&ev);
+  CTUI_TEST_ASSERT(ctui_link_host_read(h) == 0 && frames == fr,
+                   "without sinks: a frame taken, nothing drawn");
+  app_step(&ev); /* its ack */
+  int kept = dup(ctui_link_host_fd(h));
+  ctui_link_host_free(h);
+  rgba_id = files = n_puts = unputs = 0;
+  def_fg = def_bg = 0;
+  shape[0] = '\0';
+  h = ctui_link_host_adopt(kept, &sinks);
+  CTUI_TEST_ASSERT(h && ctui_link_host_reset(h) == 0 &&
+                       ctui_link_host_grid(h, 6, 30, 9, 18) == 0,
+                   "a new host on the same socket: reset, a grid");
+  t = app_step(&ev); /* the reset taken on the way */
+  CTUI_TEST_ASSERT(t == CTUI_RESIZE_EVENT, "the grid: a resize");
+  memset(got, 0, sizeof got);
+  ctui_screen_flush(s); /* nothing changed in the app */
+  CTUI_TEST_ASSERT(ctui_link_host_read(h) == 0 && got_rows == 6 &&
+                       got_text(5, "bottom") && got_text(4, "away"),
+                   "the whole screen in its next frame, what changed while "
+                   "away too");
+  cps = ctui_cell_cluster(got[3 * 30].ch, &nc);
+  CTUI_TEST_ASSERT(cps && nc == 2 && cps[1] == 0x301,
+                   "its clusters told again");
+  CTUI_TEST_ASSERT(rgba_id == 77 && !memcmp(&rgba_first, px, 4) && files == 1 &&
+                       file_id == 90 && n_puts == 1 && put_id == 77 &&
+                       put_pid == 5 && unputs == 0,
+                   "the live images again (rgba %u, files %u, puts %u): "
+                   "not the deleted, not the unput",
+                   rgba_id, files, n_puts);
+  CTUI_TEST_ASSERT(def_fg == 0xc0c0c0 && def_bg == 0x000080 &&
+                       !strcmp(shape, "grab"),
+                   "the default colours and the pointer again (%s)", shape);
+  app_step(&ev);
+  ctui_screen_puts(s, 4, 0, "back", 7, 0);
+  ctui_screen_flush(s);
+  CTUI_TEST_ASSERT(ctui_link_host_read(h) == 0 && got_text(4, "back"),
+                   "and frames go on as before");
 
   /* the host going ends the app's loop */
   ctui_link_host_free(h);

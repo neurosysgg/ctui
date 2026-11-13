@@ -6,7 +6,9 @@
 static int log_entry(CTUI_LOGGER *self, int level, const char *log_str);
 
 CTUI_LOGGER init_logger(char *path, int verbosity) {
-  FILE *f = fopen(path, "a+");
+  /* "e": close-on-exec (glibc, musl), so what an app starts (a terminal's
+   * shells, a host's next image) doesn't inherit the log */
+  FILE *f = fopen(path, "a+e");
   if (f == NULL) {
     f = stderr;
     fprintf(stderr,

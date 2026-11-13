@@ -17,6 +17,18 @@ typedef struct {
   unsigned char *px;
 } PIX;
 
+/* a live image's last call, kept for a host that lost it: what defines
+ * image id (DISPLAY / COMMIT / RGBA / PX / FILE: one per id), a put of it
+ * (one per id and placement), its wipe (one per id). Pixels a copy (a
+ * COMMIT's are the PIX buffer's), a FILE's path its own */
+typedef struct {
+  uint32_t type;
+  CTUI_LINK_M_GFX g;
+  CTUI_LINK_M_WIPE w;
+  unsigned char *px;
+  char *path;
+} REC;
+
 struct CTUI_LINK {
   int fd;
   CTUI_SCREEN *screen;
@@ -43,6 +55,14 @@ struct CTUI_LINK {
   CTUI_LINK_APP_FN app;
   void *app_ctx;
   char *buf; /* a message in */
+  /* what a host that lost it all (CTUI_LINK_RESET) is sent again: the
+   * live images' calls (REC), the default colours, the pointer's shape */
+  REC *recs;
+  int n_recs;
+  int has_default;
+  CTUI_LINK_M_DEFAULT dflt;
+  char pointer[CTUI_LINK_POINTER_MAX];
+  int full; /* the next frame ships every cell (a new grid's first) */
 };
 
 static int send0(CTUI_LINK *l, uint32_t type, const void *fixed, size_t n) {
@@ -59,6 +79,7 @@ static void pointer(void *ctx, const char *name) {
   CTUI_LINK *l = ctx;
   size_t n = strlen(name) + 1;
   if (n <= CTUI_LINK_POINTER_MAX) {
+    memcpy(l->pointer, name, n);
     ctui_link_send(l->fd, CTUI_LINK_POINTER, name, n, NULL, 0, -1);
   }
 }
@@ -145,8 +166,10 @@ static int sink_frame(void *ctx, const CTUI_SCREEN *s) {
     return 0; /* a grid that's gone: the resize redraws all of it */
   }
   size_t n = (size_t)s->rows * (size_t)s->cols;
+  int full = l->full;
+  l->full = 0;
   for (size_t i = 0; i < n; i++) {
-    if (memcmp(&s->cells[i], &s->buffer[i], sizeof(CTUI_CELL)) != 0) {
+    if (full || memcmp(&s->cells[i], &s->buffer[i], sizeof(CTUI_CELL)) != 0) {
       l->latest[i] = s->cells[i];
       l->dirty[i] = 1;
       l->any_dirty = 1;
@@ -177,6 +200,87 @@ static void pix_drop(CTUI_LINK *l, uint32_t id) {
   }
 }
 
+/* --- what a host that lost it all is sent again --- */
+
+static int rec_define(uint32_t type) {
+  return type == CTUI_LINK_G_DISPLAY || type == CTUI_LINK_G_COMMIT ||
+         type == CTUI_LINK_G_RGBA || type == CTUI_LINK_G_PX ||
+         type == CTUI_LINK_G_FILE;
+}
+
+/* the kind a record's slot is per: 0 an image's definition, 1 a put, 2 a
+ * wipe */
+static int rec_kind(uint32_t type) {
+  return type == CTUI_LINK_G_PUT ? 1 : type == CTUI_LINK_G_WIPE ? 2 : 0;
+}
+
+static void rec_clear(REC *r) {
+  free(r->px);
+  free(r->path);
+}
+
+/* image id's records gone (a put's only with placement id2, else all) */
+static void rec_drop(CTUI_LINK *l, uint32_t id, int put_only, uint32_t id2) {
+  for (int i = 0; i < l->n_recs;) {
+    REC *r = &l->recs[i];
+    uint32_t rid = r->type == CTUI_LINK_G_WIPE ? r->w.id : r->g.id;
+    if (rid == id &&
+        (!put_only || (r->type == CTUI_LINK_G_PUT && r->g.id2 == id2))) {
+      rec_clear(r);
+      memmove(r, r + 1, (size_t)(l->n_recs - i - 1) * sizeof *r);
+      l->n_recs--;
+    } else {
+      i++;
+    }
+  }
+}
+
+/* the record for this call's slot, emptied (a new one at the end: the
+ * order the calls came in) */
+static REC *rec_slot(CTUI_LINK *l, uint32_t type, uint32_t id, uint32_t id2) {
+  int kind = rec_kind(type);
+  for (int i = 0; i < l->n_recs; i++) {
+    REC *r = &l->recs[i];
+    uint32_t rid = r->type == CTUI_LINK_G_WIPE ? r->w.id : r->g.id;
+    if (rec_kind(r->type) == kind && rid == id &&
+        (kind != 1 || r->g.id2 == id2)) {
+      rec_clear(r);
+      memset(r, 0, sizeof *r);
+      r->type = type;
+      return r;
+    }
+  }
+  REC *t = realloc(l->recs, (size_t)(l->n_recs + 1) * sizeof *t);
+  if (!t) {
+    return NULL;
+  }
+  l->recs = t;
+  REC *r = &l->recs[l->n_recs++];
+  memset(r, 0, sizeof *r);
+  r->type = type;
+  return r;
+}
+
+/* an image's call kept: g's fields, a copy of its pixels (copy: rgba w x
+ * h, or NULL: none kept -- a COMMIT's are the PIX buffer's) */
+static void rec_gfx(CTUI_LINK *l, uint32_t type, const CTUI_LINK_M_GFX *g,
+                    const unsigned char *copy) {
+  REC *r = rec_slot(l, type, g->id, g->id2);
+  if (!r) {
+    return;
+  }
+  r->g = *g;
+  if (copy) {
+    size_t bytes = (size_t)g->width * (size_t)g->height * 4u;
+    r->px = malloc(bytes);
+    if (!r->px) {
+      rec_drop(l, g->id, 0, 0);
+      return;
+    }
+    memcpy(r->px, copy, bytes);
+  }
+}
+
 /* an image call with pixels (w x h RGBA) in an fd of their own */
 static void send_px(CTUI_LINK *l, uint32_t type, const CTUI_LINK_M_GFX *g,
                     const unsigned char *rgba) {
@@ -204,6 +308,7 @@ static void g_display(void *ctx, int row, int col, int cell_cols, int cell_rows,
                        .width = width,
                        .height = height};
   send_px(ctx, CTUI_LINK_G_DISPLAY, &g, rgba);
+  rec_gfx(ctx, CTUI_LINK_G_DISPLAY, &g, rgba);
 }
 
 static unsigned char *g_image_begin(void *ctx, unsigned int image_id, int width,
@@ -252,11 +357,13 @@ static void g_image_commit(void *ctx, unsigned int image_id, int row, int col,
                        .width = p->w,
                        .height = p->h};
   send_px(l, CTUI_LINK_G_COMMIT, &g, p->px);
+  rec_gfx(l, CTUI_LINK_G_COMMIT, &g, NULL);
 }
 
 static void g_image_free(void *ctx, unsigned int image_id) {
   CTUI_LINK *l = ctx;
   pix_drop(l, image_id);
+  rec_drop(l, image_id, 0, 0);
   CTUI_LINK_M_GFX g = {.id = image_id};
   send0(l, CTUI_LINK_G_FREE, &g, sizeof g);
 }
@@ -264,6 +371,7 @@ static void g_image_free(void *ctx, unsigned int image_id) {
 static void g_delete(void *ctx, unsigned int image_id) {
   CTUI_LINK *l = ctx;
   pix_drop(l, image_id);
+  rec_drop(l, image_id, 0, 0);
   CTUI_LINK_M_GFX g = {.id = image_id};
   send0(l, CTUI_LINK_G_DELETE, &g, sizeof g);
 }
@@ -276,6 +384,13 @@ static void g_place_file(void *ctx, unsigned int image_id, const char *path,
                      strlen(path) + 1, -1) != 0) {
     ctui_logf(E_WRN, "[CTUI:LINK] - a placed file didn't go\n");
   }
+  REC *r = rec_slot(l, CTUI_LINK_G_FILE, image_id, 0);
+  if (r) {
+    r->g = g;
+    if (!(r->path = strdup(path))) {
+      rec_drop(l, image_id, 0, 0);
+    }
+  }
 }
 
 static void g_place_rgba(void *ctx, unsigned int image_id,
@@ -287,6 +402,7 @@ static void g_place_rgba(void *ctx, unsigned int image_id,
                        .width = width,
                        .height = height};
   send_px(ctx, CTUI_LINK_G_RGBA, &g, rgba);
+  rec_gfx(ctx, CTUI_LINK_G_RGBA, &g, rgba);
 }
 
 static void g_display_px(void *ctx, int row, int col, int cell_cols,
@@ -306,6 +422,7 @@ static void g_display_px(void *ctx, int row, int col, int cell_cols,
                        .w = w,
                        .h = h};
   send_px(ctx, CTUI_LINK_G_PX, &g, rgba);
+  rec_gfx(ctx, CTUI_LINK_G_PX, &g, rgba);
 }
 
 static void g_wipe(void *ctx, unsigned int image_id, unsigned int left_id,
@@ -318,6 +435,10 @@ static void g_wipe(void *ctx, unsigned int image_id, unsigned int left_id,
                         .px_per_s = px_per_s,
                         .x_end = x_end};
   send0(ctx, CTUI_LINK_G_WIPE, &m, sizeof m);
+  REC *r = rec_slot(ctx, CTUI_LINK_G_WIPE, image_id, 0);
+  if (r) {
+    r->w = m;
+  }
 }
 
 static void g_put(void *ctx, unsigned int image_id, unsigned int placement_id,
@@ -330,12 +451,14 @@ static void g_put(void *ctx, unsigned int image_id, unsigned int placement_id,
                        .rows = rows,
                        .z = z};
   send0(ctx, CTUI_LINK_G_PUT, &g, sizeof g);
+  rec_gfx(ctx, CTUI_LINK_G_PUT, &g, NULL);
 }
 
 static void g_unput(void *ctx, unsigned int image_id,
                     unsigned int placement_id) {
   CTUI_LINK_M_GFX g = {.id = image_id, .id2 = placement_id};
   send0(ctx, CTUI_LINK_G_UNPUT, &g, sizeof g);
+  rec_drop(ctx, image_id, 1, placement_id);
 }
 
 static void g_flush(void *ctx) { send0(ctx, CTUI_LINK_G_FLUSH, NULL, 0); }
@@ -356,6 +479,54 @@ static const CTUI_GFX_SINK k_gfx = {
 };
 
 /* --- the host's messages --- */
+
+/* a host that lost it all (CTUI_LINK_RESET): told it all again -- the
+ * clusters as frames name them, the whole screen with the next grid's
+ * first frame (take_grid), the frame in flight forgotten (its ack won't
+ * come) */
+static void take_reset(CTUI_LINK *l) {
+  if (l->told) {
+    memset(l->told, 0, l->n_told);
+  }
+  l->inflight = 0;
+  if (l->has_default) {
+    send0(l, CTUI_LINK_DEFAULT, &l->dflt, sizeof l->dflt);
+  }
+  if (l->pointer[0]) {
+    ctui_link_send(l->fd, CTUI_LINK_POINTER, l->pointer, strlen(l->pointer) + 1,
+                   NULL, 0, -1);
+  }
+  /* the images, then what puts them elsewhere, then their wipes */
+  for (int kind = 0; kind < 3; kind++) {
+    for (int i = 0; i < l->n_recs; i++) {
+      const REC *r = &l->recs[i];
+      if (rec_kind(r->type) != kind) {
+        continue;
+      }
+      if (r->type == CTUI_LINK_G_WIPE) {
+        send0(l, CTUI_LINK_G_WIPE, &r->w, sizeof r->w);
+      } else if (r->type == CTUI_LINK_G_FILE) {
+        ctui_link_send(l->fd, CTUI_LINK_G_FILE, &r->g, sizeof r->g, r->path,
+                       strlen(r->path) + 1, -1);
+      } else if (r->type == CTUI_LINK_G_PUT) {
+        send0(l, CTUI_LINK_G_PUT, &r->g, sizeof r->g);
+      } else if (rec_define(r->type)) {
+        PIX *p = r->type == CTUI_LINK_G_COMMIT ? pix_find(l, r->g.id) : NULL;
+        const unsigned char *px = p ? p->px : r->px;
+        if (px) {
+          send_px(l, r->type, &r->g, px);
+        }
+      }
+    }
+  }
+  if (l->n_recs) {
+    send0(l, CTUI_LINK_G_FLUSH, NULL, 0);
+  }
+  ctui_logf(E_INF,
+            "[CTUI:LINK] - the host lost it all: %d image call(s) sent again "
+            "@ tick %d\n",
+            l->n_recs, ctui_tick_advance());
+}
 
 /* a new grid from the host: mapped, the newest cells sized to it */
 static int take_grid(CTUI_LINK *l, const CTUI_LINK_M_GRID *g, int fd) {
@@ -392,6 +563,12 @@ static int take_grid(CTUI_LINK *l, const CTUI_LINK_M_GRID *g, int fd) {
   l->resize.rows = g->rows;
   l->resize.cols = g->cols;
   l->resized = 1;
+  /* the new grid starts empty: its first frame is every cell, the next
+   * flush handing one even when the app's screen didn't change */
+  l->full = 1;
+  if (l->screen) {
+    ctui_screen_set_sink(l->screen, &k_screen, l);
+  }
   ctui_cell_px_set(g->cw, g->ch);
   ctui_logf(E_INF, "[CTUI:LINK] - grid %dx%d, cells %dx%d px @ tick %d\n",
             g->cols, g->rows, g->cw, g->ch, ctui_tick_advance());
@@ -417,6 +594,9 @@ static int take(CTUI_LINK *l, long len, int fd) {
   case CTUI_LINK_ACK:
     l->inflight = 0;
     ship(l);
+    break;
+  case CTUI_LINK_RESET:
+    take_reset(l);
     break;
   case CTUI_LINK_EVENT:
     if (blen < sizeof l->ev) {
@@ -561,6 +741,10 @@ void ctui_link_close(CTUI_LINK *l) {
     free(l->pix[i].px);
   }
   free(l->pix);
+  for (int i = 0; i < l->n_recs; i++) {
+    rec_clear(&l->recs[i]);
+  }
+  free(l->recs);
   free(l->latest);
   free(l->dirty);
   free(l->told);
@@ -572,6 +756,8 @@ void ctui_link_close(CTUI_LINK *l) {
 
 void ctui_link_set_default(CTUI_LINK *l, uint32_t fg, uint32_t bg) {
   CTUI_LINK_M_DEFAULT m = {.fg = fg, .bg = bg};
+  l->dflt = m;
+  l->has_default = 1;
   send0(l, CTUI_LINK_DEFAULT, &m, sizeof m);
 }
 

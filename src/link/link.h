@@ -82,6 +82,19 @@ typedef struct {
  * HELLO is checked as it comes. NULL when out of memory */
 CTUI_LINK_HOST *ctui_link_host_new(int fd, const CTUI_LINK_HOST_SINKS *sinks);
 void ctui_link_host_free(CTUI_LINK_HOST *h);
+/* the host's end of a link whose app said HELLO to a host before (one
+ * that re-exec'd, handing its sockets on): as ctui_link_host_new() with the
+ * HELLO taken as said. Follow it with ctui_link_host_reset() and a grid */
+CTUI_LINK_HOST *ctui_link_host_adopt(int fd, const CTUI_LINK_HOST_SINKS *sinks);
+/* the app's frames and images into other sinks from here (NULL: none --
+ * frames acked and dropped, images dropped: a host with no surface for the
+ * app for now) */
+void ctui_link_host_set_sinks(CTUI_LINK_HOST *h,
+                              const CTUI_LINK_HOST_SINKS *sinks);
+/* the host lost what the app gave it (sinks new or none since): the app
+ * asked for it all again -- default colours, pointer, live images, clusters
+ * -- and to fill the next grid whole. Send a grid after it. 0, or -1 */
+int ctui_link_host_reset(CTUI_LINK_HOST *h);
 int ctui_link_host_fd(const CTUI_LINK_HOST *h);
 
 /* the app's grid at rows x cols, a cell cw x ch pixels: a new shared

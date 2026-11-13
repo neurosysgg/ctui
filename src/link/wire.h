@@ -42,6 +42,12 @@ enum {
   CTUI_LINK_GRID = 32, /* CTUI_LINK_M_GRID + an fd: the cells */
   CTUI_LINK_ACK,       /* nothing: the frame in flight was taken */
   CTUI_LINK_EVENT,     /* CTUI_LINK_M_EVENT */
+  CTUI_LINK_RESET,     /* nothing: the host lost what the app gave it (a new
+                        * host on the same socket, a surface made again):
+                        * the app sends it all again -- its default colours,
+                        * pointer, live images and clusters --, its next
+                        * frame (after the GRID that follows) the whole
+                        * screen. An app of an older build ignores it */
   /* either way: the app's own, bytes the link only carries */
   CTUI_LINK_APP = 64,
 };

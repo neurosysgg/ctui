@@ -49,6 +49,38 @@ CTUI_LINK_HOST *ctui_link_host_new(int fd, const CTUI_LINK_HOST_SINKS *sinks) {
   return h;
 }
 
+CTUI_LINK_HOST *ctui_link_host_adopt(int fd,
+                                     const CTUI_LINK_HOST_SINKS *sinks) {
+  CTUI_LINK_HOST *h = ctui_link_host_new(fd, sinks);
+  if (h) {
+    h->hello = 1;
+    ctui_logf(E_INF, "[CTUI:LINK] - a link adopted (fd %d) @ tick %d\n", fd,
+              ctui_tick_advance());
+  }
+  return h;
+}
+
+void ctui_link_host_set_sinks(CTUI_LINK_HOST *h,
+                              const CTUI_LINK_HOST_SINKS *sinks) {
+  static const CTUI_LINK_HOST_SINKS none;
+  h->s = sinks ? *sinks : none;
+  if (h->screen) {
+    ctui_screen_set_sink(h->screen, h->s.screen, h->s.screen_ctx);
+  }
+}
+
+int ctui_link_host_reset(CTUI_LINK_HOST *h) {
+  /* its clusters come again as its frames name them; the frame it had in
+   * flight is forgotten on its side, so an ack owed for it would only
+   * free the next one early */
+  if (h->clusters) {
+    memset(h->clusters, 0, h->n_clusters * sizeof *h->clusters);
+  }
+  h->ack_owed = 0;
+  ctui_logf(E_INF, "[CTUI:LINK] - reset sent @ tick %d\n", ctui_tick_advance());
+  return ctui_link_send(h->fd, CTUI_LINK_RESET, NULL, 0, NULL, 0, -1);
+}
+
 void ctui_link_host_free(CTUI_LINK_HOST *h) {
   if (!h) {
     return;
@@ -159,7 +191,9 @@ static int frame(CTUI_LINK_HOST *h, const char *body, size_t n) {
         h->screen->cells[at + i] = host_cell(h, h->grid[at + i]);
       }
     }
-    ctui_screen_flush(h->screen);
+    if (h->s.screen) {
+      ctui_screen_flush(h->screen);
+    }
   }
   /* an older grid's frame is dropped, acked all the same: the app's one
    * in flight */

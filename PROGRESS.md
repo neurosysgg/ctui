@@ -237,6 +237,28 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **A link's host losing it all: reset** (2026-11-13, ctui-wm:
+  ctui-host re-exec'ing to a new build, a terminal zone kept while its
+  monitor's unplugged). A host's end could only start with an app's
+  HELLO, and the app assumed the host kept everything it had sent: its
+  images, clusters, default colours, pointer, the cells of the last
+  frame. Now `CTUI_LINK_RESET` (host to app) says the host lost it: the
+  app sends its default colours and pointer again, replays its live
+  images and forgets which clusters it told; an app's first frame after
+  any GRID now carries every cell (the screen's sink re-set, so even an
+  unchanged screen hands one). The app's end keeps a replay table of
+  each live image's last defining call (display / commit / rgba /
+  display_px / file, one per id; puts per placement; wipes), dropped by
+  free / delete / unput -- pixels a copy, a commit's the PIX buffer's.
+  The host's end: `ctui_link_host_adopt()` (a link whose HELLO came to
+  the host before), `ctui_link_host_set_sinks()` (NULL: frames acked
+  into nothing, images dropped) and `ctui_link_host_reset()` (then a
+  grid). An older app ignores the message (logged). link_test: a host
+  freed with its socket handed to an adopting one, the whole screen,
+  clusters, images (not the deleted or unput), colours and pointer back;
+  clean under ASan + UBSan. Also: the logger opens its file
+  close-on-exec, so what an app starts (a terminal's shells, a host's
+  next image) no longer inherits ctui.log.
 - [x] **ctui-term counts as kitty for graphics** (2026-11-12, ctui-wm:
   ctui-top in ctui-term drew truecolour cells, not its pixel graphs).
   `ctui_gfx_detect_caps()` takes `TERM_PROGRAM=ctui-term` as kitty:
