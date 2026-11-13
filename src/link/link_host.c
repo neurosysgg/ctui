@@ -417,6 +417,18 @@ static int take(CTUI_LINK_HOST *h, long len, int fd) {
     }
     return 0;
   }
+  case CTUI_LINK_OSC_OUT: {
+    int code;
+    size_t len;
+    const char *text = ctui_link_osc_parse(body, n, &code, &len);
+    if (!text) {
+      return -1;
+    }
+    if (h->s.osc) {
+      h->s.osc(h->s.ctx, code, text, len);
+    }
+    return 0;
+  }
   default:
     if (hd->type >= CTUI_LINK_G_DISPLAY && hd->type <= CTUI_LINK_G_FLUSH) {
       return gfx(h, hd->type, body, n, fd);
@@ -490,6 +502,11 @@ int ctui_link_host_dnd(CTUI_LINK_HOST *h, const CTUI_LINK_DND *m,
   }
   return ctui_link_send(h->fd, CTUI_LINK_DND_TELL, m, sizeof *m,
                         mimes ? mimes : "", n, fd);
+}
+
+int ctui_link_host_osc(CTUI_LINK_HOST *h, int code, const char *text,
+                       size_t n) {
+  return ctui_link_osc_send(h->fd, CTUI_LINK_OSC_IN, code, text, n);
 }
 
 int ctui_link_host_app(CTUI_LINK_HOST *h, const void *msg, size_t n) {

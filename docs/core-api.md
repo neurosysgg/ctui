@@ -587,7 +587,10 @@ above into the loop described in "Life of a frame".
   host said it does); the host's end through
   `CTUI_LINK_HOST_SINKS.dnd` and `ctui_link_host_dnd()`. What it means
   to the app's own programs is the app's (ctui-wm's ctui-term turns it
-  into kitty's OSC 72).
+  into kitty's OSC 72). OSCs go over a link too: `ctui_link_osc()` is
+  what the app would write to a terminal (the host's
+  `CTUI_LINK_HOST_SINKS.osc`), `ctui_link_host_osc()` an answer, a
+  `CTUI_OSC_EVENT` in the app's loop.
 - `ctui_focus_enable()` — opt into focus reports (`CTUI_FOCUS_EVENT`)
   when the terminal window gains/loses keyboard focus;
   `ctui_shutdown()` turns them back off.

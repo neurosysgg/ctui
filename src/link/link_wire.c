@@ -2,6 +2,7 @@
 #include "wire.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -113,4 +114,37 @@ const char *ctui_link_dnd_parse(const void *body, size_t len,
     return NULL;
   }
   return mimes;
+}
+
+const char *ctui_link_osc_parse(const void *body, size_t len, int *code,
+                                size_t *n) {
+  CTUI_LINK_M_OSC m;
+  if (len < sizeof m + 1 || len - sizeof m - 1 > CTUI_OSC_MAX) {
+    return NULL;
+  }
+  memcpy(&m, body, sizeof m);
+  const char *text = (const char *)body + sizeof m;
+  if (text[len - sizeof m - 1] != '\0') {
+    return NULL;
+  }
+  *code = m.code;
+  *n = len - sizeof m - 1;
+  return text;
+}
+
+int ctui_link_osc_send(int sock, uint32_t type, int code, const char *text,
+                       size_t n) {
+  if (n > CTUI_OSC_MAX) {
+    return -1;
+  }
+  char *tail = malloc(n + 1);
+  if (!tail) {
+    return -1;
+  }
+  memcpy(tail, text, n);
+  tail[n] = '\0';
+  CTUI_LINK_M_OSC m = {.code = code};
+  int r = ctui_link_send(sock, type, &m, sizeof m, tail, n + 1, -1);
+  free(tail);
+  return r;
 }

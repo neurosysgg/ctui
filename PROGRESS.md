@@ -237,6 +237,16 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **OSC over a link** (2026-11-13, ctui-wm: ctui apps drawing a
+  ctui-term pane over a link, whose drag and drop and clipboard copies
+  are OSCs). `ctui_link_osc(l, code, text, n)` sends what the app would
+  write to a terminal (`CTUI_LINK_OSC_OUT`, the host's
+  `CTUI_LINK_HOST_SINKS.osc`), only once the host said `DND_CAN` -- which
+  now also means "takes OSCs and skips unknown types", and goes before
+  the grid, so an app starting has it before its first write;
+  `ctui_link_host_osc()` answers (`CTUI_LINK_OSC_IN`), which the app's loop
+  hands out as a `CTUI_OSC_EVENT` (its text in the link's own buffer, as
+  the terminal's is static). link_test: both ways.
 - [x] **Drag and drop: Wayland's, and over a link** (2026-11-13, ctui-wm:
   ctui-term speaking kitty's OSC 72 to its panes from ctui-host's
   surface). src/wl/dnd.c is wl_data_device on a connection:

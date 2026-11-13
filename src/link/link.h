@@ -61,8 +61,9 @@ void ctui_link_on_app(CTUI_LINK *l, CTUI_LINK_APP_FN fn, void *ctx);
 
 enum {
   /* host -> app */
-  CTUI_LINK_DND_CAN = 1, /* the host does drag and drop: after its first
-                          * grid, and after a RESET's */
+  CTUI_LINK_DND_CAN = 1, /* the host does drag and drop (and OSC both
+                          * ways; it skips a type it doesn't know): after
+                          * its first grid, and after a RESET's */
   CTUI_LINK_DND_ENTER,   /* a drag came over the app: mimes it offers */
   CTUI_LINK_DND_MOTION,
   CTUI_LINK_DND_LEAVE,    /* it went without a drop */
@@ -114,6 +115,12 @@ int ctui_link_dnd_can(const CTUI_LINK *l);
  * link --, mimes too long, or the host's gone) */
 int ctui_link_dnd(CTUI_LINK *l, const CTUI_LINK_DND *m, const char *mimes);
 
+/* an OSC the app would write to its terminal (OSC 52's copy, kitty's 72):
+ * code its number, text what follows its ';' (n bytes, no terminator).
+ * 0, or -1 as ctui_link_dnd() -- a host that didn't say DND_CAN, text
+ * past CTUI_OSC_MAX. The host's answers come as CTUI_OSC_EVENTs */
+int ctui_link_osc(CTUI_LINK *l, int code, const char *text, size_t n);
+
 /* --- the host's end --- */
 
 typedef struct CTUI_LINK_HOST CTUI_LINK_HOST;
@@ -136,6 +143,9 @@ typedef struct {
   /* the app's drag and drop messages (CTUI_LINK_DND_ACCEPT ..; mimes ""
    * for none; NULL: ignored) */
   void (*dnd)(void *ctx, const CTUI_LINK_DND *m, const char *mimes);
+  /* the app's OSCs (ctui_link_osc(); text NUL-terminated at n; NULL:
+   * ignored) */
+  void (*osc)(void *ctx, int code, const char *text, size_t n);
 } CTUI_LINK_HOST_SINKS;
 
 /* the host's end on fd (made nonblocking, owned from here); the app's
@@ -178,5 +188,8 @@ int ctui_link_host_app(CTUI_LINK_HOST *h, const void *msg, size_t n);
  * or -1 */
 int ctui_link_host_dnd(CTUI_LINK_HOST *h, const CTUI_LINK_DND *m,
                        const char *mimes, int fd);
+/* an OSC for the app, as a terminal would answer it (code, text n bytes):
+ * a CTUI_OSC_EVENT there (an app of an older build ignores it). 0, or -1 */
+int ctui_link_host_osc(CTUI_LINK_HOST *h, int code, const char *text, size_t n);
 
 #endif

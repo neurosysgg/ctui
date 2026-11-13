@@ -153,6 +153,14 @@ static void a_dnd_fn(void *ctx, const CTUI_LINK_DND *m, const char *mimes,
   }
 }
 
+static char h_osc[64];
+static int h_osc_code;
+static void t_osc(void *ctx, int code, const char *text, size_t n) {
+  (void)ctx;
+  h_osc_code = code;
+  snprintf(h_osc, sizeof h_osc, "%.*s", (int)n, text);
+}
+
 static char app_got[64];
 static void a_app(void *ctx, const void *msg, size_t n) {
   (void)ctx;
@@ -189,7 +197,8 @@ int main(void) {
                                 .set_default = t_default,
                                 .app = t_app,
                                 .pointer = t_pointer,
-                                .dnd = t_dnd};
+                                .dnd = t_dnd,
+                                .osc = t_osc};
   CTUI_LINK_HOST *h = ctui_link_host_new(sv[1], &sinks);
   CTUI_TEST_ASSERT(h && ctui_link_host_fd(h) == sv[1], "the host's end");
   CTUI_TEST_ASSERT(ctui_link_host_grid(h, 4, 20, 9, 18) == 0,
@@ -376,6 +385,19 @@ int main(void) {
                    "an unknown type skipped, a DND without its NUL refused");
   ctui_link_host_free(h3);
   close(pp[0]);
+
+  /* OSC both ways: the app's to the host's sink, the host's an event */
+  CTUI_TEST_ASSERT(ctui_link_osc(l, 72, "t=a;text/uri-list", 17) == 0 &&
+                       ctui_link_host_read(h) == 0 && h_osc_code == 72 &&
+                       !strcmp(h_osc, "t=a;text/uri-list"),
+                   "the app's OSC to the host (%d %s)", h_osc_code, h_osc);
+  ctui_link_host_osc(h, 72, "t=m:x=1:y=2", 11);
+  t = app_step(&ev);
+  const CTUI_OSC_EVENT_DATA *od = ev.event_data;
+  CTUI_TEST_ASSERT(t == CTUI_OSC_EVENT && od->code == 72 && od->len == 11 &&
+                       !strcmp(od->text, "t=m:x=1:y=2") &&
+                       !strcmp(ev.ev_source, "input"),
+                   "the host's OSC: a CTUI_OSC_EVENT for the app's loop");
 
   /* a frame of an older grid: dropped, acked */
   int fr = frames;

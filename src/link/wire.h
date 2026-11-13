@@ -42,6 +42,9 @@ enum {
   CTUI_LINK_DND_ASK,   /* CTUI_LINK_DND + its mimes, NUL-terminated: only
                         * to a host that sent DND_CAN (an older one drops
                         * a link over a type it doesn't know) */
+  CTUI_LINK_OSC_OUT,   /* CTUI_LINK_M_OSC + its text, NUL-terminated: an OSC
+                        * the app would write to a terminal; only after
+                        * DND_CAN, as DND_ASK */
   /* host -> app */
   CTUI_LINK_GRID = 32, /* CTUI_LINK_M_GRID + an fd: the cells */
   CTUI_LINK_ACK,       /* nothing: the frame in flight was taken */
@@ -54,6 +57,8 @@ enum {
                         * screen. An app of an older build ignores it */
   CTUI_LINK_DND_TELL,  /* CTUI_LINK_DND + its mimes, NUL-terminated (+ an
                         * fd: DATA's, SEND's) */
+  CTUI_LINK_OSC_IN,    /* CTUI_LINK_M_OSC + its text: an OSC a terminal
+                        * would answer with, a CTUI_OSC_EVENT for the app */
   /* either way: the app's own, bytes the link only carries */
   CTUI_LINK_APP = 64,
 };
@@ -85,6 +90,11 @@ typedef struct {
   uint32_t index, n;
   uint32_t cps[CTUI_CLUSTER_MAX];
 } CTUI_LINK_M_CLUSTER;
+
+/* an OSC's number (-1: none), its text after it */
+typedef struct {
+  int32_t code;
+} CTUI_LINK_M_OSC;
 
 /* a pointer shape's name at most, its NUL included */
 #define CTUI_LINK_POINTER_MAX 32u
@@ -119,6 +129,14 @@ typedef struct {
 /* a DND message's body (len bytes): its fields into *m, its mimes (in
  * body, NUL-terminated); NULL when it's broken */
 const char *ctui_link_dnd_parse(const void *body, size_t len, CTUI_LINK_DND *m);
+
+/* an OSC message's body (len bytes): its code into *code, its text (in
+ * body, NUL-terminated at *n; NULs inside it kept); NULL when broken */
+const char *ctui_link_osc_parse(const void *body, size_t len, int *code,
+                                size_t *n);
+/* an OSC message (type OSC_OUT / OSC_IN) out: 0, or -1 */
+int ctui_link_osc_send(int sock, uint32_t type, int code, const char *text,
+                       size_t n);
 
 /* a message out, with fd (-1: none) beside it: 0, or -1 (the peer's gone,
  * or a nonblocking socket full) */

@@ -57,7 +57,10 @@ struct CTUI_LINK {
   CTUI_LINK_DND_FN dnd;
   void *dnd_ctx;
   int dnd_can; /* the host sent DND_CAN (since its last RESET) */
-  char *buf;   /* a message in */
+  /* an OSC from the host for the loop (take()'s 2) */
+  CTUI_OSC_EVENT_DATA osc;
+  char *osc_text;
+  char *buf; /* a message in */
   /* what a host that lost it all (CTUI_LINK_RESET) is sent again: the
    * live images' calls (REC), the default colours, the pointer's shape */
   REC *recs;
@@ -631,6 +634,23 @@ static int take(CTUI_LINK *l, long len, int fd) {
     }
     break;
   }
+  case CTUI_LINK_OSC_IN: {
+    int code;
+    size_t n;
+    const char *text = ctui_link_osc_parse(body, blen, &code, &n);
+    if (!text) {
+      r = -1;
+      break;
+    }
+    if (!l->osc_text && !(l->osc_text = malloc(CTUI_OSC_MAX + 1))) {
+      break;
+    }
+    memcpy(l->osc_text, text, n + 1);
+    l->osc = (CTUI_OSC_EVENT_DATA){
+        .code = code, .text = l->osc_text, .len = n, .truncated = 0};
+    r = 2;
+    break;
+  }
   default:
     ctui_logf(E_WRN, "[CTUI:LINK] - a message the app doesn't know (%u)\n",
               h->type);
@@ -672,10 +692,10 @@ static int src_next(void *ctx, CTUI_EVENT *ev, int readable) {
       return -1;
     }
     if (r > 0) {
-      ev->type = (CTUI_EVENTTYPE)l->ev.type;
+      ev->type = r == 2 ? CTUI_OSC_EVENT : (CTUI_EVENTTYPE)l->ev.type;
       ev->scope = CTUI_EVENT_SCOPE_GLOBAL;
       ev->ev_source = "input";
-      ev->event_data = &l->ev.d;
+      ev->event_data = r == 2 ? (void *)&l->osc : (void *)&l->ev.d;
       ev->origin = NULL;
       return 1;
     }
@@ -768,6 +788,7 @@ void ctui_link_close(CTUI_LINK *l) {
   free(l->latest);
   free(l->dirty);
   free(l->told);
+  free(l->osc_text);
   free(l->runs);
   free(l->buf);
   close(l->fd);
@@ -799,6 +820,13 @@ void ctui_link_on_dnd(CTUI_LINK *l, CTUI_LINK_DND_FN fn, void *ctx) {
 }
 
 int ctui_link_dnd_can(const CTUI_LINK *l) { return l && l->dnd_can; }
+
+int ctui_link_osc(CTUI_LINK *l, int code, const char *text, size_t n) {
+  if (!l || !l->dnd_can) {
+    return -1;
+  }
+  return ctui_link_osc_send(l->fd, CTUI_LINK_OSC_OUT, code, text, n);
+}
 
 int ctui_link_dnd(CTUI_LINK *l, const CTUI_LINK_DND *m, const char *mimes) {
   size_t n = mimes ? strlen(mimes) + 1 : 1;
