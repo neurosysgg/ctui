@@ -1623,6 +1623,81 @@ static void test_opacity(void) {
   ctui_vk_free(vk);
 }
 
+/* the 10-bit words: every pixel of a picture painted as RGBA8 again as
+ * RGB10A2 and BGR10A2, each channel v as v * 1023 / 255 rounded, alpha
+ * in two bits; a words value past them refused */
+static uint32_t ten(uint32_t v) {
+  return (v * 1023u + 127u) / 255u;
+}
+
+static uint32_t words10(uint32_t rgba8, int bgr) {
+  uint32_t r = rgba8 & 0xffu, g = rgba8 >> 8 & 0xffu, b = rgba8 >> 16 & 0xffu,
+           a = rgba8 >> 24;
+  uint32_t lo = bgr ? b : r, hi = bgr ? r : b;
+  return ten(lo) | ten(g) << 10 | ten(hi) << 20 | (a * 3u + 127u) / 255u << 30;
+}
+
+static void test_words(void) {
+  CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
+  int rows = 0, cols = 0;
+  if (!vk || ctui_vk_resize(vk, W, H, 120, CTUI_VK_WORDS_RGBA8, &rows,
+                            &cols) != 0) {
+    CTUI_TEST_ASSERT(0, "a backend for the words");
+    ctui_vk_free(vk);
+    return;
+  }
+  ctui_vk_set_default(vk, 0xe0e0e0, 0x204060);
+  CTUI_WIDGET text = ctui_widget_make(0, 0, cols, rows, NULL, render_text,
+                                      NULL);
+  CTUI_WIDGET *ws[] = {&text};
+  CTUI_SCREEN *screen = ctui_screen_create(rows, cols);
+  ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk);
+  CTUI_APP app;
+  ctui_app_init(&app, ws, 1, rows, cols);
+  g_title = "ten bits";
+  ctui_app_render(&app, screen);
+  ctui_screen_flush(screen);
+  paint(vk);
+  static uint32_t ref[W * H];
+  memcpy(ref, g_px, sizeof ref);
+  unsigned lit = 0;
+  for (unsigned i = 0; i < W * H; i++) {
+    lit += (ref[i] & 0xffffffu) != (ref[0] & 0xffffffu);
+  }
+  for (int bgr = 0; bgr < 2; bgr++) {
+    int r2 = 0, c2 = 0;
+    int ok = ctui_vk_resize(vk, W, H, 120,
+                            bgr ? CTUI_VK_WORDS_BGR10A2
+                                : CTUI_VK_WORDS_RGB10A2,
+                            &r2, &c2) == 0 &&
+             r2 == rows && c2 == cols;
+    /* a resize drops the cells on the card: sent again, as an app does */
+    ctui_app_resize(&app, screen, r2, c2);
+    ctui_app_render(&app, screen);
+    ctui_screen_flush(screen);
+    unsigned tiles = paint(vk), bad = 0;
+    for (unsigned i = 0; i < W * H; i++) {
+      bad += g_px[i] != words10(ref[i], bgr);
+    }
+    CTUI_TEST_ASSERT(ok && tiles == tiles_under(0, 0, W, H) && lit > 0 &&
+                         bad == 0,
+                     "%s: every tile again, each pixel the 8-bit one's in 10 "
+                     "bits (%u of %u differ; the background %08x)",
+                     bgr ? "BGR10A2" : "RGB10A2", bad, W * H, g_px[0]);
+  }
+  CTUI_TEST_ASSERT(words10(0xff604020u, 0) == (ten(0x20) | ten(0x40) << 10 |
+                                               ten(0x60) << 20 | 3u << 30) &&
+                       ten(255) == 1023 && ten(128) == 514,
+                   "the reference: 255 -> 1023, 128 -> 514, alpha 255 -> 3");
+  int r3, c3;
+  CTUI_TEST_ASSERT(ctui_vk_resize(vk, W, H, 120, 4, &r3, &c3) == -1 &&
+                       ctui_vk_resize(vk, W, H, 120, -1, &r3, &c3) == -1,
+                   "words past CTUI_VK_WORDS_BGR10A2 refused");
+  ctui_app_free(&app);
+  ctui_screen_free(screen);
+  ctui_vk_free(vk);
+}
+
 static void test_vk(void) {
   CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
   int rows = 0, cols = 0;
@@ -1741,6 +1816,7 @@ static void test_vk(void) {
   test_faces();
   test_pad();
   test_opacity();
+  test_words();
 
   ctui_app_free(&app);
   ctui_screen_free(screen);

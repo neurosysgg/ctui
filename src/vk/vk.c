@@ -34,7 +34,7 @@ typedef struct {
 } BUF;
 
 typedef struct {
-  uint32_t surf_w, surf_h, gw, gh, cols, rows, bgra, def_fg, def_bg, nplace,
+  uint32_t surf_w, surf_h, gw, gh, cols, rows, words, def_fg, def_bg, nplace,
       ntab, pad_x, pad_y, def_a;
 } PUSH;
 
@@ -130,7 +130,7 @@ struct CTUI_VK {
   unsigned slot;
   VkBufferCopy *copies;
   unsigned w, h, gw, gh, cols, rows, tx, ty;
-  int bgra, sized;
+  int words, sized;
   uint32_t def_fg, def_bg;
   unsigned def_a; /* the default background's alpha (ctui_vk_set_opacity()) */
   /* the 16 colours a 256 / basic index takes (ctui_vk_set_palette()) */
@@ -668,17 +668,18 @@ static int places_new(CTUI_VK *vk, size_t n) {
 }
 
 int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
-                   int bgra, int *rows, int *cols) {
-  if (!w || !h || w > 0xffffu * CTUI_VK_TILE || h > 0xffffu * CTUI_VK_TILE) {
-    ctui_logf(E_WRN, "[CTUI:VK] - resize to %ux%u rejected @ tick %d\n", w, h,
-              ctui_tick_advance());
+                   int words, int *rows, int *cols) {
+  if (!w || !h || w > 0xffffu * CTUI_VK_TILE || h > 0xffffu * CTUI_VK_TILE ||
+      words < CTUI_VK_WORDS_RGBA8 || words > CTUI_VK_WORDS_BGR10A2) {
+    ctui_logf(E_WRN, "[CTUI:VK] - resize to %ux%u, words %d rejected @ tick %d\n",
+              w, h, words, ctui_tick_advance());
     return -1;
   }
   vkDeviceWaitIdle(vk->dev);
   free_sized(vk);
   vk->w = w;
   vk->h = h;
-  vk->bgra = bgra;
+  vk->words = words;
   vk->em = FONT_EM_PX * (float)(scale120 > 0 ? scale120 : 120) / 120.0f;
   int cw, ch;
   ctui_ttf_cell(&vk->ttf, vk->em, &cw, &ch, &vk->base);
@@ -1649,7 +1650,7 @@ static unsigned record(CTUI_VK *vk, VkCommandBuffer cmd, int img, int fresh) {
   if (nt) {
     PUSH p = {vk->w,      vk->h,      vk->gw,
               vk->gh,     vk->cols,   vk->rows,
-              (uint32_t)vk->bgra, vk->def_fg, vk->def_bg,
+              (uint32_t)vk->words, vk->def_fg, vk->def_bg,
               vk->shown,  vk->tabbed, vk->px0,
               vk->py0,    vk->def_a};
     VkPipelineLayout lay = img >= 0 ? vk->dlayout : vk->layout;

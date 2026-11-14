@@ -23,7 +23,7 @@ layout(set = 0, binding = 2) readonly buffer Atlas { uint atlas[]; };
 #ifdef DIRECT
 // cells_direct.spv.h: into a swapchain image as a storage image, its
 // format the image's (shaderStorageImageWriteWithoutFormat), the bytes'
-// order the format's -- so bgra goes unread
+// order the format's -- so words goes unread
 layout(set = 0, binding = 3) writeonly uniform image2D surf_img;
 #else
 layout(set = 0, binding = 3) writeonly buffer Surf { uint px[]; };
@@ -43,7 +43,7 @@ layout(push_constant) uniform Push {
   uint gh;
   uint cols;
   uint rows;
-  uint bgra;
+  uint words; // CTUI_VK_WORDS_* (src/vk/vk.h)
   uint def_fg; // CTUI_COLOR_DEFAULT's, a cell flagged so takes them
   uint def_bg; // and past the last whole cell
   uint nplace;
@@ -201,9 +201,15 @@ uint underline(uint style, uint lx, uint gy) {
   return gy == base ? 255u : 0u;
 }
 
+uint ten(uint v) { return (v * 1023u + 127u) / 255u; }
+
 uint word(uint rgb, uint al) {
   uint r = rgb >> 16 & 0xffu, g = rgb >> 8 & 0xffu, b = rgb & 0xffu;
-  return (bgra != 0u ? b | r << 16 : r | b << 16) | g << 8 | al << 24;
+  if (words >= 2u) {
+    uint lo = words == 2u ? r : b, hi = words == 2u ? b : r;
+    return ten(lo) | ten(g) << 10 | ten(hi) << 20 | (al * 3u + 127u) / 255u << 30;
+  }
+  return (words != 0u ? b | r << 16 : r | b << 16) | g << 8 | al << 24;
 }
 
 void main() {

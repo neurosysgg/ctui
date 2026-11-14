@@ -237,6 +237,18 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **10-bit words from the painter** (2026-11-14, for syNESthesia's
+  10-bit swapchain: ctui-wm's notes/hdr.md h1). `ctui_vk_resize()`'s
+  `bgra` flag is now `words`, `CTUI_VK_WORDS_*`: RGBA8 and BGRA8 (0 and
+  1, so every caller passing the flag is unchanged) and RGB10A2 /
+  BGR10A2, the layouts of `VK_FORMAT_A2B10G10R10` / `A2R10G10B10_UNORM_PACK32`
+  (R or B in the low bits). The cells' colours stay 8 bits: each channel
+  goes out as `v * 1023 / 255` rounded, alpha in two bits, so an app
+  that copies the surface into a deeper swapchain beside a deeper
+  picture of its own can. Other values are refused. The direct path
+  (storage images) already wrote any format. Tests: a picture painted
+  as RGBA8, then again in each 10-bit layout, every pixel against the
+  8-bit one converted; out-of-range words refused (5).
 - [x] **An app drawn by a host: `link/hostwin.h`** (2026-11-13, promoted
   from ctui-wm's `src/app/hostwin`: ctui-daw, which links only ctui, is
   its second user -- kitty measured at 10-12.5 % of a core under it

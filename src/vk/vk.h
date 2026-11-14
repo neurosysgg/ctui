@@ -59,6 +59,18 @@
 /* the slot drawn as a box: a codepoint the atlas lacks */
 #define CTUI_VK_GLYPH_BOX 0xffffu
 
+/* the words a surface buffer holds, a pixel each, the swapchain's
+ * format's (ctui_vk_resize()): 8 bits a channel, RGBA or BGRA (0 and 1,
+ * so a bgra flag reads the same), or 10 with R or B in the low bits
+ * (VK_FORMAT_A2B10G10R10 / A2R10G10B10_UNORM_PACK32), alpha in two bits.
+ * The cells' colours are 8 bits whatever the words: the 10-bit ones only
+ * carry them (each v as v * 1023 / 255, rounded), for a swapchain that
+ * also holds a deeper picture beside them */
+#define CTUI_VK_WORDS_RGBA8 0
+#define CTUI_VK_WORDS_BGRA8 1
+#define CTUI_VK_WORDS_RGB10A2 2
+#define CTUI_VK_WORDS_BGR10A2 3
+
 typedef struct CTUI_VK CTUI_VK;
 
 /* an underline of style (CTUI_UL_*) at pixel lx of the cells (from their
@@ -77,12 +89,13 @@ void ctui_vk_free(CTUI_VK *vk);
 /* the surface w x h pixels, glyphs for scale120 (wp_fractional_scale's
  * 120ths: kitty's default size, 11 pt at 96 dpi a logical pixel; the
  * cell the font's advance x ascender to descender, as kitty's),
- * words in the swapchain's order (bgra != 0: BGRA). *rows / *cols: the
+ * words as the swapchain's format holds them (CTUI_VK_WORDS_*). *rows /
+ * *cols: the
  * grid, for ctui_screen_resize() / ctui_app_resize(); the cell's pixel
  * size goes to ctui_cell_px_set(). Waits for the device to be idle; the
  * next record repaints everything. 0, or -1 (logged) */
 int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
-                   int bgra, int *rows, int *cols);
+                   int words, int *rows, int *cols);
 
 /* CTUI_COLOR_DEFAULT's colours, which a terminal would have supplied
  * (0xRRGGBB; light grey on black until set); the next record repaints
