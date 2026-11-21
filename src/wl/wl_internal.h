@@ -17,6 +17,8 @@ struct wl_seat;
 struct xdg_wm_base;
 struct xdg_surface;
 struct xdg_toplevel;
+struct zxdg_decoration_manager_v1;
+struct zxdg_toplevel_decoration_v1;
 struct wp_viewporter;
 struct wp_viewport;
 struct wp_fractional_scale_manager_v1;
@@ -70,6 +72,7 @@ struct CTUI_WL_DPY {
   struct wp_cursor_shape_manager_v1 *csm;
   struct wp_cursor_shape_device_v1 *cursor;
   struct wp_presentation *pres;
+  struct zxdg_decoration_manager_v1 *deco;
   int clock_ok; /* wp_presentation's clock is MONOTONIC */
 
   CTUI_WL_OUTPUT outputs[CTUI_WL_OUTPUTS];
@@ -127,6 +130,7 @@ struct CTUI_WL {
   /* a window's role */
   struct xdg_surface *xs;
   struct xdg_toplevel *top;
+  struct zxdg_toplevel_decoration_v1 *deco;
   /* another role's (layer.c): its object, and how it goes */
   void *role;
   void (*role_free)(CTUI_WL *wl);

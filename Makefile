@@ -91,7 +91,8 @@ WL_PROTOCOLS := $(if $(WL_OK),$(shell pkg-config --variable=pkgdatadir wayland-p
 WL_XML = $(addprefix $(WL_PROTOCOLS)/,stable/xdg-shell/xdg-shell.xml \
   stable/viewporter/viewporter.xml staging/fractional-scale/fractional-scale-v1.xml \
   staging/cursor-shape/cursor-shape-v1.xml stable/tablet/tablet-v2.xml \
-  stable/presentation-time/presentation-time.xml)
+  stable/presentation-time/presentation-time.xml \
+  unstable/xdg-decoration/xdg-decoration-unstable-v1.xml)
 WL_NAMES = $(basename $(notdir $(WL_XML)))
 WL_GEN_H = $(patsubst %,wl-gen/%-client-protocol.h,$(WL_NAMES))
 WL_GEN_C = $(patsubst %,wl-gen/%-protocol.c,$(WL_NAMES))

@@ -5,6 +5,7 @@
 #include "fractional-scale-v1-client-protocol.h"
 #include "presentation-time-client-protocol.h"
 #include "viewporter-client-protocol.h"
+#include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
 #include <linux/input-event-codes.h>
@@ -832,6 +833,9 @@ static void global(void *data, struct wl_registry *reg, uint32_t name,
   } else if (!strcmp(iface, wp_cursor_shape_manager_v1_interface.name)) {
     d->csm =
         wl_registry_bind(reg, name, &wp_cursor_shape_manager_v1_interface, 1);
+  } else if (!strcmp(iface, zxdg_decoration_manager_v1_interface.name)) {
+    d->deco =
+        wl_registry_bind(reg, name, &zxdg_decoration_manager_v1_interface, 1);
   } else if (d->n_extra < CTUI_WL_EXTRA &&
              strlen(iface) < sizeof d->extra[0].iface) {
     CTUI_WL_GLOBAL *g = &d->extra[d->n_extra++];
@@ -976,6 +980,9 @@ void ctui_wl_disconnect(CTUI_WL_DPY *d) {
   }
   if (d->csm) {
     wp_cursor_shape_manager_v1_destroy(d->csm);
+  }
+  if (d->deco) {
+    zxdg_decoration_manager_v1_destroy(d->deco);
   }
   if (d->pres) {
     wp_presentation_destroy(d->pres);
@@ -1123,6 +1130,18 @@ static void top_caps(void *data, struct xdg_toplevel *top,
                      struct wl_array *caps) {
   (void)data, (void)top, (void)caps;
 }
+static void deco_configure(void *data, struct zxdg_toplevel_decoration_v1 *o,
+                           uint32_t mode) {
+  (void)data;
+  (void)o;
+  ctui_logf(E_INF, "[CTUI:WL] - decorations: %s @ tick %d\n",
+            mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE ? "server"
+                                                                  : "client",
+            ctui_tick_advance());
+}
+static const struct zxdg_toplevel_decoration_v1_listener k_deco = {
+    .configure = deco_configure,
+};
 static const struct xdg_toplevel_listener k_top = {
     .configure = top_configure,
     .close = top_close,
@@ -1147,6 +1166,15 @@ CTUI_WL *ctui_wl_window(CTUI_WL_DPY *d, const char *title, const char *app_id,
   xdg_toplevel_add_listener(wl->top, &k_top, wl);
   xdg_toplevel_set_title(wl->top, title);
   xdg_toplevel_set_app_id(wl->top, app_id);
+  /* before the first commit; nothing of ours draws a frame, so a "client
+   * side" answer just leaves the window bare */
+  if (d->deco) {
+    wl->deco = zxdg_decoration_manager_v1_get_toplevel_decoration(d->deco,
+                                                                  wl->top);
+    zxdg_toplevel_decoration_v1_add_listener(wl->deco, &k_deco, wl);
+    zxdg_toplevel_decoration_v1_set_mode(
+        wl->deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+  }
   if (ctui_wl_surface_wait(wl) < 0) {
     snprintf(err, n, "the compositor went before the window was configured");
     ctui_wl_close(wl);
@@ -1199,6 +1227,9 @@ void ctui_wl_close(CTUI_WL *wl) {
   ctui_wl_frame_cancel(wl);
   if (wl->role_free) {
     wl->role_free(wl);
+  }
+  if (wl->deco) {
+    zxdg_toplevel_decoration_v1_destroy(wl->deco);
   }
   if (wl->top) {
     xdg_toplevel_destroy(wl->top);
