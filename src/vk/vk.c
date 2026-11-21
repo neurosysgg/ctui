@@ -359,6 +359,11 @@ void ctui_vk_free(CTUI_VK *vk) {
   free(vk);
 }
 
+void ctui_vk_font(const uint8_t **data, size_t *size) {
+  *data = ctui_vk_font_ttf;
+  *size = ctui_vk_font_ttf_len;
+}
+
 CTUI_VK *ctui_vk_new(VkPhysicalDevice phys, VkDevice dev) {
   CTUI_VK *vk = calloc(1, sizeof *vk);
   if (!vk) {

@@ -57,6 +57,17 @@ host waited for was ctui-wm's panel host: it's in `src/vk/` now
 presenter per surface (`CTUI_VK_WIN`), and `host.h`, the one-window
 `CTUI_HOST` ctui-mus had, on top.
 
+**Frames** (2026-11-21): a window asks for server-side decorations
+(xdg-decoration) when it opens -- without it river hinted
+"only supports CSD" and ctui-wm left our windows bare. Consumers listing
+protocols add `unstable/xdg-decoration/xdg-decoration-unstable-v1.xml`.
+An app drawing its own frame: `ctui_wl_decorate(wl, 1)` before its
+first present, `ctui_wl_own_frame()` for the compositor's answer,
+`ctui_wl_states()` (fullscreen: no frame), and `ctui_wl_move()` /
+`_resize()` / `_minimize()` / `_maximize()` from its parts' presses;
+`ctui_vk_font()` the built-in font's bytes for its text. First user:
+syNESthesia's TV set (its notes/frame.md).
+
 Loose ends: the host is ctui's since 2026-11-10 (above), so ctui-daw's
 window builds on it. Tidied 2026-11-10: vk_test's hashes hold on lavapipe
 too (`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json

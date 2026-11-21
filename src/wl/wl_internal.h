@@ -131,6 +131,9 @@ struct CTUI_WL {
   struct xdg_surface *xs;
   struct xdg_toplevel *top;
   struct zxdg_toplevel_decoration_v1 *deco;
+  int own_frame;   /* asked to draw its own */
+  int deco_mode;   /* the compositor's answer (zxdg's MODE_*; 0: none yet) */
+  unsigned states; /* CTUI_WL_MAXIMIZED, ... */
   /* another role's (layer.c): its object, and how it goes */
   void *role;
   void (*role_free)(CTUI_WL *wl);
@@ -141,7 +144,7 @@ struct CTUI_WL {
   int scale_int; /* or whole (wl_surface's preferred buffer scale) */
   int pw, ph;    /* the buffer's last size handed out */
   int configured, closed;
-  int cw, ch; /* a cell in buffer pixels */
+  int cw, ch;   /* a cell in buffer pixels */
   int cx0, cy0; /* the cells' origin in buffer pixels (a host's inset) */
   struct wl_callback *frame; /* asked for, not come yet (ctui_wl_frame) */
   uint32_t shape; /* the pointer's over it (cursor-shape-v1's; 0: default) */

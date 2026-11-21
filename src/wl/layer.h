@@ -16,14 +16,6 @@ enum {
   CTUI_WL_LAYER_OVERLAY,
 };
 
-/* anchor bits, layer shell's own values */
-enum {
-  CTUI_WL_EDGE_TOP = 1,
-  CTUI_WL_EDGE_BOTTOM = 2,
-  CTUI_WL_EDGE_LEFT = 4,
-  CTUI_WL_EDGE_RIGHT = 8,
-};
-
 /* who gets the keyboard: never, only it (while it's mapped), or it once
  * clicked (layer shell 4; older compositors: never) */
 enum {

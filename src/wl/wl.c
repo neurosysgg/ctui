@@ -1111,8 +1111,30 @@ static const struct xdg_surface_listener k_xs = {.configure = xs_configure};
 
 static void top_configure(void *data, struct xdg_toplevel *top, int32_t w,
                           int32_t h, struct wl_array *states) {
-  (void)top, (void)states;
+  (void)top;
   CTUI_WL *wl = data;
+  unsigned st = 0;
+  uint32_t *v;
+  wl_array_for_each(v, states) {
+    switch (*v) {
+    case XDG_TOPLEVEL_STATE_MAXIMIZED:
+      st |= CTUI_WL_MAXIMIZED;
+      break;
+    case XDG_TOPLEVEL_STATE_FULLSCREEN:
+      st |= CTUI_WL_FULLSCREEN;
+      break;
+    case XDG_TOPLEVEL_STATE_ACTIVATED:
+      st |= CTUI_WL_ACTIVATED;
+      break;
+    case XDG_TOPLEVEL_STATE_TILED_LEFT:
+    case XDG_TOPLEVEL_STATE_TILED_RIGHT:
+    case XDG_TOPLEVEL_STATE_TILED_TOP:
+    case XDG_TOPLEVEL_STATE_TILED_BOTTOM:
+      st |= CTUI_WL_TILED;
+      break;
+    }
+  }
+  wl->states = st;
   if (w > 0 && h > 0) {
     wl->w = w;
     wl->h = h;
@@ -1132,11 +1154,11 @@ static void top_caps(void *data, struct xdg_toplevel *top,
 }
 static void deco_configure(void *data, struct zxdg_toplevel_decoration_v1 *o,
                            uint32_t mode) {
-  (void)data;
   (void)o;
+  ((CTUI_WL *)data)->deco_mode = (int)mode;
   ctui_logf(E_INF, "[CTUI:WL] - decorations: %s @ tick %d\n",
             mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE ? "server"
-                                                                  : "client",
+                                                                 : "client",
             ctui_tick_advance());
 }
 static const struct zxdg_toplevel_decoration_v1_listener k_deco = {
@@ -1169,8 +1191,8 @@ CTUI_WL *ctui_wl_window(CTUI_WL_DPY *d, const char *title, const char *app_id,
   /* before the first commit; nothing of ours draws a frame, so a "client
    * side" answer just leaves the window bare */
   if (d->deco) {
-    wl->deco = zxdg_decoration_manager_v1_get_toplevel_decoration(d->deco,
-                                                                  wl->top);
+    wl->deco =
+        zxdg_decoration_manager_v1_get_toplevel_decoration(d->deco, wl->top);
     zxdg_toplevel_decoration_v1_add_listener(wl->deco, &k_deco, wl);
     zxdg_toplevel_decoration_v1_set_mode(
         wl->deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
@@ -1307,5 +1329,63 @@ int ctui_wl_closed(const CTUI_WL *wl) { return wl->closed; }
 void ctui_wl_title(CTUI_WL *wl, const char *title) {
   if (wl->top) {
     xdg_toplevel_set_title(wl->top, title);
+  }
+}
+
+void ctui_wl_decorate(CTUI_WL *wl, int own) {
+  wl->own_frame = own;
+  if (wl->deco) {
+    zxdg_toplevel_decoration_v1_set_mode(
+        wl->deco, own ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
+                      : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+  }
+}
+
+int ctui_wl_own_frame(const CTUI_WL *wl) {
+  if (!wl->top) {
+    return 0;
+  }
+  if (wl->deco) {
+    return wl->deco_mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+  }
+  return wl->own_frame;
+}
+
+unsigned ctui_wl_states(const CTUI_WL *wl) { return wl->states; }
+
+/* the press the compositor wants to see: on this window, still held */
+static int frame_press(CTUI_WL *wl, const char *what) {
+  CTUI_WL_DPY *d = wl->d;
+  if (!wl->top || !d->seat || d->ptr_on != wl || !d->press_serial) {
+    ctui_logf(E_WRN,
+              "[CTUI:WL] - %s without a press held on the window @ tick %d\n",
+              what, ctui_tick_advance());
+    return 0;
+  }
+  return 1;
+}
+
+void ctui_wl_move(CTUI_WL *wl) {
+  if (frame_press(wl, "move")) {
+    xdg_toplevel_move(wl->top, wl->d->seat, wl->d->press_serial);
+  }
+}
+
+void ctui_wl_resize(CTUI_WL *wl, unsigned edges) {
+  if (edges && frame_press(wl, "resize")) {
+    xdg_toplevel_resize(wl->top, wl->d->seat, wl->d->press_serial, edges);
+  }
+}
+
+void ctui_wl_minimize(CTUI_WL *wl) {
+  if (wl->top) {
+    xdg_toplevel_set_minimized(wl->top);
+  }
+}
+
+void ctui_wl_maximize(CTUI_WL *wl, int on) {
+  if (wl->top) {
+    on ? xdg_toplevel_set_maximized(wl->top)
+       : xdg_toplevel_unset_maximized(wl->top);
   }
 }

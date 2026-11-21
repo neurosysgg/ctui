@@ -152,6 +152,10 @@ void ctui_vk_set_glyph_fn(CTUI_VK *vk, CTUI_VK_GLYPH_FN fn, void *ctx);
  * or not a TrueType font: logged, the face dropped) */
 int ctui_vk_set_face(CTUI_VK *vk, unsigned attrs, const uint8_t *data, size_t size);
 
+/* the built-in font's bytes (JetBrains Mono), for a host drawing text of
+ * its own beside the cells through ttf.h */
+void ctui_vk_font(const uint8_t **data, size_t *size);
+
 /* for ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk) */
 const CTUI_SCREEN_SINK *ctui_vk_screen_sink(void);
 
