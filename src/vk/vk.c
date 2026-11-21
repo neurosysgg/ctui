@@ -286,7 +286,7 @@ static int glyphs_reset(CTUI_VK *vk) {
   return 0;
 }
 
-static void free_sized(CTUI_VK *vk) {
+static void sized_free(CTUI_VK *vk) {
   buf_free(vk, &vk->surf);
   buf_free(vk, &vk->cells);
   buf_free(vk, &vk->tiles);
@@ -315,7 +315,7 @@ void ctui_vk_free(CTUI_VK *vk) {
     return;
   }
   vkDeviceWaitIdle(vk->dev);
-  free_sized(vk);
+  sized_free(vk);
   for (unsigned i = 0; i < vk->nimg; i++) {
     free(vk->imgs[i].px);
   }
@@ -676,7 +676,7 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
     return -1;
   }
   vkDeviceWaitIdle(vk->dev);
-  free_sized(vk);
+  sized_free(vk);
   vk->w = w;
   vk->h = h;
   vk->words = words;
@@ -725,7 +725,7 @@ int ctui_vk_resize(CTUI_VK *vk, unsigned w, unsigned h, int scale120,
             places_new(vk, vk->nplc > vk->nimg ? vk->nplc : vk->nimg);
   if (bad) {
     ctui_logf(E_ERR, "[CTUI:VK] - no memory for a %ux%u surface\n", w, h);
-    free_sized(vk);
+    sized_free(vk);
     return -1;
   }
   for (size_t i = 0; i < ncells; i++) {

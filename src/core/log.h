@@ -26,6 +26,9 @@ void ctui_log_shutdown(void);
  * number of bytes written (0 if filtered out by verbosity). level is
  * exactly one of E_DBG/E_WRN/E_INF/E_ERR (see logger.h) */
 int ctui_log(int level, const char *log_str);
+#ifdef __GNUC__
+__attribute__((format(printf, 2, 3)))
+#endif
 int(ctui_logf)(int level, const char *fmt, ...);
 int ctui_tick_advance(void);
 

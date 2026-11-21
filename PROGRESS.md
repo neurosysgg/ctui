@@ -3163,6 +3163,11 @@ terminal resize.
   vk_test's hash checked on lavapipe (2026-11-10: the same three
   hashes, 53 passed).
 
+- **C23, deferred** (`docs/c23.md`): a bump is near-free but has to move
+  every vendoring repo's Makefile at once; what it would buy (unnamed
+  parameters, `#embed` for the vk font) and the C11-safe parts already
+  done (`ctui_logf()`'s format attribute, vk.c's `free_sized` clash).
+
 - ~~Promote `CTUI_CLOCK` to `src/widgets/`~~ — done: ctui-wm is the
   second app (its zones' `clock` widget). Gained an optional strftime
   `format` field on the way (NULL keeps `%H:%M:%S`).

@@ -148,7 +148,8 @@ other apps under `examples_apps/` for worked examples of each, or
 `docs/core-api.md` for a subsystem-by-subsystem reference of every
 public function in `src/core/`. Deeper per-topic docs live under `docs/`
 as they're written — currently `docs/core-api.md` (the core library
-reference) and `docs/protocol.md` (how to add a new graphics protocol);
+reference), `docs/protocol.md` (how to add a new graphics protocol) and
+`docs/c23.md` (why ctui is still C11, and what a C23 bump would take);
 this README and `PROGRESS.md` remain the source of truth for everything
 else.
 
