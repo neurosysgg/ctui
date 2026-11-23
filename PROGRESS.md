@@ -254,7 +254,11 @@ terminal resize.
   thick clipped over clear pixels (5). `ctui_look_paint_disc()` beside
   it: a radius around a centre (the same px), hollow inside a second
   (0: whole) for a ring, blended the same way. Tests: whole inside, half
-  on its edge, a ring hollow, clipped (3).
+  on its edge, a ring hollow, clipped (3). The polyline's cost: each
+  segment set up once (no division a pixel), a long slanted one scanned
+  column by column over only the rows within reach (a short one its
+  box), and only the rows each column reached blended -- the same
+  pixels.
 - [x] **10-bit words from the painter** (2026-11-14, for syNESthesia's
   10-bit swapchain: ctui-wm's notes/hdr.md h1). `ctui_vk_resize()`'s
   `bgra` flag is now `words`, `CTUI_VK_WORDS_*`: RGBA8 and BGRA8 (0 and

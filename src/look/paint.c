@@ -181,22 +181,43 @@ static void clip_box(const CTUI_LOOK_CANVAS *c, const CTUI_LOOK_RECT *clip,
   }
 }
 
-/* how much of the pixel centred at (px, py) a line hw px either side of
- * the segment a-b covers, of 1: a box filter's width, 1 px, across the
- * edge */
-static float seg_cover(float px, float py, float ax, float ay, float bx,
-                       float by, float hw) {
-  float dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
-  float t = l2 > 0.0f ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0.0f;
+/* a segment a-b and a line hw px either side of it, set up once: how much
+ * of a pixel it covers is then seg_cover()'s */
+typedef struct {
+  float ax, ay, dx, dy, inv_l2; /* inv_l2 0: a point */
+  float reach, full2; /* (hw + 0.5)^2: none past; (hw - 0.5)^2: whole */
+} SEG;
+
+static void seg_init(SEG *g, float ax, float ay, float bx, float by, float hw) {
+  g->ax = ax;
+  g->ay = ay;
+  g->dx = bx - ax;
+  g->dy = by - ay;
+  float l2 = g->dx * g->dx + g->dy * g->dy;
+  g->inv_l2 = l2 > 0.0f ? 1.0f / l2 : 0.0f;
+  g->reach = hw + 0.5f;
+  g->full2 = hw > 0.5f ? (hw - 0.5f) * (hw - 0.5f) : 0.0f;
+}
+
+/* how much of the pixel centred at (px, py) the line covers, of 1: a box
+ * filter's width, 1 px, across the edge */
+static float seg_cover(const SEG *g, float px, float py) {
+  float t = ((px - g->ax) * g->dx + (py - g->ay) * g->dy) * g->inv_l2;
   t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
-  float ex = px - (ax + t * dx), ey = py - (ay + t * dy);
-  float d2 = ex * ex + ey * ey, reach = hw + 0.5f;
-  if (d2 >= reach * reach) {
+  float ex = px - (g->ax + t * g->dx), ey = py - (g->ay + t * g->dy);
+  float d2 = ex * ex + ey * ey;
+  if (d2 >= g->reach * g->reach) {
     return 0.0f;
   }
-  float cov = reach - sqrtf(d2);
+  if (d2 <= g->full2) {
+    return 1.0f;
+  }
+  float cov = g->reach - sqrtf(d2);
   return cov > 1.0f ? 1.0f : cov;
 }
+
+static float min_f(float a, float b) { return a < b ? a : b; }
+static float max_f(float a, float b) { return a > b ? a : b; }
 
 static int floor_i(float v) { return (int)floorf(v); }
 
@@ -234,10 +255,10 @@ void ctui_look_paint_polyline(CTUI_LOOK_CANVAS *c, const float *xy, int n,
   /* the mask: the points' box grown by the line's reach, clipped */
   float lo_x = xy[0], hi_x = xy[0], lo_y = xy[1], hi_y = xy[1];
   for (int i = 1; i < n; i++) {
-    lo_x = fminf(lo_x, xy[2 * i]);
-    hi_x = fmaxf(hi_x, xy[2 * i]);
-    lo_y = fminf(lo_y, xy[2 * i + 1]);
-    hi_y = fmaxf(hi_y, xy[2 * i + 1]);
+    lo_x = min_f(lo_x, xy[2 * i]);
+    hi_x = max_f(hi_x, xy[2 * i]);
+    lo_y = min_f(lo_y, xy[2 * i + 1]);
+    hi_y = max_f(hi_y, xy[2 * i + 1]);
   }
   float reach = hw + 0.5f;
   int mx0 = floor_i(lo_x - reach) + 1, my0 = floor_i(lo_y - reach) + 1;
@@ -250,40 +271,69 @@ void ctui_look_paint_polyline(CTUI_LOOK_CANVAS *c, const float *xy, int n,
     return;
   }
   int mw = mx1 - mx0, mh = my1 - my0;
+  /* each column's rows the line reached: only they are blended (a curve
+   * across a tall box touches a few rows of each column) */
   unsigned char *mask = calloc((size_t)mw * (size_t)mh, 1);
-  if (!mask) {
+  int *span = malloc((size_t)mw * 2 * sizeof *span);
+  if (!mask || !span) {
+    free(mask);
+    free(span);
     return;
+  }
+  for (int x = 0; x < mw; x++) {
+    span[2 * x] = mh;
+    span[2 * x + 1] = -1;
   }
   for (int i = 0; i < (n > 1 ? n - 1 : 1); i++) {
     float ax = xy[2 * i], ay = xy[2 * i + 1];
     float bx = n > 1 ? xy[2 * i + 2] : ax, by = n > 1 ? xy[2 * i + 3] : ay;
-    int x0 = floor_i(fminf(ax, bx) - reach) + 1;
-    int x1 = floor_i(fmaxf(ax, bx) + reach) + 1;
-    int y0 = floor_i(fminf(ay, by) - reach) + 1;
-    int y1 = floor_i(fmaxf(ay, by) + reach) + 1;
+    SEG g;
+    seg_init(&g, ax, ay, bx, by, hw);
+    float sx0 = min_f(ax, bx), sx1 = max_f(ax, bx);
+    int x0 = floor_i(sx0 - reach) + 1, x1 = floor_i(sx1 + reach) + 1;
+    int y0 = floor_i(min_f(ay, by) - reach) + 1;
+    int y1 = floor_i(max_f(ay, by) + reach) + 1;
     x0 = x0 > mx0 ? x0 : mx0;
-    y0 = y0 > my0 ? y0 : my0;
     x1 = x1 < mx1 ? x1 : mx1;
+    y0 = y0 > my0 ? y0 : my0;
     y1 = y1 < my1 ? y1 : my1;
-    for (int y = y0; y < y1; y++) {
-      unsigned char *m = mask + (size_t)(y - my0) * (size_t)mw;
-      for (int x = x0; x < x1; x++) {
-        float cov = seg_cover((float)x, (float)y, ax, ay, bx, by, hw) * gain;
+    /* a long slanted segment column by column, only the rows within
+     * reach of its part within reach of the column; a short one its box */
+    int band = (x1 - x0) * (y1 - y0) > 64 && sx1 - sx0 > 1e-6f;
+    float slope = band ? (by - ay) / (bx - ax) : 0.0f;
+    for (int x = x0; x < x1; x++) {
+      int ry0 = y0, ry1 = y1;
+      if (band) {
+        float xa = max_f(sx0, (float)x - reach);
+        float xb = min_f(sx1, (float)x + reach);
+        float ya = ay + (xa - ax) * slope, yb = ay + (xb - ax) * slope;
+        int b0 = floor_i(min_f(ya, yb) - reach) + 1;
+        int b1 = floor_i(max_f(ya, yb) + reach) + 1;
+        ry0 = b0 > y0 ? b0 : y0;
+        ry1 = b1 < y1 ? b1 : y1;
+      }
+      int *sp = span + 2 * (x - mx0);
+      for (int y = ry0; y < ry1; y++) {
+        unsigned char *m = mask + (size_t)(y - my0) * (size_t)mw + (x - mx0);
+        float cov = seg_cover(&g, (float)x, (float)y) * gain;
         int a = (int)(cov * 255.0f + 0.5f);
-        if (a > m[x - mx0]) {
-          m[x - mx0] = (unsigned char)a;
+        if (a > *m) {
+          *m = (unsigned char)a;
+          sp[0] = y - my0 < sp[0] ? y - my0 : sp[0];
+          sp[1] = y - my0 > sp[1] ? y - my0 : sp[1];
         }
       }
     }
   }
-  for (int y = my0; y < my1; y++) {
-    const unsigned char *m = mask + (size_t)(y - my0) * (size_t)mw;
-    unsigned char *p = c->px + ((size_t)y * (size_t)c->w + (size_t)mx0) * 4;
-    for (int x = 0; x < mw; x++, p += 4) {
-      cover_px(p, rgb, m[x]);
+  for (int x = 0; x < mw; x++) {
+    for (int y = span[2 * x]; y <= span[2 * x + 1]; y++) {
+      cover_px(c->px +
+                   ((size_t)(y + my0) * (size_t)c->w + (size_t)(x + mx0)) * 4,
+               rgb, mask[(size_t)y * (size_t)mw + (size_t)x]);
     }
   }
   free(mask);
+  free(span);
 }
 
 void ctui_look_paint_disc(CTUI_LOOK_CANVAS *c, float cx, float cy, float r,
