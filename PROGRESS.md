@@ -237,7 +237,8 @@ terminal resize.
 
 ## Fixed / addressed
 
-- [x] **Anti-aliased lines: `ctui_look_paint_polyline()`** (2026-11-23,
+- [x] **Anti-aliased lines and discs: `ctui_look_paint_polyline()`,
+  `ctui_look_paint_disc()`** (2026-11-23,
   for ctui-daw's device views and the graph control). look/paint.h's
   first anti-aliased primitive: a line through n points (px, a pixel's
   centre at its whole coordinates), any width, round ends and joins,
@@ -250,7 +251,10 @@ terminal resize.
   the well; its keys and `ctui_look_graph_at()` are unchanged. Tests: a
   level line sharp, between two rows half of each, a slanted one's
   edges in between, a line in pieces the same pixels as whole, 3 px
-  thick clipped over clear pixels (5).
+  thick clipped over clear pixels (5). `ctui_look_paint_disc()` beside
+  it: a radius around a centre (the same px), hollow inside a second
+  (0: whole) for a ring, blended the same way. Tests: whole inside, half
+  on its edge, a ring hollow, clipped (3).
 - [x] **10-bit words from the painter** (2026-11-14, for syNESthesia's
   10-bit swapchain: ctui-wm's notes/hdr.md h1). `ctui_vk_resize()`'s
   `bgra` flag is now `words`, `CTUI_VK_WORDS_*`: RGBA8 and BGRA8 (0 and

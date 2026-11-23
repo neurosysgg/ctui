@@ -1983,6 +1983,39 @@ static void test_polyline(void) {
       "opaque over clear pixels");
 }
 
+/* the anti-aliased disc: whole inside, its edge in between, a ring
+ * hollow, clipped */
+static void test_disc(void) {
+  static unsigned char px[20 * 20 * 4];
+  CTUI_LOOK_CANVAS cv = {px, 20, 20};
+  static const unsigned char black[3] = {0, 0, 0}, white[3] = {255, 255, 255};
+  ctui_look_paint_rect(&cv, 0, 0, 20, 20, black);
+  ctui_look_paint_disc(&cv, 10, 10, 4.0f, 0.0f, NULL, white);
+  int partial = 0;
+  for (int i = 0; i < 20 * 20; i++) {
+    partial += px[i * 4] > 0 && px[i * 4] < 255;
+  }
+  CTUI_TEST_ASSERT(rgb_is(px, 20, 10, 10, 255, 255, 255) &&
+                       rgb_is(px, 20, 13, 10, 255, 255, 255) &&
+                       rgb_is(px, 20, 14, 10, 128, 128, 128) &&
+                       rgb_is(px, 20, 15, 10, 0, 0, 0) && partial >= 8,
+                   "a disc of 4: whole inside, half on its edge, its rim "
+                   "in between");
+  ctui_look_paint_rect(&cv, 0, 0, 20, 20, black);
+  ctui_look_paint_disc(&cv, 10, 10, 6.0f, 3.5f, NULL, white);
+  CTUI_TEST_ASSERT(rgb_is(px, 20, 10, 10, 0, 0, 0) &&
+                       rgb_is(px, 20, 12, 10, 0, 0, 0) &&
+                       rgb_is(px, 20, 15, 10, 255, 255, 255) &&
+                       rgb_is(px, 20, 10, 5, 255, 255, 255),
+                   "a ring from 3.5 to 6: hollow, whole between");
+  memset(px, 0, sizeof px);
+  const CTUI_LOOK_RECT clip = {0, 0, 10, 20};
+  ctui_look_paint_disc(&cv, 10, 10, 4.0f, 0.0f, &clip, white);
+  CTUI_TEST_ASSERT(px[(10 * 20 + 9) * 4 + 3] == 255 &&
+                       px[(10 * 20 + 10) * 4 + 3] == 0,
+                   "clipped: cut at the clip's edge");
+}
+
 /* the meter's LEDs and the graph's line */
 static void test_meter_graph(void) {
   CTUI_LOOK l = test_look();
@@ -2361,6 +2394,7 @@ int main(void) {
   test_sky();
   test_meter_graph();
   test_polyline();
+  test_disc();
   test_cache();
   test_box_rows();
   test_filter();

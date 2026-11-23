@@ -166,6 +166,21 @@ void ctui_look_paint_mask(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
   }
 }
 
+/* a clip's rectangle inside the canvas: x0, y0, x1, y1 (end exclusive) */
+static void clip_box(const CTUI_LOOK_CANVAS *c, const CTUI_LOOK_RECT *clip,
+                     int box[4]) {
+  box[0] = 0;
+  box[1] = 0;
+  box[2] = c->w;
+  box[3] = c->h;
+  if (clip) {
+    box[0] = clip->x > 0 ? clip->x : 0;
+    box[1] = clip->y > 0 ? clip->y : 0;
+    box[2] = clip->x + clip->w < c->w ? clip->x + clip->w : c->w;
+    box[3] = clip->y + clip->h < c->h ? clip->y + clip->h : c->h;
+  }
+}
+
 /* how much of the pixel centred at (px, py) a line hw px either side of
  * the segment a-b covers, of 1: a box filter's width, 1 px, across the
  * edge */
@@ -185,6 +200,25 @@ static float seg_cover(float px, float py, float ax, float ay, float bx,
 
 static int floor_i(float v) { return (int)floorf(v); }
 
+/* rgb over the pixel p at alpha a (of 255): "over", a clear pixel taking
+ * rgb at a */
+static void cover_px(unsigned char *p, const unsigned char rgb[3], int a) {
+  if (a == 0) {
+    return;
+  }
+  if (a == 255 || p[3] == 0) {
+    memcpy(p, rgb, 3);
+    p[3] = (unsigned char)a;
+    return;
+  }
+  /* out_a = a + da (1 - a); out = (rgb a + d da (1 - a)) / out_a */
+  int da = p[3] * (255 - a), oa = a * 255 + da;
+  for (int k = 0; k < 3; k++) {
+    p[k] = (unsigned char)((rgb[k] * a * 255 + p[k] * da + oa / 2) / oa);
+  }
+  p[3] = (unsigned char)((oa + 127) / 255);
+}
+
 void ctui_look_paint_polyline(CTUI_LOOK_CANVAS *c, const float *xy, int n,
                               float width, const CTUI_LOOK_RECT *clip,
                               const unsigned char rgb[3]) {
@@ -194,13 +228,9 @@ void ctui_look_paint_polyline(CTUI_LOOK_CANVAS *c, const float *xy, int n,
   /* thinner than a pixel: a pixel's width, fainter */
   float hw = width < 1.0f ? 0.5f : width * 0.5f;
   float gain = width < 1.0f ? width : 1.0f;
-  int cx0 = 0, cy0 = 0, cx1 = c->w, cy1 = c->h;
-  if (clip) {
-    cx0 = clip->x > 0 ? clip->x : 0;
-    cy0 = clip->y > 0 ? clip->y : 0;
-    cx1 = clip->x + clip->w < c->w ? clip->x + clip->w : c->w;
-    cy1 = clip->y + clip->h < c->h ? clip->y + clip->h : c->h;
-  }
+  int box[4];
+  clip_box(c, clip, box);
+  int cx0 = box[0], cy0 = box[1], cx1 = box[2], cy1 = box[3];
   /* the mask: the points' box grown by the line's reach, clipped */
   float lo_x = xy[0], hi_x = xy[0], lo_y = xy[1], hi_y = xy[1];
   for (int i = 1; i < n; i++) {
@@ -246,28 +276,44 @@ void ctui_look_paint_polyline(CTUI_LOOK_CANVAS *c, const float *xy, int n,
       }
     }
   }
-  /* rgb over the canvas by the mask: "over", a clear pixel taking rgb at
-   * the mask's alpha */
   for (int y = my0; y < my1; y++) {
     const unsigned char *m = mask + (size_t)(y - my0) * (size_t)mw;
     unsigned char *p = c->px + ((size_t)y * (size_t)c->w + (size_t)mx0) * 4;
     for (int x = 0; x < mw; x++, p += 4) {
-      int a = m[x];
-      if (a == 0) {
-        continue;
-      }
-      if (a == 255 || p[3] == 0) {
-        memcpy(p, rgb, 3);
-        p[3] = (unsigned char)a;
-        continue;
-      }
-      /* out_a = a + da (1 - a); out = (rgb a + d da (1 - a)) / out_a */
-      int da = p[3] * (255 - a), oa = a * 255 + da;
-      for (int k = 0; k < 3; k++) {
-        p[k] = (unsigned char)((rgb[k] * a * 255 + p[k] * da + oa / 2) / oa);
-      }
-      p[3] = (unsigned char)((oa + 127) / 255);
+      cover_px(p, rgb, m[x]);
     }
   }
   free(mask);
+}
+
+void ctui_look_paint_disc(CTUI_LOOK_CANVAS *c, float cx, float cy, float r,
+                          float r_in, const CTUI_LOOK_RECT *clip,
+                          const unsigned char rgb[3]) {
+  if (!(r > 0.0f) || !(r > r_in)) {
+    return;
+  }
+  int box[4];
+  clip_box(c, clip, box);
+  float reach = r + 0.5f;
+  int x0 = floor_i(cx - reach) + 1, x1 = floor_i(cx + reach) + 1;
+  int y0 = floor_i(cy - reach) + 1, y1 = floor_i(cy + reach) + 1;
+  x0 = x0 > box[0] ? x0 : box[0];
+  y0 = y0 > box[1] ? y0 : box[1];
+  x1 = x1 < box[2] ? x1 : box[2];
+  y1 = y1 < box[3] ? y1 : box[3];
+  for (int y = y0; y < y1; y++) {
+    unsigned char *p = c->px + ((size_t)y * (size_t)c->w + (size_t)x0) * 4;
+    for (int x = x0; x < x1; x++, p += 4) {
+      float ex = (float)x - cx, ey = (float)y - cy;
+      float d = sqrtf(ex * ex + ey * ey);
+      /* the outer edge's coverage, then the hole's */
+      float cov = reach - d;
+      if (r_in > 0.0f) {
+        float in = d - r_in + 0.5f;
+        cov = in < cov ? in : cov;
+      }
+      cov = cov < 0.0f ? 0.0f : cov > 1.0f ? 1.0f : cov;
+      cover_px(p, rgb, (int)(cov * 255.0f + 0.5f));
+    }
+  }
 }

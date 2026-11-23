@@ -73,4 +73,12 @@ void ctui_look_paint_polyline(CTUI_LOOK_CANVAS *c, const float *xy, int n,
                               float width, const CTUI_LOOK_RECT *clip,
                               const unsigned char rgb[3]);
 
+/* an anti-aliased disc of radius r around (cx, cy) (px, as the polyline's),
+ * hollow inside r_in (0: whole; a ring between the two), in rgb over what's
+ * there by how much of each pixel it covers; inside clip (NULL: the
+ * canvas) */
+void ctui_look_paint_disc(CTUI_LOOK_CANVAS *c, float cx, float cy, float r,
+                          float r_in, const CTUI_LOOK_RECT *clip,
+                          const unsigned char rgb[3]);
+
 #endif
