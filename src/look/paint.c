@@ -1,5 +1,7 @@
 #include "paint.h"
 
+#include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 void ctui_look_paint_px(CTUI_LOOK_CANVAS *c, int x, int y,
@@ -162,4 +164,110 @@ void ctui_look_paint_mask(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
       }
     }
   }
+}
+
+/* how much of the pixel centred at (px, py) a line hw px either side of
+ * the segment a-b covers, of 1: a box filter's width, 1 px, across the
+ * edge */
+static float seg_cover(float px, float py, float ax, float ay, float bx,
+                       float by, float hw) {
+  float dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+  float t = l2 > 0.0f ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0.0f;
+  t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+  float ex = px - (ax + t * dx), ey = py - (ay + t * dy);
+  float d2 = ex * ex + ey * ey, reach = hw + 0.5f;
+  if (d2 >= reach * reach) {
+    return 0.0f;
+  }
+  float cov = reach - sqrtf(d2);
+  return cov > 1.0f ? 1.0f : cov;
+}
+
+static int floor_i(float v) { return (int)floorf(v); }
+
+void ctui_look_paint_polyline(CTUI_LOOK_CANVAS *c, const float *xy, int n,
+                              float width, const CTUI_LOOK_RECT *clip,
+                              const unsigned char rgb[3]) {
+  if (n < 1 || !(width > 0.0f)) {
+    return;
+  }
+  /* thinner than a pixel: a pixel's width, fainter */
+  float hw = width < 1.0f ? 0.5f : width * 0.5f;
+  float gain = width < 1.0f ? width : 1.0f;
+  int cx0 = 0, cy0 = 0, cx1 = c->w, cy1 = c->h;
+  if (clip) {
+    cx0 = clip->x > 0 ? clip->x : 0;
+    cy0 = clip->y > 0 ? clip->y : 0;
+    cx1 = clip->x + clip->w < c->w ? clip->x + clip->w : c->w;
+    cy1 = clip->y + clip->h < c->h ? clip->y + clip->h : c->h;
+  }
+  /* the mask: the points' box grown by the line's reach, clipped */
+  float lo_x = xy[0], hi_x = xy[0], lo_y = xy[1], hi_y = xy[1];
+  for (int i = 1; i < n; i++) {
+    lo_x = fminf(lo_x, xy[2 * i]);
+    hi_x = fmaxf(hi_x, xy[2 * i]);
+    lo_y = fminf(lo_y, xy[2 * i + 1]);
+    hi_y = fmaxf(hi_y, xy[2 * i + 1]);
+  }
+  float reach = hw + 0.5f;
+  int mx0 = floor_i(lo_x - reach) + 1, my0 = floor_i(lo_y - reach) + 1;
+  int mx1 = floor_i(hi_x + reach) + 1, my1 = floor_i(hi_y + reach) + 1;
+  mx0 = mx0 > cx0 ? mx0 : cx0;
+  my0 = my0 > cy0 ? my0 : cy0;
+  mx1 = mx1 < cx1 ? mx1 : cx1;
+  my1 = my1 < cy1 ? my1 : cy1;
+  if (mx1 <= mx0 || my1 <= my0) {
+    return;
+  }
+  int mw = mx1 - mx0, mh = my1 - my0;
+  unsigned char *mask = calloc((size_t)mw * (size_t)mh, 1);
+  if (!mask) {
+    return;
+  }
+  for (int i = 0; i < (n > 1 ? n - 1 : 1); i++) {
+    float ax = xy[2 * i], ay = xy[2 * i + 1];
+    float bx = n > 1 ? xy[2 * i + 2] : ax, by = n > 1 ? xy[2 * i + 3] : ay;
+    int x0 = floor_i(fminf(ax, bx) - reach) + 1;
+    int x1 = floor_i(fmaxf(ax, bx) + reach) + 1;
+    int y0 = floor_i(fminf(ay, by) - reach) + 1;
+    int y1 = floor_i(fmaxf(ay, by) + reach) + 1;
+    x0 = x0 > mx0 ? x0 : mx0;
+    y0 = y0 > my0 ? y0 : my0;
+    x1 = x1 < mx1 ? x1 : mx1;
+    y1 = y1 < my1 ? y1 : my1;
+    for (int y = y0; y < y1; y++) {
+      unsigned char *m = mask + (size_t)(y - my0) * (size_t)mw;
+      for (int x = x0; x < x1; x++) {
+        float cov = seg_cover((float)x, (float)y, ax, ay, bx, by, hw) * gain;
+        int a = (int)(cov * 255.0f + 0.5f);
+        if (a > m[x - mx0]) {
+          m[x - mx0] = (unsigned char)a;
+        }
+      }
+    }
+  }
+  /* rgb over the canvas by the mask: "over", a clear pixel taking rgb at
+   * the mask's alpha */
+  for (int y = my0; y < my1; y++) {
+    const unsigned char *m = mask + (size_t)(y - my0) * (size_t)mw;
+    unsigned char *p = c->px + ((size_t)y * (size_t)c->w + (size_t)mx0) * 4;
+    for (int x = 0; x < mw; x++, p += 4) {
+      int a = m[x];
+      if (a == 0) {
+        continue;
+      }
+      if (a == 255 || p[3] == 0) {
+        memcpy(p, rgb, 3);
+        p[3] = (unsigned char)a;
+        continue;
+      }
+      /* out_a = a + da (1 - a); out = (rgb a + d da (1 - a)) / out_a */
+      int da = p[3] * (255 - a), oa = a * 255 + da;
+      for (int k = 0; k < 3; k++) {
+        p[k] = (unsigned char)((rgb[k] * a * 255 + p[k] * da + oa / 2) / oa);
+      }
+      p[3] = (unsigned char)((oa + 127) / 255);
+    }
+  }
+  free(mask);
 }

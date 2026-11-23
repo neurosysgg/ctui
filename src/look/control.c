@@ -2,6 +2,7 @@
 
 #include <limits.h>
 #include <math.h>
+#include <stdlib.h>
 
 #include "paint.h"
 
@@ -798,32 +799,29 @@ static void paint_meter(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,
 }
 
 /* the newest sample at the right edge, a point each step px leftwards,
- * each joined to the next by a straight line */
+ * each joined to the next by a straight line, anti-aliased */
 static void graph_line(CTUI_LOOK_CANVAS *cv, const unsigned char *samples,
                        int count, int x0, int y0, int gw, int gh, int step,
                        const unsigned char *rgb) {
-  int px = -1, py = -1;
   /* the point past the left edge still gets its line, cut at the edge:
    * a full graph reaches it */
-  for (int i = count - 1, x = x0 + gw - 1; i >= 0 && px != INT_MIN;
-       i--, x -= step) {
-    int y = y0 + gh - 1 - min2(samples[i], 100) * (gh - 1) / 100;
-    if (px < 0) {
-      ctui_look_paint_rect(cv, x, y, 1, 1, rgb);
-    } else {
-      int dx = px - x, dy = py - y, n = max2(dx, dy < 0 ? -dy : dy);
-      for (int k = 0; k <= n; k++) {
-        int lx = x + (dx * k + n / 2) / n;
-        if (lx >= x0) {
-          ctui_look_paint_rect(cv, lx,
-                               y + (dy * k + (dy < 0 ? -n : n) / 2) / n, 1,
-                               1, rgb);
-        }
-      }
-    }
-    px = x < x0 ? INT_MIN : x; /* past the edge: that was the last */
-    py = y;
+  int n = 0, room = min2(count, gw / step + 2);
+  float *xy = room > 0 ? malloc((size_t)room * 2 * sizeof *xy) : NULL;
+  if (!xy) {
+    return;
   }
+  for (int i = count - 1, x = x0 + gw - 1; i >= 0 && n < room; i--, x -= step) {
+    xy[2 * n] = (float)x;
+    xy[2 * n + 1] =
+        (float)(y0 + gh - 1 - min2(samples[i], 100) * (gh - 1) / 100);
+    n++;
+    if (x < x0) {
+      break; /* past the edge: that was the last */
+    }
+  }
+  const CTUI_LOOK_RECT well = {x0, y0, gw, gh};
+  ctui_look_paint_polyline(cv, xy, n, 1.0f, &well, rgb);
+  free(xy);
 }
 
 static void paint_graph(CTUI_LOOK_CANVAS *cv, const CTUI_LOOK_CONTROL *c,

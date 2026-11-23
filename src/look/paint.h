@@ -4,9 +4,10 @@
 #include "look.h"
 
 /* The primitives the controls (control.h) are painted with: rectangles,
- * bevelled boxes, chunked fills and role masks on an RGBA buffer. Every
- * call clips to the canvas; nothing is anti-aliased (kitty shows the
- * pixels as they are when the image is exactly its cells' size). */
+ * bevelled boxes, chunked fills, role masks and lines on an RGBA buffer.
+ * Every call clips to the canvas; only the polyline is anti-aliased (kitty
+ * shows the pixels as they are when the image is exactly its cells' size,
+ * so a box's edges stay sharp and a slanted line's is smoothed here). */
 
 typedef struct {
   unsigned char *px; /* w x h RGBA, rows top down */
@@ -56,5 +57,20 @@ typedef struct {
  * 1x is centred and clipped. off: every opaque pixel in disabled. */
 void ctui_look_paint_mask(CTUI_LOOK_CANVAS *c, int x, int y, int w, int h,
                           const CTUI_LOOK_MASK *m, const CTUI_LOOK *l, int off);
+
+/* a rectangle of the canvas, in px */
+typedef struct {
+  int x, y, w, h;
+} CTUI_LOOK_RECT;
+
+/* an anti-aliased line through n points (xy: x0, y0, x1, y1, ... in px,
+ * a pixel's centre at its whole coordinates), width px thick with round
+ * ends and joins, in rgb over what's there by how much of each pixel it
+ * covers (a whole pixel's centre on it: rgb itself, so a level line on
+ * whole rows stays sharp); inside clip (NULL: the canvas). The line is one
+ * coverage mask, its joins counted once, blended in one pass. */
+void ctui_look_paint_polyline(CTUI_LOOK_CANVAS *c, const float *xy, int n,
+                              float width, const CTUI_LOOK_RECT *clip,
+                              const unsigned char rgb[3]);
 
 #endif

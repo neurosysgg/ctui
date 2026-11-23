@@ -1929,6 +1929,60 @@ static int rgb_is(const unsigned char *rgba, int w, int x, int y, int r, int g,
   return p[0] == r && p[1] == g && p[2] == b && p[3] == 255;
 }
 
+/* the anti-aliased polyline: sharp on whole pixels, smoothed between,
+ * its joins counted once, clipped */
+static void test_polyline(void) {
+  static unsigned char px[20 * 20 * 4], px2[20 * 20 * 4];
+  CTUI_LOOK_CANVAS cv = {px, 20, 20}, cv2 = {px2, 20, 20};
+  static const unsigned char black[3] = {0, 0, 0}, white[3] = {255, 255, 255};
+  ctui_look_paint_rect(&cv, 0, 0, 20, 20, black);
+  const float level[] = {2, 5, 17, 5};
+  ctui_look_paint_polyline(&cv, level, 2, 1.0f, NULL, white);
+  CTUI_TEST_ASSERT(rgb_is(px, 20, 2, 5, 255, 255, 255) &&
+                       rgb_is(px, 20, 17, 5, 255, 255, 255) &&
+                       rgb_is(px, 20, 10, 4, 0, 0, 0) &&
+                       rgb_is(px, 20, 10, 6, 0, 0, 0) &&
+                       rgb_is(px, 20, 1, 5, 0, 0, 0),
+                   "a level line on a whole row: its pixels, nothing beside");
+
+  ctui_look_paint_rect(&cv, 0, 0, 20, 20, black);
+  const float half[] = {2, 5.5f, 17, 5.5f};
+  ctui_look_paint_polyline(&cv, half, 2, 1.0f, NULL, white);
+  CTUI_TEST_ASSERT(rgb_is(px, 20, 10, 5, 128, 128, 128) &&
+                       rgb_is(px, 20, 10, 6, 128, 128, 128),
+                   "between two rows: half of each");
+
+  ctui_look_paint_rect(&cv, 0, 0, 20, 20, black);
+  const float slant[] = {2, 2, 17, 7};
+  ctui_look_paint_polyline(&cv, slant, 2, 1.0f, NULL, white);
+  int partial = 0;
+  for (int i = 0; i < 20 * 20; i++) {
+    partial += px[i * 4] > 0 && px[i * 4] < 255;
+  }
+  CTUI_TEST_ASSERT(partial > 10 && rgb_is(px, 20, 2, 2, 255, 255, 255),
+                   "a slanted line: its edges in between");
+
+  /* the same line in two pieces: the join no brighter than along it */
+  ctui_look_paint_rect(&cv2, 0, 0, 20, 20, black);
+  const float pieces[] = {2, 2, 9.5f, 4.5f, 17, 7};
+  ctui_look_paint_polyline(&cv2, pieces, 3, 1.0f, NULL, white);
+  CTUI_TEST_ASSERT(memcmp(px, px2, sizeof px) == 0,
+                   "a line in pieces: the join counted once");
+
+  /* thick, clipped, over clear pixels */
+  memset(px, 0, sizeof px);
+  const CTUI_LOOK_RECT clip = {0, 0, 10, 20};
+  const float wide[] = {5.5f, 10, 15, 10};
+  ctui_look_paint_polyline(&cv, wide, 2, 3.0f, &clip, white);
+  CTUI_TEST_ASSERT(
+      rgb_is(px, 20, 8, 9, 255, 255, 255) &&
+          rgb_is(px, 20, 8, 11, 255, 255, 255) &&
+          px[(10 * 20 + 10) * 4 + 3] == 0 && px[(8 * 20 + 8) * 4 + 3] == 0 &&
+          px[(10 * 20 + 4) * 4 + 3] > 0 && px[(10 * 20 + 4) * 4 + 3] < 255,
+      "3 px thick, cut at the clip, a round end's edge partly "
+      "opaque over clear pixels");
+}
+
 /* the meter's LEDs and the graph's line */
 static void test_meter_graph(void) {
   CTUI_LOOK l = test_look();
@@ -2306,6 +2360,7 @@ int main(void) {
   test_column();
   test_sky();
   test_meter_graph();
+  test_polyline();
   test_cache();
   test_box_rows();
   test_filter();
