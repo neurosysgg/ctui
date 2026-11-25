@@ -1929,6 +1929,20 @@ static int rgb_is(const unsigned char *rgba, int w, int x, int y, int r, int g,
   return p[0] == r && p[1] == g && p[2] == b && p[3] == 255;
 }
 
+/* an anti-aliased line through (x, y): channel ch (0 red, 1 green)
+ * summed over rows y-1..y+1 at least 200 -- a 1 px line between two
+ * rows lights both by halves (128 + 128 on black) */
+static int line_near(const unsigned char *rgba, int w, int h, int x, int y,
+                     int ch) {
+  int sum = 0;
+  for (int r = y - 1; r <= y + 1; r++) {
+    if (r >= 0 && r < h) {
+      sum += rgba[((size_t)r * (size_t)w + (size_t)x) * 4 + (size_t)ch];
+    }
+  }
+  return sum >= 200;
+}
+
 /* the anti-aliased polyline: sharp on whole pixels, smoothed between,
  * its joins counted once, clipped */
 static void test_polyline(void) {
@@ -2047,7 +2061,8 @@ static void test_meter_graph(void) {
                        ctui_look_control_key(&b, &l, 108, 20),
                    "levels in one LED: one image");
 
-  static const unsigned char h1[] = {10, 20, 30, 40}, h2[] = {10, 20, 30, 41},
+  /* 18 px inside: 39 and 40 % are both 6.75 px up (27 quarters) */
+  static const unsigned char h1[] = {10, 20, 30, 39}, h2[] = {10, 20, 30, 40},
                              h3[] = {10, 20, 30, 90};
   CTUI_LOOK_CONTROL g = {.kind = CTUI_LOOK_CTL_GRAPH, .samples = h1, .count = 4};
   uint64_t k1 = ctui_look_control_key(&g, &l, 60, 20);
@@ -2056,10 +2071,11 @@ static void test_meter_graph(void) {
   g.samples = h3;
   uint64_t k3 = ctui_look_control_key(&g, &l, 60, 20);
   CTUI_TEST_ASSERT(k1 == k2 && k1 != k3,
-                   "graph: keyed by the rows its points land on");
+                   "graph: keyed by the quarter px its points land on");
   p = paint(g, &l, 60, 20);
-  /* 18 px inside: 90 % up is row 1 + 17 - 15 = 3, at the right edge */
-  CTUI_TEST_ASSERT(rgb_is(p, 60, 58, 3, 0, 255, 64) &&
+  /* 18 px inside: 90 % up is 15.25 px, row 1 + 17 - 15.25 = 2.75, at
+   * the right edge */
+  CTUI_TEST_ASSERT(line_near(p, 60, 20, 58, 3, 1) &&
                        rgb_is(p, 60, 0, 0, 0, 0, 0) == 0 &&
                        rgb_is(p, 60, 30, 10, 0, 0, 0),
                    "the newest point at the right, the well black");
@@ -2076,13 +2092,13 @@ static void test_meter_graph(void) {
   CTUI_LOOK_CONTROL fg = {.kind = CTUI_LOOK_CTL_GRAPH, .samples = flat,
                           .count = 40};
   p = paint(fg, &l, 60, 20);
-  CTUI_TEST_ASSERT(rgb_is(p, 60, 1, 10, 0, 255, 64) &&
-                       rgb_is(p, 60, 2, 10, 0, 255, 64),
+  CTUI_TEST_ASSERT(line_near(p, 60, 20, 1, 10, 1) &&
+                       line_near(p, 60, 20, 2, 10, 1),
                    "a full graph's line reaches the well's left edge");
   fg.count = 3;
   p = paint(fg, &l, 60, 20);
-  CTUI_TEST_ASSERT(!rgb_is(p, 60, 1, 10, 0, 255, 64) &&
-                       rgb_is(p, 60, 54, 10, 0, 255, 64),
+  CTUI_TEST_ASSERT(!line_near(p, 60, 20, 1, 10, 1) &&
+                       line_near(p, 60, 20, 54, 10, 1),
                    "a short history still starts where its samples do");
   static unsigned char edge_a[40], edge_b[40];
   memset(edge_a, 50, sizeof edge_a);
@@ -2125,8 +2141,8 @@ static void test_meter_graph(void) {
                        ctui_look_graph_at(&big, 62, 60, 4) == 225,
                    "span: a point every 4 px across 60, 15 of them");
   p = paint(big, &l, 62, 60);
-  CTUI_TEST_ASSERT(rgb_is(p, 62, 56, 30, 0, 255, 64) &&
-                       rgb_is(p, 62, 4, 30, 0, 255, 64),
+  CTUI_TEST_ASSERT(line_near(p, 62, 60, 56, 30, 1) &&
+                       line_near(p, 62, 60, 4, 30, 1),
                    "... and the line drawn so, to the left edge");
   CTUI_LOOK_CONTROL big2 = big;
   big2.span = 14; /* 60 / 14 = 4 as well */
@@ -2148,10 +2164,10 @@ static void test_meter_graph(void) {
   CTUI_TEST_ASSERT(one != two && two != ctui_look_control_key(&g, &l, 60, 20),
                    "the second line keys the picture too");
   p = paint(g, &l, 60, 20);
-  /* 50 %: row 1 + 17 - 8 = 10; the green's 30 % a step left at row
+  /* 50 %: row 1 + 17 - 8.5 = 9.5; the green's 30 % a step left at row
    * 1 + 17 - 5 = 13 (the red one climbs past it at 57-58) */
-  CTUI_TEST_ASSERT(rgb_is(p, 60, 58, 10, 255, 48, 48) &&
-                       rgb_is(p, 60, 56, 13, 0, 255, 64),
+  CTUI_TEST_ASSERT(line_near(p, 60, 20, 58, 10, 0) &&
+                       line_near(p, 60, 20, 56, 13, 1),
                    "the red line and the green one, each at its level");
   CTUI_LOOK_CONTROL b2 = ctl(CTUI_LOOK_CTL_METER, 50, 100);
   b2.samples2 = k1s;

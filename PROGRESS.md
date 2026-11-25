@@ -258,7 +258,11 @@ terminal resize.
   segment set up once (no division a pixel), a long slanted one scanned
   column by column over only the rows within reach (a short one its
   box), and only the rows each column reached blended -- the same
-  pixels.
+  pixels. The GRAPH's points in quarter px (2026-11-25): a sample
+  between two rows lands between them, so a slow rise is a slope, not
+  steps a row high; the key hashes the same quarters, so keys alike
+  still paint alike. Tests: the line found near its rows (a level line
+  between two lights both by halves).
 - [x] **10-bit words from the painter** (2026-11-14, for syNESthesia's
   10-bit swapchain: ctui-wm's notes/hdr.md h1). `ctui_vk_resize()`'s
   `bgra` flag is now `words`, `CTUI_VK_WORDS_*`: RGBA8 and BGRA8 (0 and
@@ -3184,6 +3188,41 @@ terminal resize.
   xdg/png.c for `look/png_read.c` at its next bump (done 2026-11-10);
   vk_test's hash checked on lavapipe (2026-11-10: the same three
   hashes, 53 passed).
+
+- **Where the AA primitives could go next** (`ctui_look_paint_polyline()`
+  / `_disc()`; surveyed 2026-11-23 outside ctui-daw, to be checked
+  against actual usage before any of it is done). ctui-wm first needs
+  its `ctui/` bump (it vendors b972126, before both): that alone makes
+  ctui-top's graphs AA, since they're GRAPH controls (`graph_line()`'s
+  y in quarter px since 2026-11-25). Strong fits:
+  - ctui: the KNOB (`paint_knob()`:
+    cap rings as discs, pointer as a polyline, groove/sweep as a thick
+    arc polyline -- but the bevel's lit/unlit halves split per pixel on
+    the diagonal, which one disc call can't).
+  - ctui-mus `oscilloscope.c` kitty trace: nearest-of-256 samples as
+    stepped column spans (its 2 px thickens downward only) -> one
+    polyline, clipped to the well; already a `CTUI_LOOK_CANVAS`.
+  - ctui-wm `src/widgets/weather.c` temperature line (spans; one
+    polyline per NaN-free run, drawn twice: dim clipped to past hours,
+    warm the rest; `weather_test.c` pins its pixels);
+    `apps/photo/ui/curves.c` (curve and diagonal; already a canvas);
+    `plugins/river/frame_draw.c` traffic lights -- **its own copy of the
+    same box-filter AA** (`coverage`/`seg_dist`), XRGB buffer
+    (`paint_frame` already round-trips RGBA), its px centres at +0.5;
+    tray icons in `apps/mail/ui/watcher.c` / `apps/feeds/ui/watcher.c`
+    (hard `d2` circles and rings, ARGB: a swizzle).
+
+  Possible: ctui-wm viz wave (per-row gradient colour: polyline, then
+  recolour the touched rows; 30 fps, bench it); photo overlays (brush
+  ring as white+black discs; marching ants would be a polyline a dash);
+  the CHECK tick and RADIO for looks with soft edges (`filter.alpha ==
+  0`), win95 staying pixel-sharp; a spectrum envelope in ctui-mus (a new
+  feature). Not fits: bars, meters, histograms, heatmaps, the audio
+  lane's min/max envelope, svgdec (cairo), photosel (its own AA on a
+  mask), web's stand-in (its filter cuts alpha), border.c (its own SDF
+  rounded rect). Cost to watch: the polyline callocs a bounding-box mask
+  every call -- about a whole oscilloscope well at 50 fps; a kept mask
+  if it shows.
 
 - **C23, deferred** (`docs/c23.md`): a bump is near-free but has to move
   every vendoring repo's Makefile at once; what it would buy (unnamed

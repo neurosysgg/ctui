@@ -51,6 +51,13 @@ static void meter_leds(const CTUI_LOOK *l, int w, int h, int *x0, int *seg,
   *n = max2(0, (w - 2 * *x0 + 1) / (*seg + 1));
 }
 
+/* a sample's height above the well's bottom row, in quarter px: between
+ * two rows it lands between them (a slow rise a slope, not steps a row
+ * high), and the key hashes the same quarters, so keys alike paint alike */
+static int graph_y4(unsigned char sample, int gh) {
+  return (min2(sample, 100) * (gh - 1) * 4 + 50) / 100;
+}
+
 /* a graph's points: one each step px, inside a 1 px edge */
 /* a graph's points apart in px: as many as span says across the well,
  * else Task Manager's (a tenth of the height) */
@@ -347,14 +354,14 @@ uint64_t ctui_look_control_key(const CTUI_LOOK_CONTROL *c, const CTUI_LOOK *l,
       k = (k ^ v) * 0x100000001b3u;
     }
   }
-  /* a graph: the samples it shows, as the rows they land on */
+  /* a graph: the samples it shows, as the quarter px they land on */
   /* the one past the left edge too: its line runs to the edge */
   int room = h - 2, shown = (w - 2) / graph_step(c, w, h) + 2;
   for (int i = max2(0, s.count - shown); i < s.count && room > 0; i++) {
-    int y = min2(s.samples[i], 100) * (room - 1) / 100;
+    int y = graph_y4(s.samples[i], room);
     k = (k ^ (uint64_t)(y + 1)) * 0x100000001b3u;
     if (s.samples2) {
-      y = min2(s.samples2[i], 100) * (room - 1) / 100;
+      y = graph_y4(s.samples2[i], room);
       k = (k ^ (uint64_t)(y + 0x10001)) * 0x100000001b3u;
     }
   }
@@ -813,7 +820,7 @@ static void graph_line(CTUI_LOOK_CANVAS *cv, const unsigned char *samples,
   for (int i = count - 1, x = x0 + gw - 1; i >= 0 && n < room; i--, x -= step) {
     xy[2 * n] = (float)x;
     xy[2 * n + 1] =
-        (float)(y0 + gh - 1 - min2(samples[i], 100) * (gh - 1) / 100);
+        (float)(y0 + gh - 1) - (float)graph_y4(samples[i], gh) / 4.0f;
     n++;
     if (x < x0) {
       break; /* past the edge: that was the last */
