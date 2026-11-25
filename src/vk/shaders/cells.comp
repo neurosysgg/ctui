@@ -1,7 +1,7 @@
 #version 450
 // The painter (src/vk/vk.h): a workgroup a listed 16 x 16 tile of the
 // surface, each pixel its cell's background with the foreground over it
-// by the glyph's coverage, the cells from (pad_x, pad_y) on (in the inset
+// by the glyph's coverage (a colour glyph's RGBA over it instead), the cells from (pad_x, pad_y) on (in the inset
 // and past the last whole cell, the default background), with the images
 // placed over it as kitty composites them: z < 0 under the glyph (below
 // UNDER_BG only on a default background), z >= 0 over it, in z order,
@@ -18,7 +18,8 @@
 layout(local_size_x = 16, local_size_y = 16) in;
 layout(set = 0, binding = 0) readonly buffer Tiles { uint tile[]; };
 layout(set = 0, binding = 1) readonly buffer Cells { uint cell[]; };
-// the glyph cache: a slot's coverage, a byte a pixel, four to a word
+// the glyph cache: a slot's coverage, a byte a pixel, four to a word; a
+// colour glyph's cell four slots of RGBA (0xRRGGBBAA premultiplied)
 layout(set = 0, binding = 2) readonly buffer Atlas { uint atlas[]; };
 #ifdef DIRECT
 // cells_direct.spv.h: into a swapchain image as a storage image, its
@@ -56,6 +57,7 @@ layout(push_constant) uniform Push {
 // CTUI_ATTR_* (core/cell.h)
 const uint BOLD = 1u, DIM = 2u, UNDERLINE = 8u, STRIKE = 16u;
 const uint FG_DEFAULT = 1u << 8, BG_DEFAULT = 1u << 9, PLACEHOLDER = 1u << 10;
+const uint COLOR = 1u << 12; // CTUI_VK_COLOR
 const uint UL_OWN = 1u << 24; // CTUI_VK_UL_OWN: the underline's own colour
 const uint UL_DOUBLE = 1u, UL_CURLY = 2u, UL_DOTTED = 3u, UL_DASHED = 4u;
 const uint BOX = 0xffffu;
@@ -141,6 +143,21 @@ uint coverage(uint g, uint gx, uint gy) {
   return atlas[i >> 2] >> (8u * (i & 3u)) & 0xffu;
 }
 
+// colour glyph slot g's pixel at (gx, gy): rgb << 8 | a, premultiplied
+uint colour(uint g, uint gx, uint gy) {
+  return atlas[g * ((gw * gh + 3u) / 4u) + gy * gw + gx];
+}
+
+// a premultiplied t (rgb << 8 | a) over dst (0xRRGGBB, premultiplied)
+uint over_pm(uint dst, uint t) {
+  uint a = t & 0xffu, o = 0u;
+  for (uint s = 0u; s < 24u; s += 8u) {
+    uint c = (t >> (s + 8u) & 0xffu) + ((dst >> s & 0xffu) * (255u - a) + 127u) / 255u;
+    o |= min(c, 255u) << s;
+  }
+  return o;
+}
+
 // fg over bg (0xRRGGBB) by c of 255
 uint blend(uint bg, uint fg, uint c) {
   uint o = 0u;
@@ -223,6 +240,7 @@ void main() {
   uint cy = y >= pad_y ? (y - pad_y) / gh : rows;
   uint rgb = def_bg;
   uint cov = 0u;
+  uint col = 0u; // a colour glyph's pixel
   bool bg_default = true;
   uint ph = 0u; // a placeholder cell's image, where the glyph would be
   uint fg = def_fg;
@@ -240,6 +258,8 @@ void main() {
       // g its column, the attrs' byte its row
       ph = placeholder(cell[i + 1u], g * gw + gx, (a & 0xffu) * gh + gy);
       a = a & (FG_DEFAULT | BG_DEFAULT | PLACEHOLDER);
+    } else if ((a & COLOR) != 0u) {
+      col = colour(g, gx, gy);
     } else if (g == BOX) {
       cov = gx == 0u || gx == gw - 1u || gy == gh / 8u || gy == gh - 1u - gh / 8u ? 255u : 0u;
     } else {
@@ -276,6 +296,8 @@ void main() {
       rgb = over(rgb, t);
       al = over_a(al, t & 0xffu);
     }
+  rgb = over_pm(rgb, col);
+  al = over_a(al, col & 0xffu);
   rgb = blend(rgb, fg, cov);
   al = over_a(al, cov);
   rgb = blend(rgb, ulc, ul);

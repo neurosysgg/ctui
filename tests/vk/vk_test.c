@@ -392,6 +392,23 @@ static uint32_t ph_texel(unsigned id, unsigned gw, unsigned gh, unsigned dx,
   return t;
 }
 
+/* cells.comp's colour() and over_pm(): a colour glyph's pixel, a
+ * premultiplied one over the pixel under it */
+static uint32_t colour(const uint32_t *slots, unsigned sw, unsigned gw,
+                       unsigned g, unsigned gx, unsigned gy) {
+  return slots[g * sw + gy * gw + gx];
+}
+
+static uint32_t over_pm(uint32_t dst, uint32_t t) {
+  uint32_t a = t & 0xffu, o = 0;
+  for (unsigned sh = 0; sh < 24; sh += 8) {
+    uint32_t c = (t >> (sh + 8) & 0xffu) +
+                 ((dst >> sh & 0xffu) * (255u - a) + 127u) / 255u;
+    o |= (c > 255u ? 255u : c) << sh;
+  }
+  return o;
+}
+
 /* cells.comp's coverage() and blend() */
 static unsigned coverage(const uint32_t *slots, unsigned sw, unsigned gw, unsigned g,
                          unsigned gx, unsigned gy) {
@@ -451,7 +468,7 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
     for (unsigned x = 0; x < W; x++) {
       unsigned lx = x - ox, ly = y - oy;
       unsigned cx = lx / gw, cy = ly / gh, gx = lx % gw, gy = ly % gh;
-      uint32_t rgb = dbg, fg = dfg;
+      uint32_t rgb = dbg, fg = dfg, col = 0;
       unsigned cov = 0;
       int bg_default = 1;
       uint32_t ph = 0;
@@ -477,6 +494,8 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
         if (a & CTUI_VK_PLACEHOLDER) {
           ph = ph_texel(c[1], gw, gh, g * gw + gx, (a & 0xffu) * gh + gy);
           a &= CTUI_VK_FG_DEFAULT | CTUI_VK_BG_DEFAULT | CTUI_VK_PLACEHOLDER;
+        } else if (a & CTUI_VK_COLOR) {
+          col = colour(slots, sw, gw, g, gx, gy);
         } else if (g == CTUI_VK_GLYPH_BOX) {
           cov = gx == 0 || gx == gw - 1 || gy == gh / 8 || gy == gh - 1 - gh / 8 ? 255 : 0;
         } else {
@@ -516,6 +535,8 @@ static void reference(CTUI_VK *vk, const CTUI_SCREEN *s, uint32_t *px) {
           al = over_a(al, t & 0xffu);
         }
       }
+      rgb = over_pm(rgb, col);
+      al = over_a(al, col & 0xffu);
       rgb = blend(rgb, fg, cov);
       al = over_a(al, cov);
       rgb = blend(rgb, ulc, ul);
@@ -987,9 +1008,11 @@ static unsigned g_asked;
 static uint32_t g_asked_cp[16];
 static int g_asked_cells[16];
 
-static int provide(void *ctx, uint32_t cp, int cells, int gw, int gh, int base,
-                   float em, uint8_t *cov) {
-  (void)ctx, (void)base, (void)em;
+static int provide(void *ctx, const CTUI_VK_GLYPH_ASK *ask) {
+  (void)ctx;
+  uint32_t cp = ask->cps[0];
+  int cells = ask->cells, gw = ask->gw, gh = ask->gh;
+  uint8_t *cov = ask->cov;
   if (g_asked < 16) {
     g_asked_cp[g_asked] = cp;
     g_asked_cells[g_asked] = cells;
@@ -1119,6 +1142,150 @@ static void test_glyphs(void) {
       g_asked == before && differ(vk, screen) == 0,
       "中 and 😀 swapped: nothing asked again, the CONT cells follow "
       "their leads");
+  ctui_app_free(&app);
+  ctui_screen_free(screen);
+  ctui_vk_free(vk);
+}
+
+/* a provider in colour: 👍 + a skin tone whole as a colour glyph (its
+ * left cell 0x80 red at alpha 0x80, its right opaque green), 🔥 alone in
+ * colour (half alpha blue), a flag's sequence not had whole (then its
+ * first codepoint: coverage); what it was asked */
+static unsigned g_casked;
+static uint32_t g_casked_cp[16];
+static int g_casked_n[16];
+
+static int provide_color(void *ctx, const CTUI_VK_GLYPH_ASK *ask) {
+  (void)ctx;
+  if (g_casked < 16) {
+    g_casked_cp[g_casked] = ask->cps[0];
+    g_casked_n[g_casked] = ask->n;
+  }
+  g_casked++;
+  int w = ask->cells * ask->gw;
+  if ((ask->cps[0] == 0x1f44d && ask->n == 2 && ask->cps[1] == 0x1f3fd) ||
+      ask->cps[0] == 0x1f525) {
+    for (int y = 0; y < ask->gh; y++) {
+      for (int x = 0; x < w; x++) {
+        ask->rgba[y * w + x] = ask->cps[0] == 0x1f525 ? 0x00008080u
+                               : x < ask->gw          ? 0x80000080u
+                                                      : 0x00ff00ffu;
+      }
+    }
+    return CTUI_VK_GLYPH_COLOR;
+  }
+  if (ask->n == 1 && ask->cps[0] == 0x1f1e9) {
+    memset(ask->cov, 0x80, (size_t)w * (size_t)ask->gh);
+    return CTUI_VK_GLYPH_COV;
+  }
+  return -1;
+}
+
+static int casked(uint32_t cp, int n) {
+  for (unsigned i = 0; i < g_casked && i < 16; i++) {
+    if (g_casked_cp[i] == cp && g_casked_n[i] == n) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+static void render_color(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
+  ctui_widget_puts(self, comp, 0, 0, g_glyphs, CTUI_COLOR_WHITE,
+                   CTUI_COLOR_BLUE);
+  /* the same glyphs bold, dim and underlined: colour takes none but the line */
+  CTUI_CELL c = {.fg = CTUI_COLOR_WHITE,
+                 .bg = CTUI_COLOR_DEFAULT,
+                 .attr = CTUI_ATTR_BOLD | CTUI_ATTR_DIM | CTUI_ATTR_UNDERLINE};
+  ctui_widget_puts_cell(self, comp, 1, 0, g_glyphs, (size_t)-1, &c);
+}
+
+/* colour glyphs: an emoji sequence asked whole, its RGBA four slots a
+ * cell, the CONT taking the fourth on, the painter compositing it as the
+ * reference does (over the background, a default one's alpha too); a
+ * sequence the provider lacks whole falls to its first codepoint; a
+ * cluster that isn't one (é) never asked */
+static void test_color(void) {
+  CTUI_VK *vk = ctui_vk_new(g_phys, g_dev);
+  int rows = 0, cols = 0;
+  if (!vk || ctui_vk_resize(vk, W, H, 120, 0, &rows, &cols) != 0) {
+    CTUI_TEST_ASSERT(0, "a backend for colour");
+    ctui_vk_free(vk);
+    return;
+  }
+  ctui_vk_set_glyph_fn(vk, provide_color, NULL);
+  ctui_vk_set_opacity(vk, 0xc0);
+  CTUI_WIDGET text =
+      ctui_widget_make(0, 0, cols, rows, NULL, render_color, NULL);
+  CTUI_WIDGET *ws[] = {&text};
+  CTUI_SCREEN *screen = ctui_screen_create(rows, cols);
+  ctui_screen_set_sink(screen, ctui_vk_screen_sink(), vk);
+  CTUI_APP app;
+  ctui_app_init(&app, ws, 1, rows, cols);
+  /* 👍🏽, 🇩🇪, e + U+0301, 🔥 */
+  g_glyphs = "\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd\xf0\x9f\x87\xa9\xf0\x9f\x87\xaa"
+             "e\xcc\x81\xf0\x9f\x94\xa5|";
+  ctui_app_render(&app, screen);
+  ctui_screen_flush(screen);
+  memset(g_px, 0, W * H * 4u);
+  paint(vk);
+  CTUI_TEST_ASSERT(
+      casked(0x1f44d, 2) >= 0 && casked(0x1f1e9, 2) >= 0 &&
+          casked(0x1f1e9, 1) > casked(0x1f1e9, 2) && casked(0x1f525, 1) >= 0 &&
+          casked('e', 2) < 0 && casked('e', 1) < 0,
+      "asked: 👍🏽 and 🇩🇪 whole, 🇩🇪's first codepoint after, 🔥; é not "
+      "(%u asked)",
+      g_casked);
+  unsigned gw, gh, sw;
+  const uint32_t *slots;
+  ctui_vk_glyphs(vk, &gw, &gh, &slots, &sw);
+  uint32_t lead[CTUI_VK_CELL_WORDS], cont[CTUI_VK_CELL_WORDS],
+      flag[CTUI_VK_CELL_WORDS], fire[CTUI_VK_CELL_WORDS];
+  ctui_vk_cell(vk, &screen->buffer[0], lead);
+  ctui_vk_cell(vk, &screen->buffer[1], cont);
+  ctui_vk_cont(cont, lead);
+  ctui_vk_cell(vk, &screen->buffer[2], flag);
+  ctui_vk_cell(vk, &screen->buffer[5], fire);
+  unsigned l = lead[0] & 0xffffu, r = cont[0] & 0xffffu;
+  CTUI_TEST_ASSERT(
+      (screen->buffer[0].ch & CTUI_CELL_CLUSTER) &&
+          (lead[0] >> 16 & CTUI_VK_COLOR) && (lead[0] >> 16 & CTUI_VK_WIDE) &&
+          (cont[0] >> 16 & CTUI_VK_COLOR) && r == l + 4 &&
+          colour(slots, sw, gw, l, 0, 0) == 0x80000080u &&
+          colour(slots, sw, gw, l, gw - 1, gh - 1) == 0x80000080u &&
+          colour(slots, sw, gw, r, 0, 0) == 0x00ff00ffu &&
+          colour(slots, sw, gw, r, gw - 1, gh - 1) == 0x00ff00ffu,
+      "👍🏽: colour, wide, its halves four slots apart (%u, %u)", l, r);
+  CTUI_TEST_ASSERT(
+      !(flag[0] >> 16 & CTUI_VK_COLOR) && (flag[0] >> 16 & CTUI_VK_WIDE) &&
+          coverage(slots, sw, gw, flag[0] & 0xffffu, 1, 1) == 0x80 &&
+          (fire[0] >> 16 & CTUI_VK_COLOR),
+      "🇩🇪 its first codepoint's coverage, 🔥 in colour");
+  CTUI_TEST_ASSERT(differ(vk, screen) == 0,
+                   "the card's pixels are the reference's");
+  /* on the blue background: half red over it; on the default (alpha 0xc0) */
+  unsigned y = gh / 2, x = gw / 2;
+  uint32_t want =
+      0x80u | (0x77u << 16) | 0xffu << 24; /* 0x80 + 0xee * 0x7f / 255 */
+  CTUI_TEST_ASSERT(
+      g_px[y * W + x] == want && g_px[y * W + gw + x] == 0xff00ff00u,
+      "👍🏽 over blue: %08x (want %08x), its right half green %08x",
+      g_px[y * W + x], want, g_px[y * W + gw + x]);
+  ctui_vk_cell(vk, &screen->buffer[cols], lead);
+  CTUI_TEST_ASSERT(
+      (lead[0] >> 16 & CTUI_VK_COLOR) && (lead[0] & 0xffffu) == l,
+      "bold, dim, underlined: the same colour glyph (no face of its own)");
+
+  /* the same sequences again: nothing asked twice */
+  unsigned before = g_casked;
+  g_glyphs = "\xf0\x9f\x94\xa5\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd\xf0\x9f\x87\xa9"
+             "\xf0\x9f\x87\xaa|";
+  ctui_app_render(&app, screen);
+  ctui_screen_flush(screen);
+  paint(vk);
+  CTUI_TEST_ASSERT(
+      g_casked == before && differ(vk, screen) == 0,
+      "moved about: nothing asked again, the pixels the reference's");
   ctui_app_free(&app);
   ctui_screen_free(screen);
   ctui_vk_free(vk);
@@ -1813,6 +1980,7 @@ static void test_vk(void) {
   test_placed(vk, &app, screen);
   test_wipe(vk, &app, screen);
   test_glyphs();
+  test_color();
   test_faces();
   test_pad();
   test_opacity();

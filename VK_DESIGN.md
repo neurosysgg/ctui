@@ -462,7 +462,22 @@ everything moves smoothly, the playbar most of all).
   CONT also redone when its lead changes); the cache is a hash map
   keyed by codepoint and width (past the BMP too; the 128 KB BMP table
   gone); a cluster is its first codepoint at the cluster's width.
-  Colour emoji are not drawn (grey coverage only).
+- **Colour emoji and sequences (2026-11-25, ctui-wm's ctui-host)**: the
+  provider takes a `CTUI_VK_GLYPH_ASK` (codepoints, cells, the cell's
+  metrics, a coverage and an RGBA buffer) and answers
+  `CTUI_VK_GLYPH_COV`, `CTUI_VK_GLYPH_COLOR` or -1. A colour glyph is
+  four slots a cell -- a word a pixel, 0xRRGGBBAA premultiplied, the
+  same atlas -- its cell flagged `CTUI_VK_COLOR` (a wide one's CONT
+  takes slot + 4); the painter composites it "over" the background (the
+  premultiplied sum), then an underline / strike in the foreground over
+  that; never tinted, dimmed or smeared bold. An emoji sequence (a ZWJ,
+  VS16, keycap, skin tone, regional indicator or tag in the cluster) is
+  asked whole, keyed by its interned cluster index (`GKEY_CLUSTER`); one
+  the provider lacks falls to its first codepoint. A width-2 glyph is
+  asked of the provider before the font (a monospace font's is a cell
+  wide; ctui-host shapes it against the colour font first). Setting the
+  provider drops the map's boxes, sequences and width-2 entries, so
+  they're asked again.
 - **A terminal's palette and padding (2026-11-10, ctui-wm's panel
   host)**: `ctui_vk_set_palette()` for the 16 colours (a host gives its
   terminal's theme; xterm's until then), `ctui_vk_set_pad()` for an

@@ -18,8 +18,13 @@
  * (ttf.h: grey levels), box drawing stretched to its cell. A codepoint
  * the font lacks is asked of ctui_vk_set_glyph_fn()'s provider (a host
  * with fontconfig: ctui itself links no font library), else drawn as a
- * box. A width-2 glyph spans its two cells; a cluster is drawn as its
- * first codepoint at the cluster's width (one font, no shaping).
+ * box. A width-2 glyph spans its two cells. A cluster is drawn as its
+ * first codepoint at the cluster's width (one font, no shaping), except
+ * an emoji sequence (a ZWJ, VS16, skin tone, keycap, flag or tag in it),
+ * which the provider is asked for whole -- a font's ligature, shaped
+ * there. The provider may answer in colour (an emoji's bitmap): RGBA in
+ * the cache, composited over the background instead of tinted by the
+ * foreground.
  *
  * Per frame: ctui_screen_flush() (the sink takes the changes), then
  * ctui_vk_record() in a recording, then per image ctui_vk_regions() for
@@ -56,6 +61,12 @@
 /* the lead of a width-2 glyph: its right half is the next slot, which
  * the CTUI_CELL_CONT right of it takes (ctui_vk_cont()) */
 #define CTUI_VK_WIDE (1u << 11)
+/* a colour glyph (the provider's CTUI_VK_GLYPH_COLOR): its slot and the
+ * three after it hold a cell's RGBA (a word a pixel, rows of the cell's
+ * width, 0xRRGGBBAA premultiplied), so a wide one's right half is slot +
+ * 4; drawn over the background as it is, neither tinted, dimmed nor
+ * smeared bold (an underline or strike still goes over it) */
+#define CTUI_VK_COLOR (1u << 12)
 /* the slot drawn as a box: a codepoint the atlas lacks */
 #define CTUI_VK_GLYPH_BOX 0xffffu
 
@@ -128,13 +139,29 @@ void ctui_vk_set_palette(CTUI_VK *vk, const uint32_t pal[16]);
 void ctui_vk_set_pad(CTUI_VK *vk, const unsigned pad[4]);
 void ctui_vk_origin(const CTUI_VK *vk, unsigned *x, unsigned *y);
 
-/* a glyph the font lacks: cp's coverage into cov (cells * gw x gh, a
- * byte a pixel, rows of cells * gw, cleared), at em px an em with the
- * baseline at row base -- the built-in font's cell, which a fallback
- * font fits itself into. cells: 2 for a width-2 glyph. 0 drawn, -1 not
- * had (the box). Called while a frame goes in, on its thread */
-typedef int (*CTUI_VK_GLYPH_FN)(void *ctx, uint32_t cp, int cells, int gw,
-                                int gh, int base, float em, uint8_t *cov);
+/* what the provider is asked: a codepoint (n 1) or an emoji sequence's
+ * codepoints, cells wide (2 for a width-2 one) at em px an em with the
+ * baseline at row base -- the built-in font's cell (gw x gh), which a
+ * fallback font fits itself into -- and where its answer goes: cov
+ * (cells * gw x gh, a byte a pixel, rows of cells * gw) or, for a colour
+ * glyph, rgba (the same pixels, a word each, 0xRRGGBBAA premultiplied),
+ * both cleared */
+typedef struct {
+  const uint32_t *cps;
+  int n, cells, gw, gh, base;
+  float em;
+  uint8_t *cov;
+  uint32_t *rgba;
+} CTUI_VK_GLYPH_ASK;
+/* the provider's answers: drawn into cov, drawn into rgba */
+#define CTUI_VK_GLYPH_COV 0
+#define CTUI_VK_GLYPH_COLOR 1
+/* a glyph the font lacks, or an emoji sequence: CTUI_VK_GLYPH_COV,
+ * CTUI_VK_GLYPH_COLOR, or -1 not had (a sequence: then its first
+ * codepoint, else the box). A width-2 glyph is asked of it before the
+ * font (a monospace font's is a cell wide). Called while a frame goes
+ * in, on its thread */
+typedef int (*CTUI_VK_GLYPH_FN)(void *ctx, const CTUI_VK_GLYPH_ASK *ask);
 /* the provider of what the font lacks (NULL: none); codepoints drawn as
  * boxes so far are asked again, from their cells' next change. Set it
  * before the first frame; it stays across resizes */

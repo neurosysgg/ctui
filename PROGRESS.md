@@ -263,6 +263,23 @@ terminal resize.
   steps a row high; the key hashes the same quarters, so keys alike
   still paint alike. Tests: the line found near its rows (a level line
   between two lights both by halves).
+- [x] **Colour emoji in the Vulkan painter** (2026-11-25, for
+  ctui-wm's ctui-host). The glyph provider's hook is now
+  `CTUI_VK_GLYPH_FN(ctx, const CTUI_VK_GLYPH_ASK *)`: the codepoints (one,
+  or an emoji sequence whole: a ZWJ, VS16, keycap, skin tone, flag or
+  tag in the cluster), cells, the cell's metrics, a coverage and an RGBA
+  buffer; it answers `CTUI_VK_GLYPH_COV`, `_COLOR` or -1 (a sequence then
+  falls to its first codepoint). A colour glyph is four atlas slots a
+  cell of premultiplied 0xRRGGBBAA, its cell flagged `CTUI_VK_COLOR` (a
+  CONT takes slot + 4); cells.comp composites it over the background
+  (`over_pm()`), an underline or strike over it in the foreground, never
+  tinted, dimmed or smeared. A width-2 glyph goes to the provider before
+  the font. Sequences are keyed by their interned cluster index
+  (`GKEY_CLUSTER`). Tests: vk_test's `test_color()` -- 👍🏽 asked whole
+  in colour, its halves four slots apart, 🇩🇪 not had whole then its
+  first codepoint's coverage, é never asked, the card's pixels the
+  reference's (which mirrors `colour()` / `over_pm()`), half red over
+  blue checked by value, nothing asked again once cached.
 - [x] **10-bit words from the painter** (2026-11-14, for syNESthesia's
   10-bit swapchain: ctui-wm's notes/hdr.md h1). `ctui_vk_resize()`'s
   `bgra` flag is now `words`, `CTUI_VK_WORDS_*`: RGBA8 and BGRA8 (0 and

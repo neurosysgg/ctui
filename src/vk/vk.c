@@ -92,12 +92,18 @@ typedef struct {
  * (ctui_vk_set_face()) */
 #define GKEY_STYLE_SHIFT 29
 #define GKEY_STYLE (3u << GKEY_STYLE_SHIFT)
+/* a map key's flag: the rest an emoji sequence's cluster index
+ * (CTUI_CELL_CLUSTER's), asked of the provider whole */
+#define GKEY_CLUSTER (1u << 28)
+/* a map entry's slot's flag: a colour glyph (CTUI_VK_COLOR) */
+#define GSLOT_COLOR 0x80000000u
 /* CTUI_ATTR_BOLD | CTUI_ATTR_ITALIC as a face's index into faces[] */
 #define FACE_INDEX(a) \
   ((((a) & CTUI_ATTR_BOLD) ? 1u : 0u) | (((a) & CTUI_ATTR_ITALIC) ? 2u : 0u))
 
-/* the glyph map's entry: key 0 empty, else a codepoint (| GKEY_WIDE) and
- * its slot (CTUI_VK_GLYPH_BOX: no font has it) */
+/* the glyph map's entry: key 0 empty, else a codepoint or a cluster's
+ * index (| GKEY_CLUSTER), | GKEY_WIDE, its face, and its slot
+ * (CTUI_VK_GLYPH_BOX: no font has it; | GSLOT_COLOR: in colour) */
 typedef struct {
   uint32_t key;
   uint32_t slot;
@@ -150,14 +156,16 @@ struct CTUI_VK {
   /* the glyph cache: the codepoints drawn so far (gmap, open addressing
    * of gmap_cap entries, gmap_n used), each slot's coverage on the host
    * (slot_words words, 4 bytes a word, rows of gw), slot 0 blank; a wide
-   * glyph is two slots, its left half then its right; slots from up_from
+   * glyph is two slots, its left half then its right -- a colour one four
+   * a cell, its RGBA a word a pixel (CTUI_VK_COLOR); slots from up_from
    * go up with the next record, into an atlas on the card of atlas_cap
    * slots */
   GENT *gmap;
   unsigned gmap_cap, gmap_n;
   uint32_t *glyphs;
   unsigned slot_words, nslots, slots_cap, up_from, atlas_cap;
-  uint8_t *cov; /* a wide glyph's coverage: 2 * gw x gh */
+  uint8_t *cov;   /* a wide glyph's coverage: 2 * gw x gh */
+  uint32_t *rgba; /* or its colour pixels, the provider's */
   /* what the font lacks is asked of this, when set */
   CTUI_VK_GLYPH_FN glyph_fn;
   void *glyph_ctx;
@@ -271,13 +279,15 @@ static int glyphs_reset(CTUI_VK *vk) {
   free(vk->gmap);
   free(vk->glyphs);
   free(vk->cov);
+  free(vk->rgba);
   vk->gmap_cap = GMAP_FIRST;
   vk->gmap_n = 0;
   vk->gmap = calloc(vk->gmap_cap, sizeof *vk->gmap);
   vk->slots_cap = GLYPHS_FIRST;
   vk->glyphs = calloc((size_t)vk->slots_cap * vk->slot_words, 4);
   vk->cov = malloc((size_t)vk->gw * 2u * vk->gh);
-  if (!vk->gmap || !vk->glyphs || !vk->cov) {
+  vk->rgba = malloc((size_t)vk->gw * 2u * vk->gh * 4u);
+  if (!vk->gmap || !vk->glyphs || !vk->cov || !vk->rgba) {
     return -1;
   }
   vk->nslots = 1;
@@ -325,6 +335,7 @@ void ctui_vk_free(CTUI_VK *vk) {
   free(vk->gmap);
   free(vk->glyphs);
   free(vk->cov);
+  free(vk->rgba);
   free(vk->ttf_file);
   if (vk->pool) {
     vkDestroyDescriptorPool(vk->dev, vk->pool, NULL);
@@ -885,7 +896,9 @@ static int gmap_put(CTUI_VK *vk, uint32_t key, uint32_t slot) {
 void ctui_vk_set_glyph_fn(CTUI_VK *vk, CTUI_VK_GLYPH_FN fn, void *ctx) {
   vk->glyph_fn = fn;
   vk->glyph_ctx = ctx;
-  /* what was a box may be drawn now: the map rebuilt without them */
+  /* what was a box may be drawn now, and a sequence or a width-2 glyph
+   * asked of it first: the map rebuilt without them (their slots stay
+   * taken) */
   if (!vk->gmap) {
     return;
   }
@@ -898,7 +911,8 @@ void ctui_vk_set_glyph_fn(CTUI_VK *vk, CTUI_VK_GLYPH_FN fn, void *ctx) {
   }
   vk->gmap_n = 0;
   for (unsigned i = 0; i < cap; i++) {
-    if (old[i].key && old[i].slot != CTUI_VK_GLYPH_BOX) {
+    if (old[i].key && old[i].slot != CTUI_VK_GLYPH_BOX &&
+        !(old[i].key & (GKEY_CLUSTER | GKEY_WIDE))) {
       *gmap_find(vk, old[i].key) = old[i];
       vk->gmap_n++;
     }
@@ -968,10 +982,56 @@ static void smear(uint8_t *cov, int w, int h) {
   }
 }
 
-/* cp drawn into cov (cells * gw x gh): face's glyph (FACE_INDEX), else
- * the regular font's (smeared for a bold face), else the provider's
- * (smeared too). 0, or -1 when none has it */
-static int glyph_draw(CTUI_VK *vk, uint32_t cp, unsigned cells, unsigned face) {
+/* rgba (cells * gw x gh) into the slots from slot on, four a cell */
+static void slots_fill_color(CTUI_VK *vk, unsigned slot, unsigned cells) {
+  unsigned stride = cells * vk->gw;
+  for (unsigned k = 0; k < cells; k++) {
+    uint32_t *w = vk->glyphs + (size_t)(slot + 4u * k) * vk->slot_words;
+    memset(w, 0, 4u * vk->slot_words * 4u);
+    for (unsigned y = 0; y < vk->gh; y++) {
+      memcpy(w + (size_t)y * vk->gw, vk->rgba + (size_t)y * stride + k * vk->gw,
+             vk->gw * 4u);
+    }
+  }
+}
+
+/* cps (n of them) asked of the provider into cov / rgba (cleared):
+ * CTUI_VK_GLYPH_COV, _COLOR, or -1; a bold face's coverage smeared */
+static int glyph_ask(CTUI_VK *vk, const uint32_t *cps, int n, unsigned cells,
+                     unsigned face) {
+  size_t px = (size_t)cells * vk->gw * vk->gh;
+  memset(vk->cov, 0, px);
+  memset(vk->rgba, 0, px * 4u);
+  CTUI_VK_GLYPH_ASK ask = {.cps = cps,
+                           .n = n,
+                           .cells = (int)cells,
+                           .gw = (int)vk->gw,
+                           .gh = (int)vk->gh,
+                           .base = vk->base,
+                           .em = vk->em,
+                           .cov = vk->cov,
+                           .rgba = vk->rgba};
+  int r = vk->glyph_fn(vk->glyph_ctx, &ask);
+  if (r == CTUI_VK_GLYPH_COV && (face & 1u)) {
+    smear(vk->cov, (int)(cells * vk->gw), (int)vk->gh);
+  }
+  return r == CTUI_VK_GLYPH_COV || r == CTUI_VK_GLYPH_COLOR ? r : -1;
+}
+
+/* a glyph into cov (cells * gw x gh) or rgba: whole, an emoji sequence or
+ * a width-2 glyph (cps, n of them) from the provider first; else cps[0]
+ * as face's glyph (FACE_INDEX), else the regular font's (smeared for a
+ * bold face), else the provider's (smeared too). CTUI_VK_GLYPH_COV,
+ * _COLOR, or -1 when none has it */
+static int glyph_draw(CTUI_VK *vk, const uint32_t *cps, int n, int whole,
+                      unsigned cells, unsigned face) {
+  if (whole) {
+    int r = glyph_ask(vk, cps, n, cells, face);
+    if (r >= 0) {
+      return r;
+    }
+  }
+  uint32_t cp = cps[0];
   int cw = (int)(cells * vk->gw);
   const CTUI_TTF *f = &vk->ttf;
   uint16_t g = 0;
@@ -988,19 +1048,27 @@ static int glyph_draw(CTUI_VK *vk, uint32_t cp, unsigned cells, unsigned face) {
     } else if ((face & 1u) && f == &vk->ttf) {
       smear(vk->cov, cw, (int)vk->gh);
     }
-    return 0;
+    return CTUI_VK_GLYPH_COV;
   }
-  if (vk->glyph_fn) {
-    memset(vk->cov, 0, (size_t)cw * vk->gh);
-    if (vk->glyph_fn(vk->glyph_ctx, cp, (int)cells, (int)vk->gw, (int)vk->gh,
-                     vk->base, vk->em, vk->cov) == 0) {
-      if (face & 1u) {
-        smear(vk->cov, cw, (int)vk->gh);
-      }
-      return 0;
-    }
+  /* asked already when it was this codepoint alone */
+  if (vk->glyph_fn && !(whole && n == 1)) {
+    return glyph_ask(vk, cps, 1, cells, face);
   }
   return -1;
+}
+
+/* an emoji sequence: a cluster with a ZWJ, VS16, keycap, skin tone,
+ * regional indicator (a flag) or tag (a subdivision's flag) in it */
+static int emoji_seq(const uint32_t *cps, int n) {
+  for (int i = 0; i < n; i++) {
+    uint32_t c = cps[i];
+    if (c == 0x200du || c == 0xfe0fu || c == 0x20e3u ||
+        (c >= 0x1f3fbu && c <= 0x1f3ffu) || (c >= 0x1f1e6u && c <= 0x1f1ffu) ||
+        (c >= 0xe0020u && c <= 0xe007fu)) {
+      return 1;
+    }
+  }
+  return 0;
 }
 
 /* the face a cell's attrs draw from (FACE_INDEX): bold / italic as asked
@@ -1015,18 +1083,23 @@ static unsigned face_of(const CTUI_VK *vk, unsigned attr) {
 }
 
 /* ch's slot in the cache (a wide glyph's left half: its right is the next
- * slot) in face (FACE_INDEX), drawn into it the first time. A cluster is
- * its first codepoint (one font, no shaping) at the cluster's width; what
- * no font has is the box, logged once */
-static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch, unsigned face, int *wide) {
+ * slot, a colour one's the fourth on) in face (FACE_INDEX), drawn into it
+ * the first time. A cluster is its first codepoint (one font, no
+ * shaping) at the cluster's width, an emoji sequence the provider's
+ * whole (its own entry) when it has it; what no font has is the box,
+ * logged once */
+static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch, unsigned face, int *wide,
+                           int *color) {
   *wide = 0;
+  *color = 0;
   if (ch == 0 || ch == ' ' || ch == CTUI_CELL_CONT) {
     return 0;
   }
   uint32_t cp = ch;
+  const uint32_t *cps = &cp;
+  int n = 1;
   if (ch & CTUI_CELL_CLUSTER) {
-    int n = 0;
-    const uint32_t *cps = ctui_cell_cluster(ch, &n);
+    cps = ctui_cell_cluster(ch, &n);
     if (!cps || n < 1) {
       return CTUI_VK_GLYPH_BOX;
     }
@@ -1036,19 +1109,31 @@ static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch, unsigned face, int *wide) {
     return CTUI_VK_GLYPH_BOX;
   }
   unsigned cells = ctui_cell_width(ch) == 2 ? 2u : 1u;
-  uint32_t key = cp | (cells == 2 ? GKEY_WIDE : 0u) | face << GKEY_STYLE_SHIFT;
+  uint32_t idx = ch & ~CTUI_CELL_CLUSTER;
+  int whole = vk->glyph_fn && (cells == 2 || emoji_seq(cps, n));
+  if (n > 1 && (!whole || idx >= GKEY_CLUSTER)) {
+    /* the first codepoint's glyph, its entry shared */
+    whole = whole && cells == 2;
+    cps = &cp;
+    n = 1;
+  }
+  uint32_t key = (n > 1 ? GKEY_CLUSTER | idx : cp) |
+                 (cells == 2 ? GKEY_WIDE : 0u) | face << GKEY_STYLE_SHIFT;
   const GENT *e = gmap_find(vk, key);
   if (e->key) {
     *wide = e->slot != CTUI_VK_GLYPH_BOX && cells == 2;
-    return e->slot;
+    *color = (e->slot & GSLOT_COLOR) != 0;
+    return e->slot & ~GSLOT_COLOR;
   }
-  if (vk->nslots + cells >= CTUI_VK_GLYPH_BOX || glyph_draw(vk, cp, cells, face)) {
-    ctui_logf(E_WRN, "[CTUI:VK] - no glyph for 0x%x, drawn as a box\n",
-              (unsigned)cp);
+  int r = glyph_draw(vk, cps, n, whole, cells, face);
+  unsigned need = r == CTUI_VK_GLYPH_COLOR ? 4u * cells : cells;
+  if (r < 0 || vk->nslots + need >= CTUI_VK_GLYPH_BOX) {
+    ctui_logf(E_WRN, "[CTUI:VK] - no glyph for 0x%x%s, drawn as a box\n",
+              (unsigned)cp, n > 1 ? " (a sequence)" : "");
     (void)gmap_put(vk, key, CTUI_VK_GLYPH_BOX);
     return CTUI_VK_GLYPH_BOX;
   }
-  while (vk->nslots + cells > vk->slots_cap) {
+  while (vk->nslots + need > vk->slots_cap) {
     uint32_t *more = realloc(vk->glyphs, (size_t)vk->slots_cap * 2 * vk->slot_words * 4);
     if (!more) {
       ctui_logf(E_ERR, "[CTUI:VK] - no memory for glyph 0x%x\n", (unsigned)cp);
@@ -1058,12 +1143,17 @@ static uint32_t glyph_slot(CTUI_VK *vk, uint32_t ch, unsigned face, int *wide) {
     vk->slots_cap *= 2;
   }
   unsigned slot = vk->nslots;
-  if (gmap_put(vk, key, slot)) {
+  if (gmap_put(vk, key, slot | (r == CTUI_VK_GLYPH_COLOR ? GSLOT_COLOR : 0u))) {
     ctui_logf(E_ERR, "[CTUI:VK] - no memory for glyph 0x%x\n", (unsigned)cp);
     return CTUI_VK_GLYPH_BOX;
   }
-  vk->nslots += cells;
-  slots_fill(vk, slot, cells);
+  vk->nslots += need;
+  if (r == CTUI_VK_GLYPH_COLOR) {
+    slots_fill_color(vk, slot, cells);
+    *color = 1;
+  } else {
+    slots_fill(vk, slot, cells);
+  }
   *wide = cells == 2;
   return slot;
 }
@@ -1158,11 +1248,14 @@ void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
     out[3] = 0;
     return;
   }
-  int wide;
+  int wide, color;
   unsigned face = face_of(vk, c->attr);
-  uint32_t slot = glyph_slot(vk, c->ch, face, &wide);
+  uint32_t slot = glyph_slot(vk, c->ch, face, &wide, &color);
   if (wide) {
     flags |= CTUI_VK_WIDE;
+  }
+  if (color) {
+    flags |= CTUI_VK_COLOR;
   }
   /* a bold face drew it bold (or smeared it already): the painter's
    * smear only without one */
@@ -1174,12 +1267,15 @@ void ctui_vk_cell(CTUI_VK *vk, const CTUI_CELL *c, uint32_t *out) {
 }
 
 void ctui_vk_cont(uint32_t *w, const uint32_t *left) {
-  uint32_t slot = 0;
+  uint32_t slot = 0, color = 0;
   if (left && (left[0] >> 16 & CTUI_VK_WIDE) &&
       !(left[0] >> 16 & CTUI_VK_PLACEHOLDER)) {
-    slot = (left[0] & 0xffffu) + 1u;
+    color = left[0] >> 16 & CTUI_VK_COLOR;
+    slot = (left[0] & 0xffffu) + (color ? 4u : 1u);
   }
-  w[0] = (w[0] & 0xffff0000u & ~((uint32_t)CTUI_VK_WIDE << 16)) | slot;
+  w[0] =
+      (w[0] & 0xffff0000u & ~((uint32_t)(CTUI_VK_WIDE | CTUI_VK_COLOR) << 16)) |
+      slot | color << 16;
 }
 
 /* a placeholder's row and column as kitty reads them: given, else taken
