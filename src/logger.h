@@ -18,6 +18,9 @@ enum {
 
 struct CTUI_LOGGER {
   const char *path;
+  /* path made absolute at open (malloc'd; NULL on stderr): what rotation
+   * renames, wherever the process chdir()s to */
+  char *abs;
   FILE *file;
   int verbosity;
   /* 0 (default, set by init_logger()) = fflush() after every entry, so the
@@ -31,6 +34,13 @@ struct CTUI_LOGGER {
    * whatever's still sitting in the unflushed buffer. See
    * logger_set_buffered() below. */
   int buffered;
+  /* the size cap: once the file reaches max bytes it moves to PATH.1 (an
+   * older .1 goes) and PATH starts empty, so a log keeps at most ~2 * max
+   * on disk. 0 = no cap. size is the file's size as last seen (at open, at
+   * the last check) plus what this logger wrote since: the file's real
+   * size is only looked at once that reaches max. See logger_set_max(). */
+  long max;
+  long size;
   int (*log_entry)(CTUI_LOGGER *self, int level, const char *log_str);
 };
 
@@ -44,5 +54,8 @@ void shutdown_logger(CTUI_LOGGER *logger);
  * ctui_log_set_unbuffered() for the public, no-CTUI_LOGGER*-needed wrapper
  * every app actually calls. */
 void logger_set_buffered(CTUI_LOGGER *logger, int buffered);
+
+/* sets CTUI_LOGGER.max (<= 0: no cap); a file already past it rotates now */
+void logger_set_max(CTUI_LOGGER *logger, long max);
 
 #endif

@@ -15,6 +15,18 @@ void ctui_log_init(int verbosity);
  * directory of its own. */
 void ctui_log_set_path(const char *path);
 
+/* the log's size cap: once the file reaches it, it moves to PATH.1 (an
+ * older .1 goes) and PATH starts again -- checked at open and as lines are
+ * written, so a log keeps at most ~2 * the cap on disk however long the
+ * app runs or however noisy its level. <= 0: no cap. Before or after
+ * ctui_log_init(); the CTUI_LOG_MAX environment variable (bytes, K/M/G
+ * suffixes, 0 = none) overrides it, for a verbose debugging run. */
+#define CTUI_LOG_MAX_DEFAULT (8L << 20)
+void ctui_log_set_max_size(long bytes);
+
+/* CTUI_LOG_MAX's syntax: "8M", "512K", "1048576", "0"; -1 if it isn't one */
+long ctui_log_parse_max(const char *s);
+
 /* the logging half of ctui_shutdown() -- closes the log file opened by
  * ctui_log_init(). Split out for the same reason ctui_log_init() is: kept
  * separate from terminal teardown so a headless caller could shut down

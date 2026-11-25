@@ -237,6 +237,24 @@ terminal resize.
 
 ## Fixed / addressed
 
+- [x] **The log rotates: `ctui_log_set_max_size()`, `CTUI_LOG_MAX`**
+  (2026-11-25, after ctui-mus's log at `E_INF` reached 254 MB in a few
+  weeks -- ctui logs every timer, render pass and flush at that level,
+  ~50 lines per 20 ms tick -- and the suites' own `ctui.log` 69 MB). Past
+  the cap (8 MB by default) `PATH` moves to `PATH.1`, replacing an older
+  one, and starts again with a line naming where the old lines went: at
+  most ~16 MB per log. Checked at open and as lines are written; the
+  logger counts what it writes on top of the size it last saw and only
+  `fstat()`s once that reaches the cap, so the per-line cost is an add
+  and a compare. The path is made absolute at open (a `chdir()` later
+  still renames this file), and a log another process already rotated
+  (same `PATH`, a different inode) is reopened, not renamed again. The
+  environment's `CTUI_LOG_MAX` (`8M`, `512K`, bytes, `0` = none) wins
+  over the app's cap, for a debugging run. tests/log_test.c: the
+  rotation, one generation, a big file rotating at open, another
+  process's rotation, no cap, the variable and its syntax (also clean
+  under ASan + UBSan).
+
 - [x] **Anti-aliased lines and discs: `ctui_look_paint_polyline()`,
   `ctui_look_paint_disc()`** (2026-11-23,
   for ctui-daw's device views and the graph control). look/paint.h's

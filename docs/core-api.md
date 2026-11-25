@@ -678,6 +678,17 @@ above into the loop described in "Life of a frame".
 - `ctui_log_set_path(path)` — the file `ctui_log_init()` opens
   (default `ctui.log` in the cwd); call before `ctui_init()`. For an app
   whose cwd is the user's (a file manager). The path is kept, not copied.
+- `ctui_log_set_max_size(bytes)` — the log's size cap, default
+  `CTUI_LOG_MAX_DEFAULT` (8 MB): once the file reaches it, it moves to
+  `PATH.1` (an older `.1` goes) and `PATH` starts again with a line
+  saying so, so a log keeps at most ~2x the cap on disk however long an
+  app runs. Checked at open (a big log from before moves aside) and as
+  lines are written (the file's real size looked at only once this
+  logger's count reaches the cap, so a log shared by several processes
+  is rotated once, not by each). `<= 0`: no cap. Before or after
+  `ctui_log_init()`. The `CTUI_LOG_MAX` environment variable (`8M`,
+  `512K`, bytes, `0` for none; `ctui_log_parse_max()`) overrides it, for
+  a verbose debugging run that wants more history.
 - `ctui_log(level, str)` / `ctui_logf(level, fmt, ...)` — `level` is
   exactly one of `E_DBG`/`E_WRN`/`E_INF`/`E_ERR` (`src/logger.h`).
   Every non-trivial core operation logs through these — grep

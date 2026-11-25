@@ -1,5 +1,6 @@
 #include "log.h"
 
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,6 +73,53 @@ int(ctui_logf)(int level, const char *fmt, ...) {
 }
 
 static const char *log_path = "ctui.log";
+static long log_max = CTUI_LOG_MAX_DEFAULT;
+
+/* CTUI_LOG_MAX: bytes, a K/M/G suffix (1024s), 0 = no cap; anything else
+ * is ignored (-1) */
+long ctui_log_parse_max(const char *s) {
+  if (s == NULL || *s < '0' || *s > '9') {
+    return -1;
+  }
+  char *end;
+  long v = strtol(s, &end, 10);
+  long unit = 1;
+  switch (*end) {
+  case 'k':
+  case 'K':
+    unit = 1L << 10;
+    end++;
+    break;
+  case 'm':
+  case 'M':
+    unit = 1L << 20;
+    end++;
+    break;
+  case 'g':
+  case 'G':
+    unit = 1L << 30;
+    end++;
+    break;
+  default:
+    break;
+  }
+  if (*end != '\0' || v < 0 || v > LONG_MAX / unit) {
+    return -1;
+  }
+  return v * unit;
+}
+
+static long effective_max(void) {
+  long env = ctui_log_parse_max(getenv("CTUI_LOG_MAX"));
+  return env >= 0 ? env : log_max;
+}
+
+void ctui_log_set_max_size(long bytes) {
+  log_max = bytes > 0 ? bytes : 0;
+  if (logger.log_entry != NULL) {
+    logger_set_max(&logger, effective_max());
+  }
+}
 
 void ctui_log_set_path(const char *path) {
   log_path = path ? path : "ctui.log";
@@ -80,10 +128,10 @@ void ctui_log_set_path(const char *path) {
 void ctui_log_init(int verbosity) {
   _ctui_ticks = 0;
   logger = init_logger((char *)log_path, verbosity);
+  logger_set_max(&logger, effective_max());
   ctui_g_log_verbosity = verbosity;
   ctui_tick_advance();
-  ctui_logf(E_INF, "[CTUI:LOG] - logger initialised @ tick %d.\n",
-            _ctui_ticks);
+  ctui_logf(E_INF, "[CTUI:LOG] - logger initialised @ tick %d.\n", _ctui_ticks);
 }
 
 void ctui_log_shutdown(void) { shutdown_logger(&logger); }
