@@ -11,6 +11,7 @@
 
 #include "ctui_test.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,16 @@ static int slurp(const char *path, char *buf, size_t cap) {
   buf[n] = '\0';
   fclose(f);
   return 1;
+}
+
+/* threads logging at once across rotations (make the race visible under
+ * TSAN: a FILE closed by one thread's rotation under another's fwrite) */
+static void *spam(void *arg) {
+  int id = (int)(long)arg;
+  for (int i = 0; i < 400; i++) {
+    ctui_logf(E_INF, "thread %d line %03d ......................\n", id, i);
+  }
+  return NULL;
 }
 
 int main(void) {
@@ -147,8 +158,34 @@ int main(void) {
                    "its lines go on in the new PATH");
   ctui_log_shutdown();
 
+  /* threads at once, rotating every ~100 lines */
+  ctui_log_init(E_ALL);
+  pthread_t th[4];
+  for (long k = 0; k < 4; k++) {
+    pthread_create(&th[k], NULL, spam, (void *)k);
+  }
+  for (int k = 0; k < 4; k++) {
+    pthread_join(th[k], NULL);
+  }
+  int whole = slurp(lp, buf, sizeof buf);
+  for (char *l = buf; whole && *l; l = strchr(l, '\n') + 1) {
+    char *nl = strchr(l, '\n');
+    if (nl == NULL) {
+      whole = 0; /* a line cut short */
+      break;
+    }
+    whole = strncmp(l, "thread ", 7) == 0 || strncmp(l, "[CTUI:LOG]", 10) == 0;
+    if (!whole) {
+      break;
+    }
+  }
+  CTUI_TEST_ASSERT(whole && stat(old, &st) == 0,
+                   "four threads logging through rotations: whole lines");
+  ctui_log_shutdown();
+
   /* no cap */
   remove(lp);
+  remove(old);
   ctui_log_set_max_size(0);
   ctui_log_init(E_ALL);
   for (int i = 0; i < 60; i++) {

@@ -250,10 +250,12 @@ terminal resize.
   still renames this file), and a log another process already rotated
   (same `PATH`, a different inode) is reopened, not renamed again. The
   environment's `CTUI_LOG_MAX` (`8M`, `512K`, bytes, `0` = none) wins
-  over the app's cap, for a debugging run. tests/log_test.c: the
-  rotation, one generation, a big file rotating at open, another
-  process's rotation, no cap, the variable and its syntax (also clean
-  under ASan + UBSan).
+  over the app's cap, for a debugging run. A lock around each line: the
+  count and a rotation's `fclose()` raced other threads' writes (ctui-wm's
+  TSAN run found it in the web suites; stdio only locks one `fwrite()`).
+  tests/log_test.c: the rotation, one generation, a big file rotating at
+  open, another process's rotation, four threads through rotations, no
+  cap, the variable and its syntax (clean under TSAN and ASan + UBSan).
 
 - [x] **Anti-aliased lines and discs: `ctui_look_paint_polyline()`,
   `ctui_look_paint_disc()`** (2026-11-23,
