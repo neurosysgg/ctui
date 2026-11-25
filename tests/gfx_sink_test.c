@@ -124,7 +124,8 @@ static void pics_render(CTUI_WIDGET *self, CTUI_COMPOSITOR *comp) {
   (void)comp;
   static const unsigned char rgba[4] = {7, 0, 0, 255};
   ctui_gfx_kitty_display(self->y + 1, self->x + 1, 2, 1, rgba, 1, 1, 5, -1);
-  unsigned char *px = ctui_gfx_kitty_image_begin(g_img, 2, 2, 1);
+  /* NULL once the test freed it: the frames after draw without it */
+  unsigned char *px = g_img ? ctui_gfx_kitty_image_begin(g_img, 2, 2, 1) : NULL;
   if (px) {
     px[0] = 9;
     ctui_gfx_kitty_image_commit(g_img, 2, 1, 2, 1, 0);
@@ -299,6 +300,7 @@ int main(void) {
 
   g_rec[0] = '\0';
   ctui_gfx_kitty_image_free(g_img);
+  g_img = NULL;
   CTUI_TEST_ASSERT(!strcmp(g_rec, "free(6) "), "image_free forwards (%s)",
                    g_rec);
 

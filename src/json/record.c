@@ -104,7 +104,9 @@ CTUI_JSON_REC *ctui_json_rec_new(const CTUI_JSON_REC_FIELD *fields, int n) {
   }
   r->n = n;
   r->mask = slots - 1;
-  memcpy(r->fields, fields, sizeof *fields * (size_t)n);
+  if (n > 0) { /* none may come as NULL: memcpy's NULL is UB, 0 bytes or not */
+    memcpy(r->fields, fields, sizeof *fields * (size_t)n);
+  }
   for (int i = 0; i < n; i++) {
     r->keylen[i] = strlen(fields[i].key);
     unsigned h = hash(fields[i].key, r->keylen[i]) & r->mask;
